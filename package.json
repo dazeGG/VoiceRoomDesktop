@@ -1,0 +1,27 @@
+{
+  "name": "voice-room-desktop",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Electron desktop shell for Voice Room.",
+  "main": "electron/main.js",
+  "scripts": {
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --check scripts/build-electron.js && node --check scripts/clean-dist.js && node --check scripts/create-electron-config.js && node --check electron-builder.config.js",
+    "desktop": "node scripts/create-electron-config.js && electron .",
+    "electron": "npm run desktop",
+    "build": "node scripts/build-electron.js --mac --win",
+    "build:dev": "node scripts/build-electron.js --dev --mac --win",
+    "build:mac": "node scripts/build-electron.js --mac",
+    "build:mac:dev": "node scripts/build-electron.js --dev --mac",
+    "build:win": "node scripts/build-electron.js --win",
+    "build:win:dev": "node scripts/build-electron.js --dev --win",
+    "clean:dist": "node scripts/clean-dist.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.0"
+  }
+}

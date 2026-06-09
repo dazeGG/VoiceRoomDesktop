@@ -84,13 +84,18 @@ function buildMacOS() {
   fs.chmodSync(output, 0o755);
 }
 
-function buildWindows() {
+function buildWindows(options = {}) {
   const source = path.join(nativeDir, 'windows', 'SafeSystemAudioCapture.cpp');
   const outputDir = path.join(binDir, 'windows');
   ensureDir(outputDir);
 
   if (process.platform !== 'win32') {
-    console.warn('Skipping Windows native audio helper build on non-Windows host.');
+    const message = 'Windows native audio helper must be built on Windows with MSVC.';
+    if (options.required) {
+      console.error(message);
+      process.exit(1);
+    }
+    console.warn(`Skipping optional build: ${message}`);
     return;
   }
 
@@ -114,5 +119,5 @@ const requestedTargets = targets.length ? targets : [process.platform === 'win32
 
 for (const target of requestedTargets) {
   if (target === 'mac' || target === '--mac') buildMacOS();
-  if (target === 'win' || target === '--win') buildWindows();
+  if (target === 'win' || target === '--win') buildWindows({ required: true });
 }

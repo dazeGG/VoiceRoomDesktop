@@ -8,6 +8,10 @@ const path = require('node:path');
 let activeSession = null;
 let nextSessionId = 1;
 
+app.on('before-quit', () => {
+  stopSafeSystemAudioCapture();
+});
+
 function getNativeAudioCapabilities() {
   const helperPath = findSafeSystemAudioHelper();
   const nativeSafeLoopback = Boolean(helperPath);
@@ -71,8 +75,14 @@ function startSafeSystemAudioCapture(sender, options = {}) {
     child,
     format: null,
     id: sessionId,
-    sender
+    sender,
+    senderDestroyedListener: null
   };
+
+  activeSession.senderDestroyedListener = () => {
+    stopSafeSystemAudioCapture(sessionId);
+  };
+  sender.once('destroyed', activeSession.senderDestroyedListener);
 
   child.stdout.on('data', (chunk) => {
     if (!activeSession || activeSession.id !== sessionId || sender.isDestroyed()) return;
@@ -150,6 +160,9 @@ function stopSafeSystemAudioCapture(sessionId = '') {
   if (sessionId && session.id !== sessionId) return false;
 
   activeSession = null;
+  if (session.senderDestroyedListener && !session.sender.isDestroyed()) {
+    session.sender.removeListener('destroyed', session.senderDestroyedListener);
+  }
   session.child.kill();
   return true;
 }

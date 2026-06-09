@@ -7,12 +7,7 @@ const rootDir = path.join(__dirname, '..');
 const args = process.argv.slice(2);
 const dev = args.includes('--dev');
 const targets = args.filter((arg) => arg !== '--dev');
-const electronBuilderBin = path.join(
-  rootDir,
-  'node_modules',
-  '.bin',
-  process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder'
-);
+const electronBuilderCli = path.join(rootDir, 'node_modules', 'electron-builder', 'cli.js');
 
 function run(command, commandArgs, options = {}) {
   console.log(`> ${[command, ...commandArgs].join(' ')}`);
@@ -57,7 +52,7 @@ const env = {
   VOICE_ROOM_DIST_DIR: dev ? path.join('dist', 'dev', buildHash) : ''
 };
 
-run(electronBuilderBin, ['--config', 'electron-builder.config.js', '--publish', 'never', ...targets], { env });
+run(process.execPath, [electronBuilderCli, '--config', 'electron-builder.config.js', '--publish', 'never', ...targets], { env });
 
 if (!dev) {
   run(process.execPath, [path.join(rootDir, 'scripts', 'clean-dist.js')]);

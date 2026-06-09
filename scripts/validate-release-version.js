@@ -5,7 +5,7 @@ const path = require('node:path');
 
 const rootDir = path.join(__dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-const rawRef = process.env.GITHUB_REF_NAME || process.argv[2] || '';
+const rawRef = process.argv[2] || process.env.GITHUB_REF_NAME || '';
 const tag = rawRef.trim();
 
 if (!tag) {

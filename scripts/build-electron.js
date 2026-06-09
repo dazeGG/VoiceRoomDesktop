@@ -53,7 +53,7 @@ const env = {
   VOICE_ROOM_DIST_DIR: dev ? path.join('dist', 'dev', buildHash) : ''
 };
 
-run(electronBuilderBin, ['--config', 'electron-builder.config.js', ...targets], { env });
+run(electronBuilderBin, ['--config', 'electron-builder.config.js', '--publish', 'never', ...targets], { env });
 
 if (!dev) {
   run(process.execPath, [path.join(rootDir, 'scripts', 'clean-dist.js')]);

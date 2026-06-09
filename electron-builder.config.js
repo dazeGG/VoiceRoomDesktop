@@ -20,6 +20,10 @@ module.exports = {
     'electron/native-audio.js',
     'electron/preload.js',
     'electron/runtime-config.json',
+    'electron/screen-picker-preload.js',
+    'electron/screen-picker-preview.html',
+    'electron/screen-picker-preview.css',
+    'electron/screen-picker.js',
     'native/bin/**/*',
     'package.json'
   ],

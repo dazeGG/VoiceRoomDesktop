@@ -68,7 +68,7 @@ static HRESULT ActivateProcessLoopbackAudioClient(DWORD processId, PROCESS_LOOPB
   HANDLE completed = CreateEvent(nullptr, FALSE, FALSE, nullptr);
   if (!completed) return HRESULT_FROM_WIN32(GetLastError());
 
-  class CompletionHandler final : public IActivateAudioInterfaceCompletionHandler {
+  class CompletionHandler final : public IActivateAudioInterfaceCompletionHandler, public IAgileObject {
    public:
     CompletionHandler(HANDLE completed, IAudioClient** client) : refCount_(1), completed_(completed), client_(client) {}
 
@@ -86,6 +86,14 @@ static HRESULT ActivateProcessLoopbackAudioClient(DWORD processId, PROCESS_LOOPB
       if (!object) return E_POINTER;
       if (riid == __uuidof(IUnknown) || riid == __uuidof(IActivateAudioInterfaceCompletionHandler)) {
         *object = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
+        AddRef();
+        return S_OK;
+      }
+      // ActivateAudioInterfaceAsync is invoked from an MTA thread (COINIT_MULTITHREADED),
+      // so the completion handler must be agile; otherwise activation fails synchronously with
+      // E_ILLEGAL_METHOD_CALL (0x8000000E). The official sample gets this via WRL FtmBase.
+      if (riid == __uuidof(IAgileObject)) {
+        *object = static_cast<IAgileObject*>(this);
         AddRef();
         return S_OK;
       }
@@ -154,33 +162,20 @@ int wmain(int argc, wchar_t** argv) {
     return 1;
   }
 
-  WAVEFORMATEX* mixFormat = nullptr;
-  hr = audioClient->GetMixFormat(&mixFormat);
-  if (FAILED(hr)) {
-    Fail(hr, "GetMixFormat failed");
-    CoUninitialize();
-    return 1;
-  }
-
-  if (debug) {
-    std::fprintf(stderr,
-        "{\"event\":\"debug\",\"stage\":\"mix-format\",\"sampleRate\":%lu,\"channels\":%u,\"bits\":%u,\"formatTag\":%u}\n",
-        mixFormat->nSamplesPerSec, mixFormat->nChannels, mixFormat->wBitsPerSample, mixFormat->wFormatTag);
-    std::fflush(stderr);
-  }
-
+  // GetMixFormat returns E_NOTIMPL on a process-loopback client, so the capture format is
+  // hardcoded (matching the official ApplicationLoopback sample). AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+  // below makes the audio engine convert its actual mix into this 48 kHz stereo 32-bit float layout.
   WAVEFORMATEXTENSIBLE desiredFormat = {};
   desiredFormat.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-  desiredFormat.Format.nChannels = mixFormat->nChannels;
-  desiredFormat.Format.nSamplesPerSec = mixFormat->nSamplesPerSec;
+  desiredFormat.Format.nChannels = 2;
+  desiredFormat.Format.nSamplesPerSec = 48000;
   desiredFormat.Format.wBitsPerSample = 32;
   desiredFormat.Format.nBlockAlign = desiredFormat.Format.nChannels * sizeof(float);
   desiredFormat.Format.nAvgBytesPerSec = desiredFormat.Format.nSamplesPerSec * desiredFormat.Format.nBlockAlign;
   desiredFormat.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
   desiredFormat.Samples.wValidBitsPerSample = 32;
-  desiredFormat.dwChannelMask = mixFormat->nChannels == 1 ? SPEAKER_FRONT_CENTER : (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT);
+  desiredFormat.dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
   desiredFormat.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-  CoTaskMemFree(mixFormat);
 
   // Process loopback (microsoft/Windows-classic-samples ApplicationLoopback): Initialize
   // вызывается с LOOPBACK | EVENTCALLBACK | AUTOCONVERTPCM и hnsBufferDuration/hnsPeriodicity = 0.

@@ -1,12 +1,14 @@
 {
   "name": "voice-room-desktop",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "description": "Electron desktop shell for Voice Room.",
   "main": "electron/main.js",
   "scripts": {
-    "check": "node --check electron/main.js && node --check electron/preload.js && node --check scripts/build-electron.js && node --check scripts/clean-dist.js && node --check scripts/create-electron-config.js && node --check electron-builder.config.js",
-    "desktop": "node scripts/create-electron-config.js && electron .",
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/native-audio.js && node --check scripts/build-electron.js && node --check scripts/build-native-audio.js && node --check scripts/clean-dist.js && node --check scripts/create-electron-config.js && node --check scripts/validate-release-version.js && node --check electron-builder.config.js",
+    "native:build": "node scripts/build-native-audio.js",
+    "release:validate": "node scripts/validate-release-version.js",
+    "desktop": "node scripts/create-electron-config.js && npm run native:build && electron .",
     "electron": "npm run desktop",
     "build": "node scripts/build-electron.js --mac --win",
     "build:dev": "node scripts/build-electron.js --dev --mac --win",

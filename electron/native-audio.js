@@ -5,6 +5,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const EMPTY_AUDIO_BUFFER = Buffer.alloc(0);
 let activeSession = null;
 let nextSessionId = 1;
 
@@ -117,7 +118,9 @@ function startSafeSystemAudioCapture(sender, options = {}) {
   activeSession = {
     child,
     format: null,
+    frameBytes: 8,
     id: sessionId,
+    leftover: Buffer.alloc(0),
     sender,
     senderDestroyedListener: null
   };
@@ -129,8 +132,25 @@ function startSafeSystemAudioCapture(sender, options = {}) {
 
   child.stdout.on('data', (chunk) => {
     if (!activeSession || activeSession.id !== sessionId || sender.isDestroyed()) return;
+
+    // stdout is split into chunks at arbitrary byte boundaries. Forward only whole audio frames
+    // (channels * 4 bytes) and carry the partial tail to the next chunk. A frame split mid-sample
+    // would shift every subsequent sample and turn playback into loud white noise.
+    const frameBytes = activeSession.frameBytes || 8;
+    const buffer = activeSession.leftover.length
+      ? Buffer.concat([activeSession.leftover, chunk])
+      : chunk;
+    const alignedLength = buffer.length - (buffer.length % frameBytes);
+    if (alignedLength <= 0) {
+      activeSession.leftover = Buffer.from(buffer);
+      return;
+    }
+    activeSession.leftover = alignedLength < buffer.length
+      ? Buffer.from(buffer.subarray(alignedLength))
+      : EMPTY_AUDIO_BUFFER;
+
     sender.send('desktop-audio:data', {
-      chunk,
+      chunk: buffer.subarray(0, alignedLength),
       sessionId
     });
   });
@@ -144,7 +164,13 @@ function startSafeSystemAudioCapture(sender, options = {}) {
       } catch {
         event = { event: 'log', message: line };
       }
-      if (event.event === 'format') activeSession.format = event;
+      if (event.event === 'format' && activeSession) {
+        activeSession.format = event;
+        const channels = Number(event.channels);
+        if (Number.isFinite(channels) && channels > 0) {
+          activeSession.frameBytes = channels * 4; // Float32 bytes per channel
+        }
+      }
       if (!sender.isDestroyed()) {
         sender.send('desktop-audio:event', {
           event,

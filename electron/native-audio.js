@@ -13,7 +13,8 @@ app.on('before-quit', () => {
 });
 
 function getNativeAudioCapabilities() {
-  const helperPath = findSafeSystemAudioHelper();
+  const helperLookup = findSafeSystemAudioHelper();
+  const helperPath = helperLookup.path;
   const nativeSafeLoopback = Boolean(helperPath);
 
   return {
@@ -27,12 +28,13 @@ function getNativeAudioCapabilities() {
     nativeSafeLoopback,
     platform: process.platform,
     recommendedMode: nativeSafeLoopback ? 'safe-system' : 'loopback',
+    reason: nativeSafeLoopback ? '' : helperLookup.reason,
     requiresEchoFallbackWarning: !nativeSafeLoopback
   };
 }
 
 function hasNativeSafeLoopbackAudio() {
-  return Boolean(findSafeSystemAudioHelper());
+  return Boolean(findSafeSystemAudioHelper().path);
 }
 
 function findSafeSystemAudioHelper() {
@@ -45,21 +47,62 @@ function findSafeSystemAudioHelper() {
       ? 'macos'
       : '';
 
-  if (!platformDir) return '';
+  if (!platformDir) {
+    return {
+      candidates: [],
+      path: '',
+      reason: 'platform-unsupported'
+    };
+  }
 
+  const appPath = app.getAppPath();
   const candidates = [
-    path.join(app.getAppPath(), 'native', 'bin', platformDir, executable),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'native', 'bin', platformDir, executable),
     path.join(process.resourcesPath || '', 'native', 'bin', platformDir, executable),
-    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'native', 'bin', platformDir, executable)
+    path.join(appPath, 'native', 'bin', platformDir, executable)
   ];
 
-  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || '';
+  const checkedCandidates = candidates.map((candidate) => {
+    const exists = fs.existsSync(candidate);
+    const executableAccess = exists && canExecute(candidate);
+    return {
+      executable: executableAccess,
+      exists,
+      path: candidate,
+      skipped: candidate.includes('.asar' + path.sep)
+        ? 'inside-asar'
+        : ''
+    };
+  });
+
+  const match = checkedCandidates.find((candidate) => candidate.exists && candidate.executable && !candidate.skipped);
+  return {
+    candidates: checkedCandidates,
+    path: match?.path || '',
+    reason: checkedCandidates.some((candidate) => candidate.exists && candidate.skipped)
+      ? 'helper-inside-asar'
+      : checkedCandidates.some((candidate) => candidate.exists && !candidate.executable)
+        ? 'helper-not-executable'
+        : 'helper-missing'
+  };
+}
+
+function canExecute(candidate) {
+  try {
+    fs.accessSync(candidate, fs.constants.X_OK);
+    return true;
+  } catch {
+    return process.platform === 'win32';
+  }
 }
 
 function startSafeSystemAudioCapture(sender, options = {}) {
-  const helperPath = findSafeSystemAudioHelper();
+  const helperLookup = findSafeSystemAudioHelper();
+  const helperPath = helperLookup.path;
   if (!helperPath) {
-    throw new Error('Native safe stream audio helper is not available in this build.');
+    const error = new Error(`Native safe stream audio helper is not available in this build (${helperLookup.reason}).`);
+    error.code = helperLookup.reason;
+    throw error;
   }
 
   stopSafeSystemAudioCapture();

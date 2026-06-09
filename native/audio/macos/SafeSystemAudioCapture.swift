@@ -5,6 +5,8 @@ import ScreenCaptureKit
 
 private let stderrHandle = FileHandle.standardError
 private let stdoutHandle = FileHandle.standardOutput
+private let defaultSampleRate = 48_000
+private let defaultChannelCount = 2
 
 private func logEvent(_ payload: [String: Any]) {
   guard JSONSerialization.isValidJSONObject(payload),
@@ -42,12 +44,15 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     let configuration = SCStreamConfiguration()
     configuration.capturesAudio = true
     configuration.excludesCurrentProcessAudio = true
+    configuration.sampleRate = defaultSampleRate
+    configuration.channelCount = defaultChannelCount
 
     let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
     try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
     try await stream.startCapture()
     self.stream = stream
     self.running = true
+    announceFormat(sampleRate: Double(defaultSampleRate), channels: defaultChannelCount)
 
     logEvent([
       "event": "started",
@@ -114,14 +119,7 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
 
     let channelCount = max(1, Int(asbd.mChannelsPerFrame))
     if !announcedFormat {
-      announcedFormat = true
-      logEvent([
-        "event": "format",
-        "sampleRate": asbd.mSampleRate,
-        "channels": channelCount,
-        "sampleFormat": "f32le",
-        "interleaved": true
-      ])
+      announceFormat(sampleRate: asbd.mSampleRate, channels: channelCount)
     }
 
     let flags = asbd.mFormatFlags
@@ -187,6 +185,18 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
       }
     }
     writeFloat32Samples(samples)
+  }
+
+  private func announceFormat(sampleRate: Double, channels: Int) {
+    guard !announcedFormat else { return }
+    announcedFormat = true
+    logEvent([
+      "event": "format",
+      "sampleRate": sampleRate,
+      "channels": channels,
+      "sampleFormat": "f32le",
+      "interleaved": true
+    ])
   }
 }
 

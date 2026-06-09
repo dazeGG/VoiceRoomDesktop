@@ -9,7 +9,6 @@ const nativeDir = path.join(rootDir, 'native', 'audio');
 const binDir = path.join(rootDir, 'native', 'bin');
 
 function run(command, args, options = {}) {
-  if (!options.quiet) console.log(`> ${[command, ...args].join(' ')}`);
   const result = spawnSync(command, args, {
     cwd: rootDir,
     encoding: 'utf8',
@@ -23,7 +22,6 @@ function run(command, args, options = {}) {
     if (options.quiet) {
       process.stderr.write(result.stderr || result.stdout || '');
     }
-    process.stderr.write(`${command} exited with status ${result.status || 1}.\n`);
     process.exit(result.status || 1);
   }
   return true;

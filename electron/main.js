@@ -32,6 +32,18 @@ const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high']);
 const SCREEN_FPS_IDS = new Set(['15', '30']);
 const DEFAULT_SCREEN_QUALITY_ID = 'balanced';
 const DEFAULT_SCREEN_FPS_ID = '30';
+const DESKTOP_DRAG_REGION_CSS = `
+  body::before {
+    -webkit-app-region: drag;
+    content: "";
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 84px;
+    height: 34px;
+    z-index: 2147483647;
+  }
+`;
 
 function readRuntimeConfig() {
   const configPath = path.join(__dirname, 'runtime-config.json');
@@ -102,6 +114,13 @@ function configureDesktopCaptureIpc() {
     }
 
     const selection = await openDesktopCapturePickerWindow(parentWindow, sources, options);
+    if (selection.cancelled) {
+      return {
+        cancelled: true,
+        ok: false
+      };
+    }
+
     const source = sources.find((item) => item.id === selection.sourceId);
     if (!source) {
       throw new Error('Desktop capture source is no longer available.');
@@ -159,6 +178,19 @@ function configureDesktopCaptureIpc() {
     return startSafeSystemAudioCapture(event.sender, options);
   });
 
+  ipcMain.handle('desktop-audio:open-settings', (event) => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+    }
+
+    if (process.platform === 'darwin') {
+      openMacScreenCaptureSettings({ force: true });
+      return { ok: true, target: 'mac-screen-capture' };
+    }
+
+    return { ok: false, target: '' };
+  });
+
   ipcMain.handle('desktop-audio:stop', (event, sessionId = '') => {
     if (!isTrustedFrame(event.senderFrame)) {
       throw new Error('Desktop audio is only available for the configured Voice Room URL.');
@@ -187,7 +219,7 @@ function configureScreenPickerIpc() {
 
   ipcMain.handle('screen-picker:cancel', (event) => {
     const session = getDesktopCapturePickerSessionForEvent(event);
-    rejectDesktopCapturePickerSession(session, createAbortError('Выбор источника отменен'));
+    cancelDesktopCapturePickerSession(session);
     return { ok: true };
   });
 }
@@ -408,9 +440,9 @@ function createMacScreenCaptureAccessError(cause) {
   return error;
 }
 
-function openMacScreenCaptureSettings() {
+function openMacScreenCaptureSettings(options = {}) {
   const now = Date.now();
-  if (now - lastScreenCaptureSettingsOpenAt < 5000) return;
+  if (!options.force && now - lastScreenCaptureSettingsOpenAt < 5000) return;
 
   lastScreenCaptureSettingsOpenAt = now;
   shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch(() => {});
@@ -490,7 +522,7 @@ function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
     });
     pickerWindow.once('closed', () => {
       if (!session.settled) {
-        rejectDesktopCapturePickerSession(session, createAbortError('Выбор источника отменен'));
+        cancelDesktopCapturePickerSession(session);
       }
     });
     pickerWindow.loadFile(path.join(__dirname, 'screen-picker-preview.html'), {
@@ -532,18 +564,23 @@ function resolveDesktopCapturePickerSession(session, selection) {
   if (!session.window.isDestroyed()) session.window.close();
 }
 
+function cancelDesktopCapturePickerSession(session) {
+  if (session.settled) return;
+  session.settled = true;
+  desktopCapturePickerSessions.delete(session.sessionId);
+  session.resolve({
+    cancelled: true,
+    ok: false
+  });
+  if (!session.window.isDestroyed()) session.window.close();
+}
+
 function rejectDesktopCapturePickerSession(session, error) {
   if (session.settled) return;
   session.settled = true;
   desktopCapturePickerSessions.delete(session.sessionId);
   session.reject(error);
   if (!session.window.isDestroyed()) session.window.close();
-}
-
-function createAbortError(message) {
-  const error = new Error(message);
-  error.name = 'AbortError';
-  return error;
 }
 
 function configureWindowIpc() {
@@ -657,6 +694,12 @@ function createWindow() {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('Renderer process gone:', details);
   });
+
+  if (process.platform === 'darwin') {
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow.webContents.insertCSS(DESKTOP_DRAG_REGION_CSS).catch(() => {});
+    });
+  }
 
   mainWindow.loadURL(APP_URL).catch((error) => {
     dialog.showErrorBox('Voice Room', `Не удалось открыть ${APP_URL}\n\n${error.message}`);

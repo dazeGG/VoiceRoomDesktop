@@ -35,14 +35,11 @@
 body {
   min-width: 760px;
   margin: 0;
-  background:
-    radial-gradient(circle at 12% 14%, oklch(37% 0.09 158 / 0.18), transparent 30%),
-    radial-gradient(circle at 84% 10%, oklch(42% 0.11 31 / 0.14), transparent 28%),
-    linear-gradient(135deg, var(--paper-deep), var(--paper) 48%, oklch(13% 0.018 76)),
-    var(--paper);
+  background: var(--paper);
   color: var(--ink);
   font-size: 16px;
   line-height: 1.45;
+  -webkit-app-region: drag;
 }
 
 button,
@@ -53,6 +50,7 @@ input {
 button {
   cursor: pointer;
   touch-action: manipulation;
+  -webkit-app-region: no-drag;
 }
 
 button:disabled {
@@ -63,23 +61,23 @@ button:disabled {
 .screen-picker-shell {
   display: grid;
   min-height: 100vh;
-  place-items: center;
-  padding: var(--space-lg);
+  padding: 0;
 }
 
 .screen-source-panel {
   display: grid;
-  width: min(980px, 100%);
-  max-height: calc(100vh - 48px);
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: var(--space-md);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border: 0;
+  border-radius: 0;
   padding: var(--space-lg);
   background:
     linear-gradient(180deg, oklch(22% 0.018 92 / 0.96), oklch(15% 0.014 92 / 0.98)),
     var(--panel);
-  box-shadow: var(--shadow);
+  box-shadow: none;
 }
 
 .screen-source-heading {
@@ -174,16 +172,18 @@ h1 {
 .screen-source-options {
   display: grid;
   min-height: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
+  align-content: start;
   overflow: auto;
   padding-right: 2px;
+  -webkit-app-region: no-drag;
 }
 
 .screen-source-option {
   display: grid;
   min-width: 0;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
   gap: var(--space-xs);
   border: 1px solid oklch(34% 0.02 92);
   border-radius: var(--radius-sm);
@@ -191,13 +191,12 @@ h1 {
   background: oklch(15% 0.014 92);
   color: inherit;
   text-align: left;
-  transition: border-color 140ms var(--ease-out), background 140ms var(--ease-out), transform 140ms var(--ease-out);
+  transition: border-color 140ms var(--ease-out), background 140ms var(--ease-out);
 }
 
 .screen-source-option:hover {
   border-color: color-mix(in oklch, var(--control-line), var(--ink) 28%);
   background: oklch(19% 0.016 92);
-  transform: translateY(-1px);
 }
 
 .screen-source-option[aria-pressed="true"] {
@@ -323,6 +322,7 @@ h1 {
   align-items: end;
   border-top: 1px solid var(--line);
   padding-top: var(--space-md);
+  -webkit-app-region: no-drag;
 }
 
 .screen-profile-group {
@@ -425,7 +425,7 @@ h1 {
 
 @media (max-width: 860px) {
   .screen-source-options {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .screen-source-controls {
@@ -434,5 +434,11 @@ h1 {
 
   .screen-profile-start {
     grid-column: span 2;
+  }
+}
+
+@media (max-width: 680px) {
+  .screen-source-options {
+    grid-template-columns: 1fr;
   }
 }

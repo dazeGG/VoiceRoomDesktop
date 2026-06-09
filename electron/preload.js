@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopCapture', {
 
 contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
   getCapabilities: () => ipcRenderer.invoke('desktop-audio:get-capabilities'),
+  openSettings: () => ipcRenderer.invoke('desktop-audio:open-settings'),
   onData: (handler) => {
     if (typeof handler !== 'function') return () => {};
     const listener = (_event, payload) => handler(payload);

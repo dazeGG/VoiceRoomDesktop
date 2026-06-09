@@ -10,7 +10,6 @@ const targets = args.filter((arg) => arg !== '--dev');
 const electronBuilderCli = path.join(rootDir, 'node_modules', 'electron-builder', 'cli.js');
 
 function run(command, commandArgs, options = {}) {
-  console.log(`> ${[command, ...commandArgs].join(' ')}`);
   const result = spawnSync(command, commandArgs, {
     cwd: rootDir,
     env: options.env || process.env,
@@ -18,10 +17,7 @@ function run(command, commandArgs, options = {}) {
     stdio: 'inherit'
   });
 
-  if (result.status !== 0) {
-    console.error(`${command} exited with status ${result.status || 1}.`);
-    process.exit(result.status || 1);
-  }
+  if (result.status !== 0) process.exit(result.status || 1);
 }
 
 function readGitHash() {

@@ -43,12 +43,27 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     let filter = SCContentFilter(display: display, excludingWindows: [])
     let configuration = SCStreamConfiguration()
     configuration.capturesAudio = true
+    // TODO: excludesCurrentProcessAudio исключает аудио только самого процесса-хелпера,
+    // а не основного приложения Voice Room (это разные процессы), поэтому в захват может
+    // попасть воспроизведение голосов других участников → возможное эхо. На Windows это
+    // решено исключением дерева процессов; per-app-исключения чужого процесса в SCK (13.0)
+    // нет. Чистое решение — выполнять SCK-захват внутри процесса, проигрывающего звук
+    // Voice Room. Отдельная задача, не блокер «нет звука».
     configuration.excludesCurrentProcessAudio = true
     configuration.sampleRate = defaultSampleRate
     configuration.channelCount = defaultChannelCount
+    // ScreenCaptureKit не доставляет аудио-буферы для чисто аудио-захвата (forum thread/718279,
+    // "stream output NOT found. Dropping frame"). Нужна валидная видеоконфигурация и screen-выход;
+    // кадры видео отбрасываются в didOutputSampleBuffer (guard outputType == .audio).
+    configuration.width = 16
+    configuration.height = 16
+    configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1) // ~1 fps
+    configuration.queueDepth = 6
+    configuration.showsCursor = false
 
     let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
     try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+    try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
     try await stream.startCapture()
     self.stream = stream
     self.running = true
@@ -100,13 +115,24 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
     guard frameCount > 0 else { return }
 
+    let channelCount = max(1, Int(asbd.mChannelsPerFrame))
+    if !announcedFormat {
+      announceFormat(sampleRate: asbd.mSampleRate, channels: channelCount)
+    }
+
+    // ScreenCaptureKit отдаёт PCM неинтерливленно — по одному AudioBuffer на канал, поэтому
+    // AudioBufferList должен вмещать channelCount буферов. Статический `AudioBufferList()`
+    // вмещает лишь один → CMSampleBufferGetAudioBufferList… возвращает -12737
+    // (kCMSampleBufferError_ArrayTooSmall) и кадр теряется. Выделяем список нужного размера.
+    let buffers = AudioBufferList.allocate(maximumBuffers: channelCount)
+    defer { free(buffers.unsafeMutablePointer) }
+
     var blockBuffer: CMBlockBuffer?
-    var bufferList = AudioBufferList()
     let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
       sampleBuffer,
       bufferListSizeNeededOut: nil,
-      bufferListOut: &bufferList,
-      bufferListSize: MemoryLayout<AudioBufferList>.size,
+      bufferListOut: buffers.unsafeMutablePointer,
+      bufferListSize: AudioBufferList.sizeInBytes(maximumBuffers: channelCount),
       blockBufferAllocator: kCFAllocatorDefault,
       blockBufferMemoryAllocator: kCFAllocatorDefault,
       flags: UInt32(kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment),
@@ -117,37 +143,31 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
       return
     }
 
-    let channelCount = max(1, Int(asbd.mChannelsPerFrame))
-    if !announcedFormat {
-      announceFormat(sampleRate: asbd.mSampleRate, channels: channelCount)
-    }
-
     let flags = asbd.mFormatFlags
     let isFloat = (flags & kAudioFormatFlagIsFloat) != 0
     let isNonInterleaved = (flags & kAudioFormatFlagIsNonInterleaved) != 0
     let bitsPerChannel = Int(asbd.mBitsPerChannel)
 
-    if isFloat && bitsPerChannel == 32 {
-      emitFloat32(bufferList: &bufferList, frameCount: frameCount, channelCount: channelCount, isNonInterleaved: isNonInterleaved)
-      return
+    // blockBuffer владеет памятью, на которую указывают buffers[*].mData — держим его живым,
+    // пока пишем сэмплы.
+    withExtendedLifetime(blockBuffer) {
+      if isFloat && bitsPerChannel == 32 {
+        emitFloat32(buffers: buffers, frameCount: frameCount, channelCount: channelCount, isNonInterleaved: isNonInterleaved)
+      } else if !isFloat && bitsPerChannel == 16 {
+        emitInt16AsFloat32(buffers: buffers, frameCount: frameCount, channelCount: channelCount, isNonInterleaved: isNonInterleaved)
+      } else {
+        logEvent([
+          "event": "warning",
+          "message": "Unsupported PCM layout",
+          "bitsPerChannel": bitsPerChannel,
+          "isFloat": isFloat,
+          "isNonInterleaved": isNonInterleaved
+        ])
+      }
     }
-
-    if !isFloat && bitsPerChannel == 16 {
-      emitInt16AsFloat32(bufferList: &bufferList, frameCount: frameCount, channelCount: channelCount, isNonInterleaved: isNonInterleaved)
-      return
-    }
-
-    logEvent([
-      "event": "warning",
-      "message": "Unsupported PCM layout",
-      "bitsPerChannel": bitsPerChannel,
-      "isFloat": isFloat,
-      "isNonInterleaved": isNonInterleaved
-    ])
   }
 
-  private func emitFloat32(bufferList: inout AudioBufferList, frameCount: Int, channelCount: Int, isNonInterleaved: Bool) {
-    let buffers = UnsafeMutableAudioBufferListPointer(&bufferList)
+  private func emitFloat32(buffers: UnsafeMutableAudioBufferListPointer, frameCount: Int, channelCount: Int, isNonInterleaved: Bool) {
     if !isNonInterleaved, let data = buffers.first?.mData {
       stdoutHandle.write(Data(bytes: data, count: frameCount * channelCount * MemoryLayout<Float>.size))
       return
@@ -164,8 +184,7 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     writeFloat32Samples(samples)
   }
 
-  private func emitInt16AsFloat32(bufferList: inout AudioBufferList, frameCount: Int, channelCount: Int, isNonInterleaved: Bool) {
-    let buffers = UnsafeMutableAudioBufferListPointer(&bufferList)
+  private func emitInt16AsFloat32(buffers: UnsafeMutableAudioBufferListPointer, frameCount: Int, channelCount: Int, isNonInterleaved: Bool) {
     var samples = Array(repeating: Float(0), count: frameCount * channelCount)
 
     if !isNonInterleaved, let data = buffers.first?.mData {

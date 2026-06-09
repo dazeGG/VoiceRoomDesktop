@@ -174,12 +174,16 @@ int wmain(int argc, wchar_t** argv) {
   desiredFormat.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
   CoTaskMemFree(mixFormat);
 
-  REFERENCE_TIME bufferDuration = 10000000;
+  // Process loopback (microsoft/Windows-classic-samples ApplicationLoopback): Initialize
+  // вызывается с LOOPBACK | EVENTCALLBACK | AUTOCONVERTPCM и hnsBufferDuration/hnsPeriodicity = 0.
+  // Без AUTOCONVERTPCM запрос 32-bit float ведёт к отказу Initialize либо GetNextPacketSize
+  // всегда возвращает 0 (тишина); для process loopback hns-параметры ДОЛЖНЫ быть нулевыми.
   hr = audioClient->Initialize(
       AUDCLNT_SHAREMODE_SHARED,
-      AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-      bufferDuration,
-      0,
+      AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+          | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+      0,   // hnsBufferDuration ДОЛЖЕН быть 0 для process loopback
+      0,   // hnsPeriodicity ДОЛЖЕН быть 0
       reinterpret_cast<WAVEFORMATEX*>(&desiredFormat),
       nullptr);
   if (FAILED(hr)) {

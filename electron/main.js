@@ -12,9 +12,15 @@ const {
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = APP_URL ? new URL(APP_URL).origin : '';
+const PICKER_PREVIEW_ENABLED = process.env.VOICE_ROOM_PICKER_PREVIEW === '1';
+const DESKTOP_CAPTURE_PENDING_TTL_MS = 15_000;
+const DESKTOP_CAPTURE_SOURCE_SNAPSHOT_TTL_MS = 30_000;
 const pendingDesktopCaptureSources = new Map();
+const desktopCaptureSourceSnapshots = new Map();
+const desktopCapturePickerSessions = new Map();
 let latestPendingDesktopCaptureSource = null;
 let lastScreenCaptureSettingsOpenAt = 0;
+let nextDesktopCapturePickerSessionId = 1;
 
 const DESKTOP_AUDIO_MODES = new Set([
   'none',
@@ -22,6 +28,10 @@ const DESKTOP_AUDIO_MODES = new Set([
   'safe-system',
   'application'
 ]);
+const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high']);
+const SCREEN_FPS_IDS = new Set(['15', '30']);
+const DEFAULT_SCREEN_QUALITY_ID = 'balanced';
+const DEFAULT_SCREEN_FPS_ID = '30';
 
 function readRuntimeConfig() {
   const configPath = path.join(__dirname, 'runtime-config.json');
@@ -72,9 +82,47 @@ function configureDesktopCaptureIpc() {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
     }
 
+    const frameKey = getFrameKey(event.senderFrame);
     const sources = await getDesktopCaptureSources();
+    if (frameKey) storeDesktopCaptureSourceSnapshot(frameKey, sources);
 
     return sources.map(serializeDesktopSource);
+  });
+
+  ipcMain.handle('desktop-capture:open-picker', async (event, options = {}) => {
+    const frameKey = getFrameKey(event.senderFrame);
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+    }
+
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    const sources = await getDesktopCaptureSources();
+    if (!sources.length) {
+      throw new Error('Нет доступных источников экрана');
+    }
+
+    const selection = await openDesktopCapturePickerWindow(parentWindow, sources, options);
+    const source = sources.find((item) => item.id === selection.sourceId);
+    if (!source) {
+      throw new Error('Desktop capture source is no longer available.');
+    }
+
+    const audioOptions = {
+      allowEchoFallback: false,
+      enabled: selection.streamAudioEnabled,
+      mode: 'safe-system'
+    };
+    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions);
+
+    return {
+      audioCapture,
+      fpsId: selection.fpsId,
+      ok: true,
+      profileId: createScreenProfileId(selection.qualityId, selection.fpsId),
+      qualityId: selection.qualityId,
+      source: serializeDesktopSource(source),
+      streamAudioEnabled: selection.streamAudioEnabled
+    };
   });
 
   ipcMain.handle('desktop-capture:select-source', async (event, sourceId, audioOptions = 'loopback') => {
@@ -83,35 +131,12 @@ function configureDesktopCaptureIpc() {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
     }
 
-    const sources = await getDesktopCaptureSources();
-    const source = sources.find((item) => item.id === sourceId);
+    const source = await getDesktopCaptureSourceForSelection(frameKey, sourceId);
     if (!source) {
       throw new Error('Desktop capture source is no longer available.');
     }
 
-    const previous = frameKey ? pendingDesktopCaptureSources.get(frameKey) : null;
-    if (previous?.timer) clearTimeout(previous.timer);
-
-    const timer = setTimeout(() => {
-      if (frameKey) pendingDesktopCaptureSources.delete(frameKey);
-      if (latestPendingDesktopCaptureSource?.source.id === source.id) {
-        latestPendingDesktopCaptureSource = null;
-      }
-    }, 15_000);
-    timer.unref?.();
-
-    const audioCapture = normalizeDesktopAudioCapture(source, audioOptions);
-    const pendingSource = {
-      audioCapture,
-      source,
-      timer
-    };
-    if (frameKey) pendingDesktopCaptureSources.set(frameKey, pendingSource);
-    latestPendingDesktopCaptureSource = {
-      audioCapture: pendingSource.audioCapture,
-      expiresAt: Date.now() + 15_000,
-      source
-    };
+    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions);
     return {
       audioCapture,
       ok: true
@@ -140,6 +165,30 @@ function configureDesktopCaptureIpc() {
     }
 
     return stopSafeSystemAudioCapture(sessionId);
+  });
+}
+
+function configureScreenPickerIpc() {
+  ipcMain.handle('screen-picker:get-state', (event) => {
+    const session = getDesktopCapturePickerSessionForEvent(event);
+    return {
+      defaultFpsId: session.defaultFpsId,
+      defaultQualityId: session.defaultQualityId,
+      defaultStreamAudioEnabled: session.defaultStreamAudioEnabled,
+      sources: session.sources.map(serializeDesktopSource)
+    };
+  });
+
+  ipcMain.handle('screen-picker:select', (event, selection = {}) => {
+    const session = getDesktopCapturePickerSessionForEvent(event);
+    resolveDesktopCapturePickerSession(session, normalizeDesktopCapturePickerSelection(selection));
+    return { ok: true };
+  });
+
+  ipcMain.handle('screen-picker:cancel', (event) => {
+    const session = getDesktopCapturePickerSessionForEvent(event);
+    rejectDesktopCapturePickerSession(session, createAbortError('Выбор источника отменен'));
+    return { ok: true };
   });
 }
 
@@ -199,10 +248,60 @@ function modeToCapabilityKey(mode) {
   return mode;
 }
 
-function getDesktopCaptureSources() {
+function createScreenProfileId(qualityId, fpsId) {
+  return `${qualityId}-${fpsId}`;
+}
+
+function normalizeScreenQualityId(qualityId) {
+  return SCREEN_QUALITY_IDS.has(qualityId) ? qualityId : DEFAULT_SCREEN_QUALITY_ID;
+}
+
+function normalizeScreenFpsId(fpsId) {
+  return SCREEN_FPS_IDS.has(fpsId) ? fpsId : DEFAULT_SCREEN_FPS_ID;
+}
+
+function normalizeDesktopCapturePickerSelection(selection) {
+  return {
+    fpsId: normalizeScreenFpsId(selection.fpsId),
+    qualityId: normalizeScreenQualityId(selection.qualityId),
+    sourceId: String(selection.sourceId || ''),
+    streamAudioEnabled: selection.streamAudioEnabled !== false
+  };
+}
+
+function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopback') {
+  const previous = frameKey ? pendingDesktopCaptureSources.get(frameKey) : null;
+  if (previous?.timer) clearTimeout(previous.timer);
+
+  const timer = setTimeout(() => {
+    if (frameKey) pendingDesktopCaptureSources.delete(frameKey);
+    if (latestPendingDesktopCaptureSource?.source.id === source.id) {
+      latestPendingDesktopCaptureSource = null;
+    }
+  }, DESKTOP_CAPTURE_PENDING_TTL_MS);
+  timer.unref?.();
+
+  const audioCapture = normalizeDesktopAudioCapture(source, audioOptions);
+  const pendingSource = {
+    audioCapture,
+    source,
+    timer
+  };
+
+  if (frameKey) pendingDesktopCaptureSources.set(frameKey, pendingSource);
+  latestPendingDesktopCaptureSource = {
+    audioCapture: pendingSource.audioCapture,
+    expiresAt: Date.now() + DESKTOP_CAPTURE_PENDING_TTL_MS,
+    source
+  };
+
+  return audioCapture;
+}
+
+async function getDesktopCaptureSources() {
   assertMacScreenCaptureAccess();
 
-  return desktopCapturer
+  const sources = await desktopCapturer
     .getSources({
       fetchWindowIcons: true,
       thumbnailSize: { height: 360, width: 640 },
@@ -216,6 +315,62 @@ function getDesktopCaptureSources() {
 
       throw error;
     });
+  return sources.filter((source) => !isOwnDesktopCaptureSource(source));
+}
+
+function isOwnDesktopCaptureSource(source) {
+  if (!source?.id?.startsWith('window:')) return false;
+  return getOwnDesktopCaptureSourceIds().has(source.id);
+}
+
+function getOwnDesktopCaptureSourceIds() {
+  const ids = new Set();
+  for (const window of BrowserWindow.getAllWindows()) {
+    const mediaSourceId = window.getMediaSourceId?.();
+    if (mediaSourceId) ids.add(mediaSourceId);
+  }
+  return ids;
+}
+
+function storeDesktopCaptureSourceSnapshot(frameKey, sources) {
+  clearDesktopCaptureSourceSnapshot(frameKey);
+
+  const timer = setTimeout(() => {
+    clearDesktopCaptureSourceSnapshot(frameKey);
+  }, DESKTOP_CAPTURE_SOURCE_SNAPSHOT_TTL_MS);
+  timer.unref?.();
+
+  desktopCaptureSourceSnapshots.set(frameKey, {
+    expiresAt: Date.now() + DESKTOP_CAPTURE_SOURCE_SNAPSHOT_TTL_MS,
+    sources: new Map(sources.map((source) => [source.id, source])),
+    timer
+  });
+}
+
+function clearDesktopCaptureSourceSnapshot(frameKey) {
+  const snapshot = desktopCaptureSourceSnapshots.get(frameKey);
+  if (snapshot?.timer) clearTimeout(snapshot.timer);
+  desktopCaptureSourceSnapshots.delete(frameKey);
+}
+
+async function getDesktopCaptureSourceForSelection(frameKey, sourceId) {
+  const snapshotSource = getDesktopCaptureSourceFromSnapshot(frameKey, sourceId);
+  if (snapshotSource) return snapshotSource;
+
+  const sources = await getDesktopCaptureSources();
+  return sources.find((source) => source.id === sourceId) || null;
+}
+
+function getDesktopCaptureSourceFromSnapshot(frameKey, sourceId) {
+  const snapshot = frameKey ? desktopCaptureSourceSnapshots.get(frameKey) : null;
+  if (!snapshot) return null;
+
+  if (snapshot.expiresAt < Date.now()) {
+    clearDesktopCaptureSourceSnapshot(frameKey);
+    return null;
+  }
+
+  return snapshot.sources.get(sourceId) || null;
 }
 
 function assertMacScreenCaptureAccess() {
@@ -295,6 +450,102 @@ function clearPendingDesktopCaptureSource(sourceId) {
   }
 }
 
+function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
+  const sessionId = String(nextDesktopCapturePickerSessionId++);
+  const pickerWindow = new BrowserWindow({
+    backgroundColor: '#10110f',
+    height: 760,
+    minHeight: 640,
+    minWidth: 760,
+    modal: Boolean(parentWindow),
+    parent: parentWindow || undefined,
+    show: false,
+    title: 'Voice Room Stream Picker',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'screen-picker-preload.js'),
+      sandbox: true
+    },
+    width: 1040
+  });
+
+  return new Promise((resolve, reject) => {
+    const session = {
+      defaultFpsId: normalizeScreenFpsId(options.fpsId),
+      defaultQualityId: normalizeScreenQualityId(options.qualityId),
+      defaultStreamAudioEnabled: options.streamAudioEnabled !== false,
+      reject,
+      resolve,
+      sessionId,
+      settled: false,
+      sources,
+      window: pickerWindow
+    };
+    desktopCapturePickerSessions.set(sessionId, session);
+
+    pickerWindow.once('ready-to-show', () => {
+      pickerWindow.show();
+    });
+    pickerWindow.once('closed', () => {
+      if (!session.settled) {
+        rejectDesktopCapturePickerSession(session, createAbortError('Выбор источника отменен'));
+      }
+    });
+    pickerWindow.loadFile(path.join(__dirname, 'screen-picker-preview.html'), {
+      query: { sessionId }
+    }).catch((error) => {
+      rejectDesktopCapturePickerSession(session, error);
+    });
+  });
+}
+
+function getDesktopCapturePickerSessionForEvent(event) {
+  const sessionId = getScreenPickerSessionId(event.senderFrame?.url || '');
+  const session = sessionId ? desktopCapturePickerSessions.get(sessionId) : null;
+  if (!session || session.window.webContents !== event.sender) {
+    throw new Error('Screen picker session is not available.');
+  }
+  return session;
+}
+
+function getScreenPickerSessionId(rawUrl) {
+  try {
+    return new URL(rawUrl).searchParams.get('sessionId') || '';
+  } catch {
+    return '';
+  }
+}
+
+function resolveDesktopCapturePickerSession(session, selection) {
+  if (session.settled) return;
+  session.settled = true;
+  desktopCapturePickerSessions.delete(session.sessionId);
+
+  if (!session.sources.some((source) => source.id === selection.sourceId)) {
+    session.reject(new Error('Выбранный источник больше недоступен.'));
+  } else {
+    session.resolve(selection);
+  }
+
+  if (!session.window.isDestroyed()) session.window.close();
+}
+
+function rejectDesktopCapturePickerSession(session, error) {
+  if (session.settled) return;
+  session.settled = true;
+  desktopCapturePickerSessions.delete(session.sessionId);
+  session.reject(error);
+  if (!session.window.isDestroyed()) session.window.close();
+}
+
+function createAbortError(message) {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
 function configureWindowIpc() {
   ipcMain.handle('window:set-fullscreen', (event, fullscreen) => {
     if (!isTrustedFrame(event.senderFrame)) {
@@ -359,6 +610,11 @@ function configurePermissions() {
 }
 
 function createWindow() {
+  if (PICKER_PREVIEW_ENABLED) {
+    createPickerPreviewWindow();
+    return;
+  }
+
   if (!APP_URL) {
     dialog.showErrorBox('Voice Room', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
     app.quit();
@@ -407,6 +663,32 @@ function createWindow() {
   });
 }
 
+function createPickerPreviewWindow() {
+  const previewWindow = new BrowserWindow({
+    backgroundColor: '#10110f',
+    height: 760,
+    minHeight: 640,
+    minWidth: 760,
+    show: false,
+    title: 'Voice Room Stream Picker Preview',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    },
+    width: 1040
+  });
+
+  previewWindow.once('ready-to-show', () => {
+    previewWindow.show();
+  });
+
+  previewWindow.loadFile(path.join(__dirname, 'screen-picker-preview.html')).catch((error) => {
+    dialog.showErrorBox('Voice Room', `Не удалось открыть preview\n\n${error.message}`);
+  });
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -421,6 +703,7 @@ if (!gotLock) {
   app.whenReady().then(() => {
     configurePermissions();
     configureDesktopCaptureIpc();
+    configureScreenPickerIpc();
     configureWindowIpc();
     createWindow();
 

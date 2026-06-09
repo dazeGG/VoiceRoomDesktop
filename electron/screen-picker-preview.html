@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voice Room Stream Picker Preview</title>
+    <link rel="stylesheet" href="./screen-picker-preview.css">
+  </head>
+  <body>
+    <main class="screen-picker-shell">
+      <section class="screen-source-panel" aria-labelledby="pickerTitle">
+        <header class="screen-source-heading">
+          <div>
+            <p class="eyebrow">Стрим</p>
+            <h1 id="pickerTitle">Выберите, что показать</h1>
+          </div>
+          <button class="screen-source-close" id="screenSourceClose" type="button" aria-label="Закрыть">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </header>
+
+        <nav class="screen-source-tabs" aria-label="Тип источника">
+          <button class="screen-source-tab" id="screenSourceScreensTab" type="button" aria-pressed="true">Экраны</button>
+          <button class="screen-source-tab" id="screenSourceWindowsTab" type="button" aria-pressed="false">Окна</button>
+        </nav>
+
+        <div class="screen-source-options" id="screenSourceOptions" aria-label="Источники"></div>
+
+        <footer class="screen-source-controls">
+          <div class="screen-profile-group">
+            <span class="screen-profile-group-title">Качество</span>
+            <div class="screen-profile-segments" id="screenQualityOptions">
+              <button type="button" data-quality-id="low">540p</button>
+              <button type="button" data-quality-id="balanced" aria-pressed="true">720p</button>
+              <button type="button" data-quality-id="high">1080p</button>
+            </div>
+          </div>
+          <div class="screen-profile-group">
+            <span class="screen-profile-group-title">FPS</span>
+            <div class="screen-profile-segments screen-profile-segments-compact" id="screenFpsOptions">
+              <button type="button" data-fps-id="15">15</button>
+              <button type="button" data-fps-id="30" aria-pressed="true">30</button>
+            </div>
+          </div>
+          <label class="screen-audio-toggle">
+            <input id="screenAudioToggle" type="checkbox" checked>
+            <span class="screen-audio-switch" aria-hidden="true"></span>
+            <span>Звук стрима</span>
+          </label>
+          <button class="screen-profile-start" id="screenSourceStart" type="button">Запустить</button>
+        </footer>
+      </section>
+    </main>
+    <script src="./screen-picker.js"></script>
+  </body>
+</html>

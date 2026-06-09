@@ -5,9 +5,11 @@
   "description": "Electron desktop shell for Voice Room.",
   "main": "electron/main.js",
   "scripts": {
-    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/native-audio.js && node --check scripts/build-electron.js && node --check scripts/build-native-audio.js && node --check scripts/clean-dist.js && node --check scripts/create-electron-config.js && node --check scripts/validate-release-version.js && node --check electron-builder.config.js",
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/screen-picker-preload.js && node --check electron/screen-picker.js && node --check electron/native-audio.js && node --check scripts/build-electron.js && node --check scripts/build-native-audio.js && node --check scripts/capture-picker-preview.js && node --check scripts/clean-dist.js && node --check scripts/create-electron-config.js && node --check scripts/validate-release-version.js && node --check electron-builder.config.js",
     "native:build": "node scripts/build-native-audio.js",
     "release:validate": "node scripts/validate-release-version.js",
+    "preview:picker": "VOICE_ROOM_PICKER_PREVIEW=1 electron .",
+    "preview:picker:capture": "electron scripts/capture-picker-preview.js dist/picker-preview.png",
     "desktop": "node scripts/create-electron-config.js && npm run native:build && electron .",
     "electron": "npm run desktop",
     "build": "node scripts/build-electron.js --mac --win",

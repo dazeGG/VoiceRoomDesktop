@@ -22,6 +22,19 @@ await window.voiceRoomDesktopCapture.selectSource(sourceId, {
 });
 ```
 
+The preferred desktop path is to let the shell own source selection:
+
+```js
+const selection = await window.voiceRoomDesktopCapture.openPicker({
+  fpsId: '30',
+  qualityId: 'balanced',
+  streamAudioEnabled: true
+});
+
+// selection.profileId contains the chosen quality/FPS profile.
+// The selected source is already staged for the next getDisplayMedia call.
+```
+
 `safe-system` is the Discord-like intent: capture system audio while excluding Voice Room playback. The Electron shell builds native helpers for this path:
 
 - macOS: ScreenCaptureKit audio with `excludesCurrentProcessAudio`.

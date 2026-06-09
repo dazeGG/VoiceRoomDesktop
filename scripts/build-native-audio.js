@@ -48,6 +48,7 @@ function buildMacOS() {
     '-O',
     '-parse-as-library',
     '-framework', 'AVFoundation',
+    '-framework', 'CoreAudio',
     '-framework', 'CoreMedia',
     '-framework', 'ScreenCaptureKit'
   ];

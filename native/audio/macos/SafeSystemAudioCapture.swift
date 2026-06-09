@@ -1,5 +1,7 @@
 import AVFoundation
+import CoreAudio
 import CoreMedia
+import Darwin
 import Foundation
 import ScreenCaptureKit
 
@@ -219,12 +221,289 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
   }
 }
 
+// MARK: - Core Audio process tap (macOS 14.4+)
+
+// Captures the system audio mix while EXCLUDING the entire Voice Room process tree, so the
+// stream does not re-capture other participants' voices played back by Voice Room (no echo).
+// This is the macOS equivalent of the Windows EXCLUDE_TARGET_PROCESS_TREE loopback. Mirrors
+// insidegui/AudioCap and Apple's "Capturing system audio with Core Audio taps".
+@available(macOS 14.4, *)
+final class ProcessTapCapture {
+  private let excludePid: pid_t
+  private let writeQueue = DispatchQueue(label: "ru.dazinho.voiceroom.tap-write")
+  private var tapID = AudioObjectID(kAudioObjectUnknown)
+  private var aggregateID = AudioObjectID(kAudioObjectUnknown)
+  private var ioProcID: AudioDeviceIOProcID?
+  private var format = AudioStreamBasicDescription()
+  private var running = false
+
+  init(excludePid: pid_t) {
+    self.excludePid = excludePid
+  }
+
+  func start() throws {
+    // 1. All PIDs of the Voice Room process tree (main Electron process + children, including
+    //    the Chromium audio service process that actually plays participant audio).
+    let treePids = collectProcessTree(root: excludePid)
+
+    // 2. Audio process objects whose PID is in that tree → the exclusion list.
+    var excludedObjects: [AudioObjectID] = []
+    for object in readAudioProcessObjectList() {
+      guard let pid = readAudioProcessPID(object) else { continue }
+      if treePids.contains(pid) { excludedObjects.append(object) }
+    }
+
+    // 3. Global system-audio tap excluding those processes.
+    let tapUUID = UUID()
+    let description = CATapDescription(stereoGlobalTapButExcludeProcesses: excludedObjects)
+    description.uuid = tapUUID
+    description.name = "VoiceRoomStreamTap"
+    description.isPrivate = true
+    // muteBehavior left at its default (CATapUnmuted): the tapped audio keeps playing
+    // normally while we capture it.
+
+    var createdTap = AudioObjectID(kAudioObjectUnknown)
+    var status = AudioHardwareCreateProcessTap(description, &createdTap)
+    guard status == noErr, createdTap != AudioObjectID(kAudioObjectUnknown) else {
+      throw tapError("AudioHardwareCreateProcessTap failed", status)
+    }
+    tapID = createdTap
+
+    // 4. Real audio format produced by the tap.
+    guard let tapFormat = readTapFormat(tapID) else {
+      throw tapError("Unable to read tap format", noErr)
+    }
+    format = tapFormat
+
+    // 5. Private aggregate device that auto-starts the tap and exposes it as an input stream.
+    let aggregateDescription: [String: Any] = [
+      kAudioAggregateDeviceNameKey: "VoiceRoomAggregate",
+      kAudioAggregateDeviceUIDKey: "VoiceRoomAggregate-\(UUID().uuidString)",
+      kAudioAggregateDeviceIsPrivateKey: true,
+      kAudioAggregateDeviceIsStackedKey: false,
+      kAudioAggregateDeviceTapAutoStartKey: true,
+      kAudioAggregateDeviceSubDeviceListKey: [[String: Any]](),
+      kAudioAggregateDeviceTapListKey: [
+        [
+          kAudioSubTapDriftCompensationKey: true,
+          kAudioSubTapUIDKey: tapUUID.uuidString
+        ]
+      ]
+    ]
+    var createdAggregate = AudioObjectID(kAudioObjectUnknown)
+    status = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &createdAggregate)
+    guard status == noErr, createdAggregate != AudioObjectID(kAudioObjectUnknown) else {
+      throw tapError("AudioHardwareCreateAggregateDevice failed", status)
+    }
+    aggregateID = createdAggregate
+
+    // 6. IO proc on a private serial queue (keeps stdout writes off the real-time thread).
+    var createdProc: AudioDeviceIOProcID?
+    status = AudioDeviceCreateIOProcIDWithBlock(&createdProc, aggregateID, writeQueue) { [weak self] _, inInputData, _, _, _ in
+      self?.emit(inInputData)
+    }
+    guard status == noErr, let proc = createdProc else {
+      throw tapError("AudioDeviceCreateIOProcIDWithBlock failed", status)
+    }
+    ioProcID = proc
+
+    status = AudioDeviceStart(aggregateID, proc)
+    guard status == noErr else {
+      throw tapError("AudioDeviceStart failed", status)
+    }
+
+    running = true
+    announceFormat()
+    logEvent([
+      "event": "started",
+      "mode": "safe-system",
+      "platform": "darwin",
+      "method": "core-audio-process-tap",
+      "excludedProcesses": excludedObjects.count
+    ])
+  }
+
+  func stop() {
+    let wasRunning = running
+    running = false
+    if let proc = ioProcID {
+      if wasRunning { AudioDeviceStop(aggregateID, proc) }
+      AudioDeviceDestroyIOProcID(aggregateID, proc)
+      ioProcID = nil
+    }
+    if aggregateID != AudioObjectID(kAudioObjectUnknown) {
+      AudioHardwareDestroyAggregateDevice(aggregateID)
+      aggregateID = AudioObjectID(kAudioObjectUnknown)
+    }
+    if tapID != AudioObjectID(kAudioObjectUnknown) {
+      AudioHardwareDestroyProcessTap(tapID)
+      tapID = AudioObjectID(kAudioObjectUnknown)
+    }
+    if wasRunning { logEvent(["event": "stopped"]) }
+  }
+
+  private func emit(_ bufferList: UnsafePointer<AudioBufferList>) {
+    guard running else { return }
+    let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
+    let channelCount = max(1, Int(format.mChannelsPerFrame))
+    let isNonInterleaved = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+
+    // Tap format is 32-bit float. Interleaved → write bytes as-is (already f32le).
+    if !isNonInterleaved {
+      guard let first = abl.first, let data = first.mData, first.mDataByteSize > 0 else { return }
+      stdoutHandle.write(Data(bytes: data, count: Int(first.mDataByteSize)))
+      return
+    }
+
+    // Planar float → interleave into f32le.
+    let frameCount = Int(abl.first?.mDataByteSize ?? 0) / MemoryLayout<Float>.size
+    guard frameCount > 0 else { return }
+    var samples = Array(repeating: Float(0), count: frameCount * channelCount)
+    for channel in 0..<min(channelCount, abl.count) {
+      guard let data = abl[channel].mData else { continue }
+      let channelSamples = data.assumingMemoryBound(to: Float.self)
+      for frame in 0..<frameCount {
+        samples[(frame * channelCount) + channel] = channelSamples[frame]
+      }
+    }
+    writeFloat32Samples(samples)
+  }
+
+  private func announceFormat() {
+    logEvent([
+      "event": "format",
+      "sampleRate": format.mSampleRate > 0 ? format.mSampleRate : Double(defaultSampleRate),
+      "channels": max(1, Int(format.mChannelsPerFrame)),
+      "sampleFormat": "f32le",
+      "interleaved": true
+    ])
+  }
+
+  private func tapError(_ message: String, _ status: OSStatus) -> NSError {
+    return NSError(
+      domain: "VoiceRoomProcessTap",
+      code: Int(status),
+      userInfo: [NSLocalizedDescriptionKey: "\(message) (status=\(status))"]
+    )
+  }
+}
+
+@available(macOS 14.4, *)
+private func readAudioProcessObjectList() -> [AudioObjectID] {
+  var address = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwarePropertyProcessObjectList,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain
+  )
+  var dataSize: UInt32 = 0
+  guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize) == noErr else {
+    return []
+  }
+  let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+  guard count > 0 else { return [] }
+  var ids = [AudioObjectID](repeating: AudioObjectID(kAudioObjectUnknown), count: count)
+  let status = ids.withUnsafeMutableBytes { raw -> OSStatus in
+    AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, raw.baseAddress!)
+  }
+  return status == noErr ? ids : []
+}
+
+@available(macOS 14.4, *)
+private func readAudioProcessPID(_ object: AudioObjectID) -> pid_t? {
+  var address = AudioObjectPropertyAddress(
+    mSelector: kAudioProcessPropertyPID,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain
+  )
+  var pid: pid_t = -1
+  var size = UInt32(MemoryLayout<pid_t>.size)
+  guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &pid) == noErr else { return nil }
+  return pid
+}
+
+@available(macOS 14.4, *)
+private func readTapFormat(_ tapID: AudioObjectID) -> AudioStreamBasicDescription? {
+  var address = AudioObjectPropertyAddress(
+    mSelector: kAudioTapPropertyFormat,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain
+  )
+  var asbd = AudioStreamBasicDescription()
+  var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+  guard AudioObjectGetPropertyData(tapID, &address, 0, nil, &size, &asbd) == noErr else { return nil }
+  return asbd
+}
+
+// All running processes as (pid, ppid) pairs via sysctl(KERN_PROC_ALL).
+private func allProcessParents() -> [(pid: pid_t, ppid: pid_t)] {
+  var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+  var length = 0
+  guard sysctl(&name, 4, nil, &length, nil, 0) == 0, length > 0 else { return [] }
+  let stride = MemoryLayout<kinfo_proc>.stride
+  var procs = [kinfo_proc](repeating: kinfo_proc(), count: length / stride)
+  var resultLength = length
+  let status = procs.withUnsafeMutableBytes { raw -> Int32 in
+    sysctl(&name, 4, raw.baseAddress, &resultLength, nil, 0)
+  }
+  guard status == 0 else { return [] }
+  return procs.prefix(resultLength / stride).map { ($0.kp_proc.p_pid, $0.kp_eproc.e_ppid) }
+}
+
+// Set of PIDs rooted at `root` (inclusive), walking the parent→child relationships.
+private func collectProcessTree(root: pid_t) -> Set<pid_t> {
+  guard root > 0 else { return [] }
+  var childrenByParent: [pid_t: [pid_t]] = [:]
+  for entry in allProcessParents() {
+    childrenByParent[entry.ppid, default: []].append(entry.pid)
+  }
+  var result: Set<pid_t> = [root]
+  var stack: [pid_t] = [root]
+  while let current = stack.popLast() {
+    for child in childrenByParent[current] ?? [] where !result.contains(child) {
+      result.insert(child)
+      stack.append(child)
+    }
+  }
+  return result
+}
+
+private func parseExcludePid(_ arguments: [String]) -> pid_t? {
+  guard let index = arguments.firstIndex(of: "--exclude-pid"), index + 1 < arguments.count else { return nil }
+  return pid_t(arguments[index + 1])
+}
+
+private func installSignalHandlers() {
+  signal(SIGINT) { _ in Foundation.exit(0) }
+  signal(SIGTERM) { _ in Foundation.exit(0) }
+}
+
 @main
 struct VoiceRoomSafeSystemAudioMain {
   static func main() async {
-    guard ProcessInfo.processInfo.arguments.contains("--safe-system") else {
+    let arguments = ProcessInfo.processInfo.arguments
+    guard arguments.contains("--safe-system") else {
       logEvent(["event": "error", "message": "Expected --safe-system"])
       Foundation.exit(64)
+    }
+
+    // macOS 14.4+: Core Audio process tap that excludes the Voice Room process tree (no echo).
+    if #available(macOS 14.4, *) {
+      let tap = ProcessTapCapture(excludePid: parseExcludePid(arguments) ?? getppid())
+      do {
+        try tap.start()
+        installSignalHandlers()
+        RunLoop.current.run()
+        tap.stop()
+        return
+      } catch {
+        tap.stop()
+        logEvent([
+          "event": "warning",
+          "message": "Core Audio process tap unavailable, falling back to ScreenCaptureKit",
+          "detail": error.localizedDescription
+        ])
+        // fall through to the ScreenCaptureKit path (system audio works, echo possible)
+      }
     }
 
     guard #available(macOS 13.0, *) else {
@@ -236,8 +515,7 @@ struct VoiceRoomSafeSystemAudioMain {
     do {
       try await capture.start()
       await withCheckedContinuation { continuation in
-        signal(SIGINT) { _ in Foundation.exit(0) }
-        signal(SIGTERM) { _ in Foundation.exit(0) }
+        installSignalHandlers()
         RunLoop.current.run()
         continuation.resume()
       }

@@ -181,7 +181,9 @@ function startSafeSystemAudioCapture(sender, options = {}) {
 }
 
 function getSafeSystemAudioHelperArgs(options = {}) {
-  if (process.platform === 'darwin') return ['--safe-system'];
+  // Pass the main process PID so the macOS helper can exclude the entire Voice Room
+  // process tree from the system-audio capture (mirrors Windows EXCLUDE_TARGET_PROCESS_TREE).
+  if (process.platform === 'darwin') return ['--safe-system', '--exclude-pid', String(process.pid)];
 
   if (process.platform === 'win32') {
     const targetPid = Number.isInteger(options.targetPid) && options.targetPid > 0
@@ -191,6 +193,9 @@ function getSafeSystemAudioHelperArgs(options = {}) {
     if (options.mode === 'application' && Number.isInteger(options.targetPid) && options.targetPid > 0) {
       args.push('--include-target');
     }
+    // DEBUG BUILD (v1.0.3-debug): emit capture diagnostics to stderr, forwarded as
+    // desktop-audio:event so they show up in DevTools onEvent. Remove for production releases.
+    args.push('--debug');
     return args;
   }
 

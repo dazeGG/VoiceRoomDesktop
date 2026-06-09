@@ -7,6 +7,8 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <fcntl.h>
+#include <io.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
 #include <propsys.h>
@@ -138,6 +140,10 @@ static HRESULT ActivateProcessLoopbackAudioClient(DWORD processId, PROCESS_LOOPB
 }
 
 int wmain(int argc, wchar_t** argv) {
+  // PCM goes to stdout in binary. Without this the CRT translates every 0x0A byte to 0x0D 0x0A,
+  // corrupting the audio stream into loud white noise. stderr stays in text mode for JSON events.
+  _setmode(_fileno(stdout), _O_BINARY);
+
   std::signal(SIGINT, HandleSignal);
   std::signal(SIGTERM, HandleSignal);
 

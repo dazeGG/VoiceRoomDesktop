@@ -9,6 +9,7 @@ const nativeDir = path.join(rootDir, 'native', 'audio');
 const binDir = path.join(rootDir, 'native', 'bin');
 
 function run(command, args, options = {}) {
+  if (!options.quiet) console.log(`> ${[command, ...args].join(' ')}`);
   const result = spawnSync(command, args, {
     cwd: rootDir,
     encoding: 'utf8',

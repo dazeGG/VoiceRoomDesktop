@@ -10,7 +10,25 @@ contextBridge.exposeInMainWorld('voiceRoomRuntime', {
 
 contextBridge.exposeInMainWorld('voiceRoomDesktopCapture', {
   getSources: () => ipcRenderer.invoke('desktop-capture:get-sources'),
-  selectSource: (sourceId, audioMode) => ipcRenderer.invoke('desktop-capture:select-source', sourceId, audioMode)
+  selectSource: (sourceId, audioOptions) => ipcRenderer.invoke('desktop-capture:select-source', sourceId, audioOptions)
+});
+
+contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
+  getCapabilities: () => ipcRenderer.invoke('desktop-audio:get-capabilities'),
+  onData: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-audio:data', listener);
+    return () => ipcRenderer.removeListener('desktop-audio:data', listener);
+  },
+  onEvent: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-audio:event', listener);
+    return () => ipcRenderer.removeListener('desktop-audio:event', listener);
+  },
+  startSafeSystem: (options) => ipcRenderer.invoke('desktop-audio:start-safe-system', options),
+  stop: (sessionId) => ipcRenderer.invoke('desktop-audio:stop', sessionId)
 });
 
 contextBridge.exposeInMainWorld('voiceRoomWindow', {

@@ -9,6 +9,8 @@ electron/runtime-config.json
 
 # Build output
 dist/
+native/bin/
+native/.cache/
 
 # Logs
 *.log

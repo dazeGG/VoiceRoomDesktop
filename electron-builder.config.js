@@ -12,10 +12,15 @@ module.exports = {
   directories: {
     output: outputDir
   },
+  asarUnpack: [
+    'native/bin/**/*'
+  ],
   files: [
     'electron/main.js',
+    'electron/native-audio.js',
     'electron/preload.js',
     'electron/runtime-config.json',
+    'native/bin/**/*',
     'package.json'
   ],
   mac: {

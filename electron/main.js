@@ -3,6 +3,11 @@
 const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, shell, session, systemPreferences } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  getNativeAudioCapabilities,
+  startSafeSystemAudioCapture,
+  stopSafeSystemAudioCapture
+} = require('./native-audio');
 
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
@@ -10,6 +15,13 @@ const TRUSTED_ORIGIN = APP_URL ? new URL(APP_URL).origin : '';
 const pendingDesktopCaptureSources = new Map();
 let latestPendingDesktopCaptureSource = null;
 let lastScreenCaptureSettingsOpenAt = 0;
+
+const DESKTOP_AUDIO_MODES = new Set([
+  'none',
+  'loopback',
+  'safe-system',
+  'application'
+]);
 
 function readRuntimeConfig() {
   const configPath = path.join(__dirname, 'runtime-config.json');
@@ -65,7 +77,7 @@ function configureDesktopCaptureIpc() {
     return sources.map(serializeDesktopSource);
   });
 
-  ipcMain.handle('desktop-capture:select-source', async (event, sourceId, audioMode = 'loopback') => {
+  ipcMain.handle('desktop-capture:select-source', async (event, sourceId, audioOptions = 'loopback') => {
     const frameKey = getFrameKey(event.senderFrame);
     if (!isTrustedFrame(event.senderFrame)) {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
@@ -88,19 +100,103 @@ function configureDesktopCaptureIpc() {
     }, 15_000);
     timer.unref?.();
 
+    const audioCapture = normalizeDesktopAudioCapture(source, audioOptions);
     const pendingSource = {
-      audioMode: audioMode === 'none' ? 'none' : 'loopback',
+      audioCapture,
       source,
       timer
     };
     if (frameKey) pendingDesktopCaptureSources.set(frameKey, pendingSource);
     latestPendingDesktopCaptureSource = {
-      audioMode: pendingSource.audioMode,
+      audioCapture: pendingSource.audioCapture,
       expiresAt: Date.now() + 15_000,
       source
     };
-    return true;
+    return {
+      audioCapture,
+      ok: true
+    };
   });
+
+  ipcMain.handle('desktop-audio:get-capabilities', (event) => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+    }
+
+    return getDesktopAudioCapabilities();
+  });
+
+  ipcMain.handle('desktop-audio:start-safe-system', (event, options = {}) => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+    }
+
+    return startSafeSystemAudioCapture(event.sender, options);
+  });
+
+  ipcMain.handle('desktop-audio:stop', (event, sessionId = '') => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+    }
+
+    return stopSafeSystemAudioCapture(sessionId);
+  });
+}
+
+function getDesktopAudioCapabilities() {
+  const nativeCapabilities = getNativeAudioCapabilities();
+  return {
+    label: 'Звук стрима',
+    ...nativeCapabilities
+  };
+}
+
+function normalizeDesktopAudioCapture(source, audioOptions) {
+  const options = typeof audioOptions === 'object' && audioOptions !== null
+    ? audioOptions
+    : { mode: audioOptions };
+  const enabled = options.enabled !== false && options.mode !== 'none';
+  if (!enabled) {
+    return {
+      mode: 'none',
+      requestedMode: 'none',
+      sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
+      warning: ''
+    };
+  }
+
+  const requestedMode = DESKTOP_AUDIO_MODES.has(options.mode) ? options.mode : 'safe-system';
+  const safeModeRequested = requestedMode === 'safe-system' || requestedMode === 'application';
+  const nativeCapabilities = getNativeAudioCapabilities();
+  if (safeModeRequested && nativeCapabilities.modes[modeToCapabilityKey(requestedMode)]) {
+    return {
+      mode: requestedMode,
+      requestedMode,
+      sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
+      warning: ''
+    };
+  }
+
+  if (safeModeRequested && options.allowEchoFallback === false) {
+    return {
+      mode: 'none',
+      requestedMode,
+      sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
+      warning: 'safe-loopback-unavailable'
+    };
+  }
+
+  return {
+    mode: 'loopback',
+    requestedMode,
+    sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
+    warning: safeModeRequested ? 'using-echo-prone-loopback' : ''
+  };
+}
+
+function modeToCapabilityKey(mode) {
+  if (mode === 'safe-system') return 'safeSystem';
+  return mode;
 }
 
 function getDesktopCaptureSources() {
@@ -182,9 +278,9 @@ function takePendingDesktopCaptureSource(frame) {
     return null;
   }
 
-  const { audioMode, source } = latestPendingDesktopCaptureSource;
+  const { audioCapture, source } = latestPendingDesktopCaptureSource;
   clearPendingDesktopCaptureSource(source.id);
-  return { audioMode, source };
+  return { audioCapture, source };
 }
 
 function clearPendingDesktopCaptureSource(sourceId) {
@@ -249,7 +345,7 @@ function configurePermissions() {
 
       try {
         const canCaptureLoopbackAudio = request.audioRequested
-          && pending.audioMode !== 'none';
+          && pending.audioCapture?.mode === 'loopback';
         const response = { video: pending.source };
         if (canCaptureLoopbackAudio) response.audio = 'loopback';
         callback(response);

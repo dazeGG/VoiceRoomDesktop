@@ -45,6 +45,7 @@ function readGitHash() {
 const buildHash = dev ? readGitHash() : '';
 
 run(process.execPath, [path.join(rootDir, 'scripts', 'create-electron-config.js')]);
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), ...targets]);
 
 const env = {
   ...process.env,

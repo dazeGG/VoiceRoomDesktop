@@ -9,8 +9,8 @@ Use semver in `package.json` and tag releases as `vX.Y.Z`.
 The release workflow validates that the tag matches `package.json`:
 
 ```text
-package.json version: 1.0.1
-git tag: v1.0.1
+package.json version: 1.0.2
+git tag: v1.0.2
 ```
 
 If they do not match, CI fails before building installers.
@@ -20,22 +20,22 @@ If they do not match, CI fails before building installers.
 1. Update the app version:
 
    ```bash
-   npm version 1.0.1 --no-git-tag-version
+   npm version 1.0.2 --no-git-tag-version
    ```
 
 2. Commit the version bump and any release changes:
 
    ```bash
    git add package.json package-lock.json
-   git commit -m "Release v1.0.1"
+   git commit -m "Release v1.0.2"
    ```
 
 3. Create and push the tag:
 
    ```bash
-   git tag v1.0.1
+   git tag v1.0.2
    git push origin main
-   git push origin v1.0.1
+   git push origin v1.0.2
    ```
 
 4. GitHub Actions builds:

@@ -219,9 +219,6 @@ function getSafeSystemAudioHelperArgs(options = {}) {
     if (options.mode === 'application' && Number.isInteger(options.targetPid) && options.targetPid > 0) {
       args.push('--include-target');
     }
-    // DEBUG BUILD (v1.0.3-debug): emit capture diagnostics to stderr, forwarded as
-    // desktop-audio:event so they show up in DevTools onEvent. Remove for production releases.
-    args.push('--debug');
     return args;
   }
 

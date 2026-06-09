@@ -149,7 +149,6 @@ int wmain(int argc, wchar_t** argv) {
 
   const DWORD targetPid = ReadDWORDArg(argc, argv, L"--target-pid", GetCurrentProcessId());
   const bool includeTarget = HasArg(argc, argv, L"--include-target");
-  const bool debug = HasArg(argc, argv, L"--debug");
   const PROCESS_LOOPBACK_MODE mode = includeTarget
       ? PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
       : PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE;
@@ -163,7 +162,7 @@ int wmain(int argc, wchar_t** argv) {
   ComPtr<IAudioClient> audioClient;
   hr = ActivateProcessLoopbackAudioClient(targetPid, mode, &audioClient);
   if (FAILED(hr)) {
-    Fail(hr, "Process loopback activation failed");
+    Fail(hr, "Process loopback activation failed (requires Windows 10 2004+ x64)");
     CoUninitialize();
     return 1;
   }
@@ -244,68 +243,30 @@ int wmain(int argc, wchar_t** argv) {
     return 1;
   }
 
-  unsigned long long waitCalls = 0, signalCount = 0, timeoutCount = 0;
-  unsigned long long packetCount = 0, totalFrames = 0, nonSilentFrames = 0;
-  DWORD lastFlags = 0;
-  bool loggedFirstAudio = false;
-  ULONGLONG lastStatsTick = GetTickCount64();
-
   while (g_running) {
     const DWORD wait = WaitForSingleObject(sampleReady, 500);
-    ++waitCalls;
-    if (wait == WAIT_OBJECT_0) {
-      ++signalCount;
-      for (;;) {
-        UINT32 packetFrames = 0;
-        hr = captureClient->GetNextPacketSize(&packetFrames);
-        if (FAILED(hr) || packetFrames == 0) break;
+    if (wait != WAIT_OBJECT_0) continue;
 
-        BYTE* data = nullptr;
-        UINT32 framesAvailable = 0;
-        DWORD flags = 0;
-        hr = captureClient->GetBuffer(&data, &framesAvailable, &flags, nullptr, nullptr);
-        if (FAILED(hr)) break;
+    for (;;) {
+      UINT32 packetFrames = 0;
+      hr = captureClient->GetNextPacketSize(&packetFrames);
+      if (FAILED(hr) || packetFrames == 0) break;
 
-        ++packetCount;
-        totalFrames += framesAvailable;
-        lastFlags = flags;
+      BYTE* data = nullptr;
+      UINT32 framesAvailable = 0;
+      DWORD flags = 0;
+      hr = captureClient->GetBuffer(&data, &framesAvailable, &flags, nullptr, nullptr);
+      if (FAILED(hr)) break;
 
-        const size_t byteCount = static_cast<size_t>(framesAvailable) * desiredFormat.Format.nBlockAlign;
-        if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
-          std::string silence(byteCount, '\0');
-          std::fwrite(silence.data(), 1, silence.size(), stdout);
-        } else {
-          nonSilentFrames += framesAvailable;
-          if (debug && !loggedFirstAudio) {
-            std::fprintf(stderr, "{\"event\":\"debug\",\"stage\":\"first-audio\",\"frames\":%u}\n", framesAvailable);
-            std::fflush(stderr);
-            loggedFirstAudio = true;
-          }
-          std::fwrite(data, 1, byteCount, stdout);
-        }
-        std::fflush(stdout);
-        captureClient->ReleaseBuffer(framesAvailable);
+      const size_t byteCount = static_cast<size_t>(framesAvailable) * desiredFormat.Format.nBlockAlign;
+      if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
+        std::string silence(byteCount, '\0');
+        std::fwrite(silence.data(), 1, silence.size(), stdout);
+      } else {
+        std::fwrite(data, 1, byteCount, stdout);
       }
-    } else {
-      ++timeoutCount;
-    }
-
-    // Periodic capture stats (stderr only, --debug). Reveals where the pipeline stalls:
-    //   signals=0          -> the sample-ready event never fires (process loopback not delivering)
-    //   signals>0,packets=0-> GetNextPacketSize keeps returning 0 (known loopback symptom)
-    //   packets>0,nonSilent=0 -> only silence captured (nothing playing outside the excluded tree)
-    //   nonSilentFrames>0  -> native capture works; investigate the IPC/web side instead
-    if (debug) {
-      const ULONGLONG now = GetTickCount64();
-      if (now - lastStatsTick >= 1000) {
-        std::fprintf(stderr,
-            "{\"event\":\"debug\",\"stage\":\"stats\",\"waits\":%llu,\"signals\":%llu,\"timeouts\":%llu,"
-            "\"packets\":%llu,\"frames\":%llu,\"nonSilentFrames\":%llu,\"lastFlags\":%lu}\n",
-            waitCalls, signalCount, timeoutCount, packetCount, totalFrames, nonSilentFrames,
-            static_cast<unsigned long>(lastFlags));
-        std::fflush(stderr);
-        lastStatsTick = now;
-      }
+      std::fflush(stdout);
+      captureClient->ReleaseBuffer(framesAvailable);
     }
   }
 

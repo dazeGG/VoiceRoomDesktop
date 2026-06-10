@@ -20,6 +20,34 @@ const {
 } = require('./desktop-capture-policy');
 const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 
+// On Windows, prefer the Windows Graphics Capture (WGC) backend for screen/window
+// sharing instead of the legacy DXGI/GDI desktop-duplication path. The legacy path
+// composites a synthetic system cursor onto the captured frame, which shows up as a
+// "phantom" cursor in the stream for full-screen games (e.g. PUBG) that hide their
+// own cursor. WGC reports cursor visibility correctly, so the phantom disappears
+// while the real desktop cursor is still streamed.
+//
+// Caveats (must be relayed to streamers):
+//   - WGC cannot capture exclusive-fullscreen surfaces, so the game has to run in
+//     borderless / windowed-fullscreen; otherwise Chromium falls back to the legacy
+//     capturer and the phantom cursor comes back. This is the dominant factor for the
+//     phantom-cursor symptom — the switches below only help once the game is borderless.
+//   - On Windows 11 24H2+ Chromium already prefers WGC by an OS-version gate, so
+//     these switches are largely a no-op there; they matter on older Windows builds
+//     where WGC is gated off by default.
+//   - Unknown/renamed feature names are silently ignored by Chromium, so appending
+//     them stays safe across Electron/Chromium upgrades.
+// Verify it is active via chrome://webrtc-internals (the capturer name) while sharing.
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer'
+  );
+  // WGC draws a coloured capture border around the shared surface on builds that
+  // require it; turn that requirement off so the border does not leak into the stream.
+  app.commandLine.appendSwitch('disable-features', 'WebRtcWgcRequireBorder');
+}
+
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = APP_URL ? new URL(APP_URL).origin : '';

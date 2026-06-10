@@ -8,10 +8,13 @@ const elements = {
   qualityOptions: document.querySelector('#screenQualityOptions'),
   screensTab: document.querySelector('#screenSourceScreensTab'),
   startButton: document.querySelector('#screenSourceStart'),
+  tablist: document.querySelector('.screen-source-tabs'),
+  tabpanel: document.querySelector('#screenSourceTabpanel'),
   windowsTab: document.querySelector('#screenSourceWindowsTab')
 };
 
 const sourceButtons = new Map();
+let cachedGridColumnCount = 1;
 
 const fallbackState = {
   defaultFpsId: '30',
@@ -34,10 +37,29 @@ const state = {
 };
 
 init().catch((error) => {
-  console.error(error);
+  showInitError(error);
 });
 
+function assertPickerElements() {
+  for (const [name, element] of Object.entries(elements)) {
+    if (!element) {
+      throw new Error(`Missing picker element: ${name}`);
+    }
+  }
+}
+
+function showInitError(error) {
+  console.error(error);
+  if (elements.options) {
+    elements.options.textContent = 'Не удалось открыть выбор источника. Закройте окно и попробуйте снова.';
+    elements.options.setAttribute('role', 'alert');
+  }
+  if (elements.startButton) elements.startButton.disabled = true;
+}
+
 async function init() {
+  assertPickerElements();
+
   const pickerState = await getPickerState();
   state.sources = pickerState.sources || [];
   state.qualityId = pickerState.defaultQualityId || 'balanced';
@@ -65,14 +87,17 @@ async function init() {
     refreshSegments();
   });
   elements.options.addEventListener('keydown', handleSourceGridKeydown);
+  elements.tablist.addEventListener('keydown', handleTablistKeydown);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') cancelPicker();
     if (event.key === 'Enter' && state.selectedSourceId) submitSelection();
   });
+  window.addEventListener('resize', updateGridColumnCount);
 
   refreshTabs();
   refreshSegments();
   renderSources();
+  updateGridColumnCount();
 }
 
 async function getPickerState() {
@@ -89,10 +114,24 @@ function setSourceType(type) {
 }
 
 function refreshTabs() {
-  elements.screensTab.setAttribute('aria-pressed', String(state.sourceType === 'screen'));
-  elements.windowsTab.setAttribute('aria-pressed', String(state.sourceType === 'window'));
+  const isScreen = state.sourceType === 'screen';
+  elements.screensTab.setAttribute('aria-selected', String(isScreen));
+  elements.windowsTab.setAttribute('aria-selected', String(!isScreen));
+  elements.tabpanel.setAttribute('aria-labelledby', isScreen ? 'screenSourceScreensTab' : 'screenSourceWindowsTab');
   elements.screensTab.disabled = !state.sources.some((source) => source.type === 'screen');
   elements.windowsTab.disabled = !state.sources.some((source) => source.type === 'window');
+}
+
+function handleTablistKeydown(event) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+
+  const nextType = state.sourceType === 'screen' ? 'window' : 'screen';
+  const nextTab = nextType === 'screen' ? elements.screensTab : elements.windowsTab;
+  if (nextTab.disabled) return;
+
+  event.preventDefault();
+  setSourceType(nextType);
+  nextTab.focus();
 }
 
 function refreshSegments() {
@@ -126,6 +165,7 @@ function renderSources() {
   }
 
   updateSourceSelection();
+  updateGridColumnCount();
 }
 
 function getVisibleSources() {
@@ -167,11 +207,8 @@ function createSourceButton(source) {
   button.className = 'screen-source-option';
   button.type = 'button';
   button.dataset.sourceId = source.id;
-  button.setAttribute('aria-label', source.name);
   syncSourceButton(button, source);
-  button.addEventListener('click', () => {
-    selectSource(source.id, { focus: true });
-  });
+  button.addEventListener('click', () => selectSource(source.id, { focus: true }));
   return button;
 }
 
@@ -182,10 +219,16 @@ function syncSourceButton(button, source) {
   let preview = button.querySelector('.screen-source-preview');
   if (!preview) {
     preview = document.createElement('span');
+    preview.className = 'screen-source-preview';
+    preview.setAttribute('aria-hidden', 'true');
     button.prepend(preview);
   }
 
   preview.className = `screen-source-preview ${getFallbackPreviewClass(source)}`;
+  const thumbnailKey = source.thumbnail || '';
+  if (preview.dataset.thumbnailKey === thumbnailKey) return;
+
+  preview.dataset.thumbnailKey = thumbnailKey;
   preview.replaceChildren();
 
   if (source.thumbnail) {
@@ -206,10 +249,18 @@ function syncSourceButton(button, source) {
   label.textContent = source.name;
 }
 
-function getGridColumnCount() {
+function updateGridColumnCount() {
   const template = window.getComputedStyle(elements.options).gridTemplateColumns;
-  if (!template || template === 'none') return 1;
-  return template.split(' ').filter(Boolean).length;
+  if (!template || template === 'none') {
+    cachedGridColumnCount = 1;
+    return;
+  }
+
+  cachedGridColumnCount = Math.max(1, template.split(' ').filter(Boolean).length);
+}
+
+function getGridColumnCount() {
+  return cachedGridColumnCount;
 }
 
 function handleSourceGridKeydown(event) {
@@ -279,6 +330,7 @@ function createFallbackPreviewNodes(source) {
 
 function createPreviewSpan(className = '') {
   const span = document.createElement('span');
+  span.setAttribute('aria-hidden', 'true');
   if (className) span.className = className;
   return span;
 }
@@ -291,10 +343,15 @@ function submitSelection() {
     streamAudioEnabled: elements.audioToggle.checked
   };
   if (!window.voiceRoomScreenPicker?.select) return;
-  window.voiceRoomScreenPicker.select(selection).catch((error) => console.error(error));
+  window.voiceRoomScreenPicker.select(selection).catch((error) => {
+    console.error('Picker submit failed:', error);
+    elements.startButton.disabled = true;
+  });
 }
 
 function cancelPicker() {
   if (!window.voiceRoomScreenPicker?.cancel) return;
-  window.voiceRoomScreenPicker.cancel().catch((error) => console.error(error));
+  window.voiceRoomScreenPicker.cancel().catch((error) => {
+    console.error('Picker cancel failed:', error);
+  });
 }

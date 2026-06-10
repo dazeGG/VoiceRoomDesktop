@@ -20,9 +20,7 @@ function getNativeAudioCapabilities() {
   const nativeSafeLoopback = Boolean(helperPath);
 
   return {
-    helperPath: helperPath || '',
     modes: {
-      application: false,
       loopback: true,
       none: true,
       safeSystem: nativeSafeLoopback
@@ -205,8 +203,6 @@ function startSafeSystemAudioCapture(sender, options = {}) {
   });
 
   return {
-    args,
-    helperPath,
     sessionId
   };
 }
@@ -220,11 +216,7 @@ function getSafeSystemAudioHelperArgs(options = {}) {
     const targetPid = Number.isInteger(options.targetPid) && options.targetPid > 0
       ? options.targetPid
       : process.pid;
-    const args = ['--target-pid', String(targetPid)];
-    if (options.mode === 'application' && Number.isInteger(options.targetPid) && options.targetPid > 0) {
-      args.push('--include-target');
-    }
-    return args;
+    return ['--target-pid', String(targetPid)];
   }
 
   return [];
@@ -239,7 +231,14 @@ function stopSafeSystemAudioCapture(sessionId = '') {
   if (session.senderDestroyedListener && !session.sender.isDestroyed()) {
     session.sender.removeListener('destroyed', session.senderDestroyedListener);
   }
-  session.child.kill();
+  const child = session.child;
+  if (child.exitCode === null && !child.killed) {
+    child.kill('SIGTERM');
+    const forceKillTimer = setTimeout(() => {
+      if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+    }, 2000);
+    forceKillTimer.unref?.();
+  }
   return true;
 }
 

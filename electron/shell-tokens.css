@@ -1,0 +1,34 @@
+:root {
+  color-scheme: dark;
+  --paper: oklch(15.5% 0.015 92);
+  --ink: oklch(94% 0.012 92);
+  --muted: oklch(69% 0.028 88);
+  --line: oklch(35% 0.025 92);
+  --control: oklch(23% 0.016 92);
+  --control-hover: oklch(30% 0.018 92);
+  --control-line: oklch(41% 0.018 92);
+  --control-active: oklch(84% 0.012 92);
+  --control-active-hover: oklch(89% 0.01 92);
+  --ink-inverse: oklch(9% 0.012 92);
+  --focus-ring: oklch(78% 0.12 164);
+  --accent: oklch(84% 0.012 92);
+  --danger: oklch(67% 0.18 31);
+  --disabled-surface: oklch(12% 0.012 92 / 0.8);
+  --disabled-border: oklch(30% 0.018 92 / 0.86);
+  --disabled-ink: oklch(60% 0.018 92);
+  --touch-target: 44px;
+  --radius-sm: 8px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

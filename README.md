@@ -43,6 +43,8 @@ const selection = await window.voiceRoomDesktopCapture.openPicker({
 
 // selection.profileId contains the chosen quality/FPS profile.
 // The selected source is already staged for the next getDisplayMedia call.
+// openPicker always uses safe-system audio with allowEchoFallback: false.
+// Use selectSource directly when you need Chromium loopback fallback.
 ```
 
 `safe-system` is the Discord-like intent: capture system audio while excluding Voice Room playback. The Electron shell builds native helpers for this path:

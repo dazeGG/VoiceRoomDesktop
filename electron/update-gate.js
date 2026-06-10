@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const { shouldRunUpdateGateState } = require('./update-gate-policy');
 const log = require('./logger');
+const { WINDOW_BACKGROUND } = require('./shell-theme');
 
 const CHECK_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -27,7 +28,7 @@ function formatBlockedMessage() {
 
 function createUpdateSplashWindow() {
   const window = new BrowserWindow({
-    backgroundColor: '#10110f',
+    backgroundColor: WINDOW_BACKGROUND,
     height: 320,
     maximizable: false,
     minimizable: false,

@@ -22,8 +22,11 @@ module.exports = {
   ],
   files: [
     'electron/desktop-capture-policy.js',
+    'electron/logger.js',
     'electron/main.js',
     'electron/native-audio.js',
+    'electron/shell-theme.js',
+    'electron/shell-tokens.css',
     'electron/preload.js',
     'electron/renderer-recovery.css',
     'electron/renderer-recovery.html',

@@ -1,17 +1,3 @@
-:root {
-  color-scheme: dark;
-  --paper: oklch(15.5% 0.015 92);
-  --ink: oklch(94% 0.012 92);
-  --muted: oklch(69% 0.028 88);
-  --line: oklch(35% 0.025 92);
-  --control: oklch(23% 0.016 92);
-  --control-hover: oklch(30% 0.018 92);
-  --control-line: oklch(41% 0.018 92);
-  --accent: oklch(84% 0.012 92);
-  --danger: oklch(67% 0.18 31);
-  font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-}
-
 * {
   box-sizing: border-box;
 }
@@ -31,6 +17,11 @@ button {
   -webkit-app-region: no-drag;
 }
 
+button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .update-shell {
   display: grid;
   min-height: 100vh;
@@ -43,7 +34,7 @@ button {
   margin: 0;
   color: var(--muted);
   font-size: 0.74rem;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -76,7 +67,7 @@ h1 {
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
-  transition: width 180ms ease;
+  transition: width 180ms var(--ease-out);
 }
 
 .update-progress-label {
@@ -88,9 +79,10 @@ h1 {
 
 .update-quit {
   justify-self: start;
-  min-height: 40px;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
   border: 1px solid var(--control-line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 16px;
   background: var(--control);
   color: var(--ink);

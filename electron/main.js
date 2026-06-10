@@ -10,6 +10,7 @@ const {
 } = require('./native-audio');
 const { runUpdateGate } = require('./update-gate');
 const log = require('./logger');
+const { WINDOW_BACKGROUND } = require('./shell-theme');
 const {
   createScreenProfileId,
   normalizeDesktopAudioCapture,
@@ -174,7 +175,8 @@ function configureDesktopCaptureIpc() {
       throw new Error('Desktop audio is only available for the configured Voice Room URL.');
     }
 
-    return startSafeSystemAudioCapture(event.sender, options);
+    const session = startSafeSystemAudioCapture(event.sender, options);
+    return { sessionId: session.sessionId };
   });
 
   ipcMain.handle('desktop-audio:open-settings', (event) => {
@@ -375,7 +377,9 @@ function openMacScreenCaptureSettings(options = {}) {
   if (!options.force && now - lastScreenCaptureSettingsOpenAt < 5000) return;
 
   lastScreenCaptureSettingsOpenAt = now;
-  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch(() => {});
+  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch((error) => {
+    log.warn('Failed to open macOS Screen Recording settings:', error);
+  });
 }
 
 function takePendingDesktopCaptureSource(frame) {
@@ -388,6 +392,7 @@ function takePendingDesktopCaptureSource(frame) {
       clearPendingDesktopCaptureSource(pending.source.id);
       return pending;
     }
+    return null;
   }
 
   if (!latestPendingDesktopCaptureSource || latestPendingDesktopCaptureSource.expiresAt < Date.now()) {
@@ -415,7 +420,7 @@ function clearPendingDesktopCaptureSource(sourceId) {
 function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
   const sessionId = String(nextDesktopCapturePickerSessionId++);
   const pickerWindow = new BrowserWindow({
-    backgroundColor: '#10110f',
+    backgroundColor: WINDOW_BACKGROUND,
     height: 760,
     minHeight: 640,
     minWidth: 760,
@@ -625,7 +630,7 @@ function createWindow() {
   }
 
   const mainWindow = new BrowserWindow({
-    backgroundColor: '#10110f',
+    backgroundColor: WINDOW_BACKGROUND,
     height: 820,
     minHeight: 620,
     minWidth: 420,
@@ -647,14 +652,18 @@ function createWindow() {
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: 'allow' };
-    shell.openExternal(url).catch(() => {});
+    shell.openExternal(url).catch((error) => {
+      log.warn('Failed to open external URL:', url, error);
+    });
     return { action: 'deny' };
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (isTrustedUrl(url)) return;
     event.preventDefault();
-    shell.openExternal(url).catch(() => {});
+    shell.openExternal(url).catch((error) => {
+      log.warn('Failed to open external URL:', url, error);
+    });
   });
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
@@ -664,7 +673,9 @@ function createWindow() {
   if (process.platform === 'darwin') {
     mainWindow.webContents.on('did-finish-load', () => {
       if (isRecoveryUrl(mainWindow.webContents.getURL())) return;
-      mainWindow.webContents.insertCSS(DESKTOP_DRAG_REGION_CSS).catch(() => {});
+      mainWindow.webContents.insertCSS(DESKTOP_DRAG_REGION_CSS).catch((error) => {
+        log.warn('Failed to inject desktop drag region CSS:', error);
+      });
     });
   }
 
@@ -673,7 +684,7 @@ function createWindow() {
 
 function createPickerPreviewWindow() {
   const previewWindow = new BrowserWindow({
-    backgroundColor: '#10110f',
+    backgroundColor: WINDOW_BACKGROUND,
     height: 760,
     minHeight: 640,
     minWidth: 760,

@@ -5,6 +5,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; font-src 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Voice Room Stream Picker Preview</title>
+    <link rel="stylesheet" href="./shell-tokens.css">
     <link rel="stylesheet" href="./screen-picker-preview.css">
   </head>
   <body>
@@ -23,24 +24,26 @@
           </button>
         </header>
 
-        <nav class="screen-source-tabs" aria-label="Тип источника">
-          <button class="screen-source-tab" id="screenSourceScreensTab" type="button" aria-pressed="true">Экраны</button>
-          <button class="screen-source-tab" id="screenSourceWindowsTab" type="button" aria-pressed="false">Окна</button>
+        <nav class="screen-source-tabs" aria-label="Тип источника" role="tablist">
+          <button class="screen-source-tab" id="screenSourceScreensTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="true">Экраны</button>
+          <button class="screen-source-tab" id="screenSourceWindowsTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="false">Окна</button>
         </nav>
 
-        <div class="screen-source-options" id="screenSourceOptions" aria-label="Источники"></div>
+        <div id="screenSourceTabpanel" role="tabpanel" aria-labelledby="screenSourceScreensTab">
+          <div class="screen-source-options" id="screenSourceOptions" role="radiogroup" aria-label="Источники"></div>
+        </div>
 
         <footer class="screen-source-controls">
-          <div class="screen-profile-group">
-            <span class="screen-profile-group-title">Качество</span>
+          <div class="screen-profile-group" role="group" aria-labelledby="screenQualityGroupTitle">
+            <span class="screen-profile-group-title" id="screenQualityGroupTitle">Качество</span>
             <div class="screen-profile-segments" id="screenQualityOptions">
               <button type="button" data-quality-id="low">540p</button>
               <button type="button" data-quality-id="balanced" aria-pressed="true">720p</button>
               <button type="button" data-quality-id="high">1080p</button>
             </div>
           </div>
-          <div class="screen-profile-group">
-            <span class="screen-profile-group-title">FPS</span>
+          <div class="screen-profile-group" role="group" aria-labelledby="screenFpsGroupTitle">
+            <span class="screen-profile-group-title" id="screenFpsGroupTitle">FPS</span>
             <div class="screen-profile-segments screen-profile-segments-compact" id="screenFpsOptions">
               <button type="button" data-fps-id="15">15</button>
               <button type="button" data-fps-id="30" aria-pressed="true">30</button>

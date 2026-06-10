@@ -62,6 +62,24 @@ const removeDataListener = window.voiceRoomDesktopAudio.onData(({ sessionId, chu
 
 The web app is still responsible for converting these PCM chunks into a `MediaStreamTrack` (for example via `AudioWorklet` + `MediaStreamAudioDestinationNode`) and publishing that track as LiveKit screen audio. If the helper is unavailable, the shell can fall back to Chromium loopback when `allowEchoFallback` is enabled.
 
+## Screen share limits
+
+The desktop shell supports one active screen share flow at a time from this client:
+
+- one pending capture source staged for the next `getDisplayMedia` call
+- one active native safe-system audio session
+
+Starting a new share replaces the previous one. Watching other participants' streams is not limited by the desktop shell.
+
+## Auto-update
+
+Packaged builds check GitHub Releases on startup before opening Voice Room.
+
+- if an update is available, the app downloads and installs it before launch
+- if the update server is unreachable, the app stays on the launch screen and does not open Voice Room
+
+Development builds started with `npm run electron` skip the update gate.
+
 ## Setup
 
 Create a local `.env`:
@@ -78,6 +96,7 @@ npm run build
 npm run build:mac
 npm run build:win
 npm run check
+npm test
 ```
 
 Build artifacts are written to `dist/`.

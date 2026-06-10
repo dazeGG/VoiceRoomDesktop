@@ -6,6 +6,11 @@ const outputDir = (process.env.VOICE_ROOM_DIST_DIR || 'dist').trim();
 module.exports = {
   appId: 'ru.dazinho.voiceroom',
   productName: 'Voice Room',
+  publish: {
+    provider: 'github',
+    owner: 'dazeGG',
+    repo: 'VoiceRoomDesktop'
+  },
   artifactName: buildHash
     ? `\${productName}-\${version}-${buildHash}-\${os}-\${arch}.\${ext}`
     : '${productName}-${version}-${os}-${arch}.${ext}',
@@ -16,6 +21,7 @@ module.exports = {
     'native/bin/**/*'
   ],
   files: [
+    'electron/desktop-capture-policy.js',
     'electron/main.js',
     'electron/native-audio.js',
     'electron/preload.js',
@@ -24,6 +30,12 @@ module.exports = {
     'electron/screen-picker-preview.html',
     'electron/screen-picker-preview.css',
     'electron/screen-picker.js',
+    'electron/update-gate-policy.js',
+    'electron/update-gate.js',
+    'electron/update-preload.js',
+    'electron/update-splash.css',
+    'electron/update-splash.html',
+    'electron/update-splash.js',
     'native/bin/**/*',
     'package.json'
   ],
@@ -36,6 +48,10 @@ module.exports = {
       {
         target: 'dmg',
         arch: ['arm64', 'x64']
+      },
+      {
+        target: 'zip',
+        arch: ['arm64', 'x64']
       }
     ],
     extendInfo: {
@@ -47,6 +63,7 @@ module.exports = {
   },
   win: {
     icon: 'assets/logo/icon.ico',
+    legalTrademarks: 'Voice Room',
     target: [
       {
         target: 'portable',

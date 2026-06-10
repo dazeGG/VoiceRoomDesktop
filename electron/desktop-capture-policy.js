@@ -1,0 +1,94 @@
+'use strict';
+
+const DESKTOP_AUDIO_MODES = new Set([
+  'none',
+  'loopback',
+  'safe-system',
+  'application'
+]);
+const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high']);
+const SCREEN_FPS_IDS = new Set(['15', '30']);
+const DEFAULT_SCREEN_QUALITY_ID = 'balanced';
+const DEFAULT_SCREEN_FPS_ID = '30';
+
+function modeToCapabilityKey(mode) {
+  if (mode === 'safe-system') return 'safeSystem';
+  return mode;
+}
+
+function getSourceType(sourceId) {
+  return String(sourceId || '').startsWith('screen:') ? 'screen' : 'window';
+}
+
+function normalizeDesktopAudioCapture(source, audioOptions, nativeCapabilities) {
+  const options = typeof audioOptions === 'object' && audioOptions !== null
+    ? audioOptions
+    : { mode: audioOptions };
+  const enabled = options.enabled !== false && options.mode !== 'none';
+  const sourceType = getSourceType(source?.id);
+
+  if (!enabled) {
+    return {
+      mode: 'none',
+      requestedMode: 'none',
+      sourceType,
+      warning: ''
+    };
+  }
+
+  const requestedMode = DESKTOP_AUDIO_MODES.has(options.mode) ? options.mode : 'safe-system';
+  const safeModeRequested = requestedMode === 'safe-system' || requestedMode === 'application';
+  if (safeModeRequested && nativeCapabilities.modes[modeToCapabilityKey(requestedMode)]) {
+    return {
+      mode: requestedMode,
+      requestedMode,
+      sourceType,
+      warning: ''
+    };
+  }
+
+  if (safeModeRequested && options.allowEchoFallback === false) {
+    return {
+      mode: 'none',
+      requestedMode,
+      sourceType,
+      warning: 'safe-loopback-unavailable'
+    };
+  }
+
+  return {
+    mode: 'loopback',
+    requestedMode,
+    sourceType,
+    warning: safeModeRequested ? 'using-echo-prone-loopback' : ''
+  };
+}
+
+function createScreenProfileId(qualityId, fpsId) {
+  return `${qualityId}-${fpsId}`;
+}
+
+function normalizeScreenQualityId(qualityId) {
+  return SCREEN_QUALITY_IDS.has(qualityId) ? qualityId : DEFAULT_SCREEN_QUALITY_ID;
+}
+
+function normalizeScreenFpsId(fpsId) {
+  return SCREEN_FPS_IDS.has(fpsId) ? fpsId : DEFAULT_SCREEN_FPS_ID;
+}
+
+function normalizeDesktopCapturePickerSelection(selection) {
+  return {
+    fpsId: normalizeScreenFpsId(selection.fpsId),
+    qualityId: normalizeScreenQualityId(selection.qualityId),
+    sourceId: String(selection.sourceId || ''),
+    streamAudioEnabled: selection.streamAudioEnabled !== false
+  };
+}
+
+module.exports = {
+  createScreenProfileId,
+  normalizeDesktopAudioCapture,
+  normalizeDesktopCapturePickerSelection,
+  normalizeScreenFpsId,
+  normalizeScreenQualityId
+};

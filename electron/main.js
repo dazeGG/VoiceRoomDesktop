@@ -8,6 +8,14 @@ const {
   startSafeSystemAudioCapture,
   stopSafeSystemAudioCapture
 } = require('./native-audio');
+const { runUpdateGate } = require('./update-gate');
+const {
+  createScreenProfileId,
+  normalizeDesktopAudioCapture,
+  normalizeDesktopCapturePickerSelection,
+  normalizeScreenFpsId,
+  normalizeScreenQualityId
+} = require('./desktop-capture-policy');
 
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
@@ -22,16 +30,6 @@ let latestPendingDesktopCaptureSource = null;
 let lastScreenCaptureSettingsOpenAt = 0;
 let nextDesktopCapturePickerSessionId = 1;
 
-const DESKTOP_AUDIO_MODES = new Set([
-  'none',
-  'loopback',
-  'safe-system',
-  'application'
-]);
-const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high']);
-const SCREEN_FPS_IDS = new Set(['15', '30']);
-const DEFAULT_SCREEN_QUALITY_ID = 'balanced';
-const DEFAULT_SCREEN_FPS_ID = '30';
 const DESKTOP_DRAG_REGION_CSS = `
   body::before {
     -webkit-app-region: drag;
@@ -232,75 +230,6 @@ function getDesktopAudioCapabilities() {
   };
 }
 
-function normalizeDesktopAudioCapture(source, audioOptions) {
-  const options = typeof audioOptions === 'object' && audioOptions !== null
-    ? audioOptions
-    : { mode: audioOptions };
-  const enabled = options.enabled !== false && options.mode !== 'none';
-  if (!enabled) {
-    return {
-      mode: 'none',
-      requestedMode: 'none',
-      sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
-      warning: ''
-    };
-  }
-
-  const requestedMode = DESKTOP_AUDIO_MODES.has(options.mode) ? options.mode : 'safe-system';
-  const safeModeRequested = requestedMode === 'safe-system' || requestedMode === 'application';
-  const nativeCapabilities = getNativeAudioCapabilities();
-  if (safeModeRequested && nativeCapabilities.modes[modeToCapabilityKey(requestedMode)]) {
-    return {
-      mode: requestedMode,
-      requestedMode,
-      sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
-      warning: ''
-    };
-  }
-
-  if (safeModeRequested && options.allowEchoFallback === false) {
-    return {
-      mode: 'none',
-      requestedMode,
-      sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
-      warning: 'safe-loopback-unavailable'
-    };
-  }
-
-  return {
-    mode: 'loopback',
-    requestedMode,
-    sourceType: source.id.startsWith('screen:') ? 'screen' : 'window',
-    warning: safeModeRequested ? 'using-echo-prone-loopback' : ''
-  };
-}
-
-function modeToCapabilityKey(mode) {
-  if (mode === 'safe-system') return 'safeSystem';
-  return mode;
-}
-
-function createScreenProfileId(qualityId, fpsId) {
-  return `${qualityId}-${fpsId}`;
-}
-
-function normalizeScreenQualityId(qualityId) {
-  return SCREEN_QUALITY_IDS.has(qualityId) ? qualityId : DEFAULT_SCREEN_QUALITY_ID;
-}
-
-function normalizeScreenFpsId(fpsId) {
-  return SCREEN_FPS_IDS.has(fpsId) ? fpsId : DEFAULT_SCREEN_FPS_ID;
-}
-
-function normalizeDesktopCapturePickerSelection(selection) {
-  return {
-    fpsId: normalizeScreenFpsId(selection.fpsId),
-    qualityId: normalizeScreenQualityId(selection.qualityId),
-    sourceId: String(selection.sourceId || ''),
-    streamAudioEnabled: selection.streamAudioEnabled !== false
-  };
-}
-
 function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopback') {
   const previous = frameKey ? pendingDesktopCaptureSources.get(frameKey) : null;
   if (previous?.timer) clearTimeout(previous.timer);
@@ -313,7 +242,7 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
   }, DESKTOP_CAPTURE_PENDING_TTL_MS);
   timer.unref?.();
 
-  const audioCapture = normalizeDesktopAudioCapture(source, audioOptions);
+  const audioCapture = normalizeDesktopAudioCapture(source, audioOptions, getNativeAudioCapabilities());
   const pendingSource = {
     audioCapture,
     source,
@@ -743,15 +672,29 @@ if (!gotLock) {
     window.focus();
   });
 
-  app.whenReady().then(() => {
+  async function launchApplication() {
     configurePermissions();
     configureDesktopCaptureIpc();
     configureScreenPickerIpc();
     configureWindowIpc();
-    createWindow();
+
+    const gate = await runUpdateGate({ previewEnabled: PICKER_PREVIEW_ENABLED });
+    if (gate.ok) createWindow();
+  }
+
+  app.whenReady().then(() => {
+    launchApplication().catch((error) => {
+      console.error('Application launch failed:', error);
+      app.quit();
+    });
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (BrowserWindow.getAllWindows().length === 0) {
+        launchApplication().catch((error) => {
+          console.error('Application relaunch failed:', error);
+          app.quit();
+        });
+      }
     });
   });
 }

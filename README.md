@@ -80,6 +80,29 @@ Packaged builds check GitHub Releases on startup before opening Voice Room.
 
 Development builds started with `npm run electron` skip the update gate.
 
+## Code signing policy
+
+Free code signing for Windows release artifacts is provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+| Role | Members |
+|------|---------|
+| Authors / Committers | [@dazeGG](https://github.com/dazeGG) |
+| Reviewers | [@dazeGG](https://github.com/dazeGG) |
+| Approvers | [@dazeGG](https://github.com/dazeGG) |
+
+See [docs/code-signing.md](docs/code-signing.md) for the release signing flow and artifact scope.
+
+## Privacy
+
+This desktop shell does not collect or send telemetry on its own.
+
+It only makes network requests to:
+
+- GitHub Releases, to check for and download application updates
+- the configured Voice Room URL (`https://voiceroom.ru` in production builds)
+
+The hosted Voice Room web application has its own privacy policy.
+
 ## Setup
 
 Create a local `.env`:

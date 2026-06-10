@@ -69,7 +69,6 @@ Settings -> Secrets and variables -> Actions -> Variables -> VOICE_ROOM_URL
 
 ## Signing
 
-The current workflow builds unsigned artifacts. Future production releases should add:
+Windows portable `.exe` files are signed through SignPath after the unsigned CI build completes. See [code-signing.md](code-signing.md).
 
-- Apple Developer ID signing and notarization for macOS.
-- Authenticode signing for Windows.
+macOS artifacts are currently unsigned. Future production releases may add Apple Developer ID signing and notarization.

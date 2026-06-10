@@ -13,7 +13,19 @@ describe('shouldRunUpdateGateState', () => {
     assert.equal(shouldRunUpdateGateState({ isPackaged: false, previewEnabled: false }), false);
   });
 
-  it('runs the gate for packaged builds', () => {
-    assert.equal(shouldRunUpdateGateState({ isPackaged: true, previewEnabled: false }), true);
+  it('skips the gate for packaged dev builds', () => {
+    assert.equal(shouldRunUpdateGateState({
+      buildProfile: { channel: 'dev', buildHash: 'abc12345' },
+      isPackaged: true,
+      previewEnabled: false
+    }), false);
+  });
+
+  it('runs the gate for packaged release builds', () => {
+    assert.equal(shouldRunUpdateGateState({
+      buildProfile: { channel: 'release' },
+      isPackaged: true,
+      previewEnabled: false
+    }), true);
   });
 });

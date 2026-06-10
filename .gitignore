@@ -6,6 +6,7 @@ node_modules/
 .env.*
 !.env.example
 electron/runtime-config.json
+electron/build-profile.json
 
 # Build output
 dist/

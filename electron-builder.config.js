@@ -21,6 +21,7 @@ module.exports = {
     'native/bin/**/*'
   ],
   files: [
+    'electron/build-profile.json',
     'electron/desktop-capture-policy.js',
     'electron/logger.js',
     'electron/main.js',

@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -38,6 +39,12 @@ function readGitHash() {
 }
 
 const buildHash = dev ? readGitHash() : '';
+const buildProfilePath = path.join(rootDir, 'electron', 'build-profile.json');
+
+fs.writeFileSync(
+  buildProfilePath,
+  `${JSON.stringify(dev ? { buildHash, channel: 'dev' } : { channel: 'release' }, null, 2)}\n`
+);
 
 run(process.execPath, [path.join(rootDir, 'scripts', 'create-electron-config.js')]);
 run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), ...targets]);

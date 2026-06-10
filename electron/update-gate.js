@@ -13,6 +13,7 @@ let updateGateConfigured = false;
 
 function shouldRunUpdateGate(options = {}) {
   return shouldRunUpdateGateState({
+    appPath: app.getAppPath(),
     isPackaged: app.isPackaged,
     previewEnabled: options.previewEnabled
   });

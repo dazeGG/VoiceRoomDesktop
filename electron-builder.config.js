@@ -24,6 +24,7 @@ module.exports = {
     'electron/build-profile.json',
     'electron/desktop-capture-policy.js',
     'electron/logger.js',
+    'electron/media-device-policy.js',
     'electron/main.js',
     'electron/native-audio.js',
     'electron/shell-theme.js',

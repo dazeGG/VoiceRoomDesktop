@@ -18,6 +18,7 @@ const {
   normalizeScreenFpsId,
   normalizeScreenQualityId
 } = require('./desktop-capture-policy');
+const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
@@ -696,6 +697,20 @@ function loadMainApplication(window) {
   });
 }
 
+function installMediaDeviceFilter(webContents) {
+  const script = getMediaDeviceFilterInjectScript();
+
+  const inject = () => {
+    if (webContents.isDestroyed()) return;
+    webContents.executeJavaScript(script, true).catch((error) => {
+      log.warn('Failed to install media device filter:', error);
+    });
+  };
+
+  webContents.on('dom-ready', inject);
+  webContents.on('did-navigate-in-page', inject);
+}
+
 function configurePermissions() {
   const defaultSession = session.defaultSession;
 
@@ -800,6 +815,8 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
+
+  installMediaDeviceFilter(mainWindow.webContents);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: 'allow' };

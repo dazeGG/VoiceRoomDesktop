@@ -38,12 +38,14 @@ function readGitHash() {
   return status ? `${hash}-dirty` : hash;
 }
 
-const buildHash = dev ? readGitHash() : '';
+const buildHash = readGitHash();
 const buildProfilePath = path.join(rootDir, 'electron', 'build-profile.json');
 
+// The hash goes into build-profile.json for every channel so the in-app build
+// label can show it on stable builds too.
 fs.writeFileSync(
   buildProfilePath,
-  `${JSON.stringify(dev ? { buildHash, channel: 'dev' } : { channel: 'release' }, null, 2)}\n`
+  `${JSON.stringify({ buildHash, channel: dev ? 'dev' : 'release' }, null, 2)}\n`
 );
 
 run(process.execPath, [path.join(rootDir, 'scripts', 'create-electron-config.js')]);
@@ -51,7 +53,9 @@ run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), .
 
 const env = {
   ...process.env,
-  VOICE_ROOM_BUILD_HASH: buildHash,
+  // Stable artifacts keep clean version-only filenames, so only dev passes the hash
+  // to electron-builder. The hash still reaches the app via build-profile.json above.
+  VOICE_ROOM_BUILD_HASH: dev ? buildHash : '',
   VOICE_ROOM_DEV_BUILD: dev ? '1' : '',
   VOICE_ROOM_DIST_DIR: dev ? path.join('dist', 'dev', buildHash) : ''
 };

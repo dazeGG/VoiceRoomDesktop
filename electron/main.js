@@ -9,6 +9,7 @@ const {
   stopSafeSystemAudioCapture
 } = require('./native-audio');
 const { runUpdateGate } = require('./update-gate');
+const { readBuildProfile } = require('./update-gate-policy');
 const log = require('./logger');
 const { WINDOW_BACKGROUND } = require('./shell-theme');
 const {
@@ -739,6 +740,39 @@ function installMediaDeviceFilter(webContents) {
   webContents.on('did-navigate-in-page', inject);
 }
 
+// Bakes a small, unobtrusive "build: <version> · <hash>" label into the bottom-left
+// corner of the remote app. The hash comes from build-profile.json (written at build
+// time), so nothing is computed at runtime. The label is fixed-position, faint and
+// click-through so it never gets in the way of the underlying UI.
+function installBuildLabel(webContents) {
+  const profile = readBuildProfile(app.getAppPath());
+  const hash = profile?.buildHash || '';
+  const text = hash ? `build: ${app.getVersion()} · ${hash}` : `build: ${app.getVersion()}`;
+  const label = JSON.stringify(text);
+  const script = `(function(){
+    var id='voice-room-build-label';
+    var existing=document.getElementById(id);
+    if(existing){existing.textContent=${label};return;}
+    var el=document.createElement('div');
+    el.id=id;
+    el.textContent=${label};
+    el.style.cssText='position:fixed;left:8px;bottom:6px;z-index:2147483647;'+
+      'font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;'+
+      'color:currentColor;opacity:0.35;pointer-events:none;user-select:none;white-space:nowrap;';
+    (document.body||document.documentElement).appendChild(el);
+  })();`;
+
+  const inject = () => {
+    if (webContents.isDestroyed()) return;
+    webContents.executeJavaScript(script, true).catch((error) => {
+      log.warn('Failed to inject build label:', error);
+    });
+  };
+
+  webContents.on('dom-ready', inject);
+  webContents.on('did-navigate-in-page', inject);
+}
+
 function configurePermissions() {
   const defaultSession = session.defaultSession;
 
@@ -845,6 +879,7 @@ function createWindow() {
   });
 
   installMediaDeviceFilter(mainWindow.webContents);
+  installBuildLabel(mainWindow.webContents);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: 'allow' };

@@ -5,9 +5,17 @@ const outputDir = (process.env.VOICE_ROOM_DIST_DIR || 'dist').trim();
 
 // Base artifact name shared by every target. Both Windows targets emit a .exe,
 // so each one appends a distinct suffix below to avoid clobbering the other.
+//
+// The product slug is hard-coded as "Voice-Room" instead of ${productName}
+// on purpose: productName is "Voice Room" (with a space), and a space in the
+// filename breaks auto-update. electron-builder rewrites the space to a hyphen
+// in latest.yml, while GitHub rewrites it to a dot in the uploaded asset name —
+// so the URL in latest.yml (Voice-Room-…) never matches the asset (Voice.Room-…)
+// and electron-updater 404s on download. A space-free slug keeps all three
+// (on-disk file, GitHub asset, latest.yml url) identical.
 const artifactBase = buildHash
-  ? `\${productName}-\${version}-${buildHash}-\${os}-\${arch}`
-  : '${productName}-${version}-${os}-${arch}';
+  ? `Voice-Room-\${version}-${buildHash}-\${os}-\${arch}`
+  : 'Voice-Room-${version}-${os}-${arch}';
 
 module.exports = {
   appId: 'ru.dazinho.voiceroom',

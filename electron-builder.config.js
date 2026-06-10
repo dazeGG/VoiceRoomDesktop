@@ -3,6 +3,12 @@
 const buildHash = (process.env.VOICE_ROOM_BUILD_HASH || '').trim();
 const outputDir = (process.env.VOICE_ROOM_DIST_DIR || 'dist').trim();
 
+// Base artifact name shared by every target. Both Windows targets emit a .exe,
+// so each one appends a distinct suffix below to avoid clobbering the other.
+const artifactBase = buildHash
+  ? `\${productName}-\${version}-${buildHash}-\${os}-\${arch}`
+  : '${productName}-${version}-${os}-${arch}';
+
 module.exports = {
   appId: 'ru.dazinho.voiceroom',
   productName: 'Voice Room',
@@ -11,9 +17,7 @@ module.exports = {
     owner: 'dazeGG',
     repo: 'VoiceRoomDesktop'
   },
-  artifactName: buildHash
-    ? `\${productName}-\${version}-${buildHash}-\${os}-\${arch}.\${ext}`
-    : '${productName}-${version}-${os}-${arch}.${ext}',
+  artifactName: `${artifactBase}.\${ext}`,
   directories: {
     output: outputDir
   },
@@ -73,10 +77,25 @@ module.exports = {
     icon: 'assets/logo/icon.ico',
     legalTrademarks: 'Voice Room',
     target: [
+      // nsis = installed app that electron-updater can auto-update (this target
+      // emits latest.yml + .blockmap, which the update gate needs). portable =
+      // no-install standalone .exe kept as a convenience download.
+      // Caveat: only the nsis install auto-updates in place; a portable copy that
+      // hits the update gate will download and run the nsis installer instead.
+      {
+        target: 'nsis',
+        arch: ['x64']
+      },
       {
         target: 'portable',
         arch: ['x64']
       }
     ]
+  },
+  nsis: {
+    artifactName: `${artifactBase}-setup.\${ext}`
+  },
+  portable: {
+    artifactName: `${artifactBase}-portable.\${ext}`
   }
 };

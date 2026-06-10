@@ -4,18 +4,45 @@
   --paper-deep: oklch(10.5% 0.012 92);
   --panel: oklch(20% 0.017 92);
   --panel-strong: oklch(25% 0.019 92);
+  --panel-gradient-top: oklch(22% 0.018 92 / 0.96);
+  --panel-gradient-bottom: oklch(15% 0.014 92 / 0.98);
   --control: oklch(23% 0.016 92);
   --control-hover: oklch(30% 0.018 92);
   --control-active: oklch(84% 0.012 92);
   --control-active-hover: oklch(89% 0.01 92);
   --control-line: oklch(41% 0.018 92);
+  --control-muted: oklch(28% 0.018 92);
+  --control-surface: oklch(14% 0.014 92 / 0.9);
+  --control-pressed: oklch(17% 0.014 92 / 0.9);
   --ink: oklch(94% 0.012 92);
+  --ink-strong: oklch(96% 0.008 92);
+  --ink-inverse: oklch(9% 0.012 92);
   --muted: oklch(69% 0.028 88);
   --line: oklch(35% 0.025 92);
+  --border: oklch(34% 0.02 92);
+  --border-soft: oklch(36% 0.02 92);
+  --surface: oklch(15% 0.014 92);
+  --surface-hover: oklch(19% 0.016 92);
+  --surface-selected-top: oklch(21% 0.017 92);
+  --surface-selected-bottom: oklch(16% 0.015 92);
+  --preview-backdrop: oklch(7% 0.01 92);
   --green: oklch(72% 0.16 164);
   --blue: oklch(68% 0.14 246);
   --coral: oklch(67% 0.18 31);
   --amber: oklch(79% 0.14 82);
+  --accent-soft: oklch(84% 0.012 92 / 0.14);
+  --accent-softer: oklch(84% 0.012 92 / 0.16);
+  --accent-faint: oklch(84% 0.012 92 / 0.2);
+  --accent-ghost: oklch(84% 0.012 92 / 0.18);
+  --accent-ghost-soft: oklch(84% 0.012 92 / 0.12);
+  --accent-ghost-faint: oklch(84% 0.012 92 / 0.08);
+  --accent-ghost-min: oklch(84% 0.012 92 / 0.06);
+  --switch-track: oklch(19% 0.014 92);
+  --switch-thumb: oklch(78% 0.012 92);
+  --disabled-surface: oklch(12% 0.012 92 / 0.8);
+  --disabled-border: oklch(30% 0.018 92 / 0.86);
+  --disabled-ink: oklch(60% 0.018 92);
+  --focus-ring: oklch(78% 0.12 164);
   --shadow: 0 24px 70px oklch(6% 0.02 92 / 0.46);
   --radius-sm: 8px;
   --radius-md: 14px;
@@ -24,6 +51,7 @@
   --space-sm: 12px;
   --space-md: 16px;
   --space-lg: 24px;
+  --touch-target: 44px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
 }
@@ -58,6 +86,12 @@ button:disabled {
   opacity: 0.56;
 }
 
+button:focus-visible,
+.screen-audio-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .screen-picker-shell {
   display: grid;
   min-height: 100vh;
@@ -75,7 +109,7 @@ button:disabled {
   border-radius: 0;
   padding: var(--space-lg);
   background:
-    linear-gradient(180deg, oklch(22% 0.018 92 / 0.96), oklch(15% 0.014 92 / 0.98)),
+    linear-gradient(180deg, var(--panel-gradient-top), var(--panel-gradient-bottom)),
     var(--panel);
   box-shadow: none;
 }
@@ -105,8 +139,8 @@ h1 {
 
 .screen-source-close {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: var(--touch-target);
+  height: var(--touch-target);
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--control-line);
@@ -137,15 +171,15 @@ h1 {
   grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column;
   gap: 6px;
-  border: 1px solid oklch(28% 0.018 92);
+  border: 1px solid var(--control-muted);
   border-radius: var(--radius-sm);
   padding: 4px;
-  background: oklch(14% 0.014 92 / 0.9);
+  background: var(--control-surface);
 }
 
 .screen-source-tab,
 .screen-profile-segments button {
-  min-height: 38px;
+  min-height: var(--touch-target);
   min-width: 104px;
   border: 1px solid transparent;
   border-radius: calc(var(--radius-sm) - 2px);
@@ -164,9 +198,9 @@ h1 {
 .screen-source-tab[aria-pressed="true"],
 .screen-profile-segments button[aria-pressed="true"] {
   border-color: color-mix(in oklch, var(--control-line), var(--ink) 16%);
-  background: oklch(17% 0.014 92 / 0.9);
+  background: var(--control-pressed);
   color: var(--ink);
-  box-shadow: inset 0 0 0 1px oklch(84% 0.012 92 / 0.14);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
 }
 
 .screen-source-options {
@@ -185,10 +219,10 @@ h1 {
   min-width: 0;
   grid-template-rows: auto auto;
   gap: var(--space-xs);
-  border: 1px solid oklch(34% 0.02 92);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: var(--space-xs);
-  background: oklch(15% 0.014 92);
+  background: var(--surface);
   color: inherit;
   text-align: left;
   transition: border-color 140ms var(--ease-out), background 140ms var(--ease-out);
@@ -196,15 +230,15 @@ h1 {
 
 .screen-source-option:hover {
   border-color: color-mix(in oklch, var(--control-line), var(--ink) 28%);
-  background: oklch(19% 0.016 92);
+  background: var(--surface-hover);
 }
 
 .screen-source-option[aria-pressed="true"] {
   border-color: var(--control-active);
   background:
-    linear-gradient(180deg, oklch(21% 0.017 92), oklch(16% 0.015 92)),
+    linear-gradient(180deg, var(--surface-selected-top), var(--surface-selected-bottom)),
     var(--panel);
-  box-shadow: inset 0 0 0 1px oklch(84% 0.012 92 / 0.16);
+  box-shadow: inset 0 0 0 1px var(--accent-softer);
 }
 
 .screen-source-preview {
@@ -213,7 +247,7 @@ h1 {
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: calc(var(--radius-sm) - 2px);
-  background: oklch(7% 0.01 92);
+  background: var(--preview-backdrop);
 }
 
 .screen-source-preview img {
@@ -226,7 +260,7 @@ h1 {
 .screen-source-label {
   min-width: 0;
   overflow: hidden;
-  color: oklch(96% 0.008 92);
+  color: var(--ink-strong);
   font-size: 0.86rem;
   font-weight: 800;
   text-overflow: ellipsis;
@@ -234,7 +268,7 @@ h1 {
 }
 
 .preview-desktop {
-  background: linear-gradient(135deg, oklch(30% 0.035 92), oklch(12% 0.014 92) 66%);
+  background: linear-gradient(135deg, oklch(30% 0.035 92), var(--paper-deep) 66%);
 }
 
 .preview-topbar {
@@ -242,7 +276,7 @@ h1 {
   inset: 14px 14px auto;
   height: 18px;
   border-radius: 5px;
-  background: oklch(84% 0.012 92 / 0.2);
+  background: var(--accent-faint);
 }
 
 .preview-layout {
@@ -251,7 +285,7 @@ h1 {
   border-radius: 7px;
   background:
     linear-gradient(90deg, oklch(68% 0.14 246 / 0.58) 0 36%, transparent 36%),
-    linear-gradient(180deg, oklch(84% 0.012 92 / 0.18), oklch(84% 0.012 92 / 0.06));
+    linear-gradient(180deg, var(--accent-ghost), var(--accent-ghost-min));
 }
 
 .preview-code {
@@ -263,7 +297,7 @@ h1 {
 
 .preview-code span {
   border-radius: 5px;
-  background: oklch(84% 0.012 92 / 0.12);
+  background: var(--accent-ghost-soft);
 }
 
 .preview-code span:first-child {
@@ -292,7 +326,7 @@ h1 {
   height: calc(100% - 38px);
   background:
     radial-gradient(circle at 28% 32%, oklch(72% 0.16 164 / 0.48), transparent 15%),
-    linear-gradient(135deg, oklch(68% 0.14 246 / 0.42), oklch(84% 0.012 92 / 0.08));
+    linear-gradient(135deg, oklch(68% 0.14 246 / 0.42), var(--accent-ghost-faint));
 }
 
 .preview-chat {
@@ -350,14 +384,15 @@ h1 {
 }
 
 .screen-audio-toggle {
+  position: relative;
   display: flex;
-  min-height: 46px;
+  min-height: var(--touch-target);
   align-items: center;
   gap: 10px;
-  border: 1px solid oklch(28% 0.018 92);
+  border: 1px solid var(--control-muted);
   border-radius: var(--radius-sm);
   padding: 0 var(--space-sm);
-  background: oklch(14% 0.014 92 / 0.9);
+  background: var(--control-surface);
   color: var(--ink);
   font-size: 0.88rem;
   font-weight: 850;
@@ -365,8 +400,14 @@ h1 {
 
 .screen-audio-toggle input {
   position: absolute;
-  opacity: 0;
-  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .screen-audio-switch {
@@ -374,9 +415,9 @@ h1 {
   width: 42px;
   height: 24px;
   flex: 0 0 auto;
-  border: 1px solid oklch(36% 0.02 92);
+  border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: oklch(19% 0.014 92);
+  background: var(--switch-track);
   transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out);
 }
 
@@ -388,7 +429,7 @@ h1 {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: oklch(78% 0.012 92);
+  background: var(--switch-thumb);
   transition: transform 140ms var(--ease-out), background 140ms var(--ease-out);
 }
 
@@ -398,17 +439,17 @@ h1 {
 }
 
 .screen-audio-toggle input:checked + .screen-audio-switch::after {
-  background: oklch(9% 0.012 92);
+  background: var(--ink-inverse);
   transform: translateX(18px);
 }
 
 .screen-profile-start {
-  min-height: 46px;
+  min-height: var(--touch-target);
   border: 1px solid color-mix(in oklch, var(--control-active), var(--line) 28%);
   border-radius: var(--radius-sm);
   padding: 0 20px;
   background: var(--control-active);
-  color: oklch(9% 0.012 92);
+  color: var(--ink-inverse);
   font-weight: 900;
 }
 
@@ -418,9 +459,9 @@ h1 {
 }
 
 .screen-profile-start:disabled {
-  border-color: oklch(30% 0.018 92 / 0.86);
-  background: oklch(12% 0.012 92 / 0.8);
-  color: oklch(60% 0.018 92);
+  border-color: var(--disabled-border);
+  background: var(--disabled-surface);
+  color: var(--disabled-ink);
 }
 
 @media (max-width: 860px) {

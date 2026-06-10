@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('voiceRoomWindow', {
   setFullscreen: (fullscreen) => ipcRenderer.invoke('window:set-fullscreen', fullscreen)
 });
 
+contextBridge.exposeInMainWorld('voiceRoomRecovery', {
+  reload: () => ipcRenderer.invoke('window:reload-main')
+});
+
 window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.dataset.electron = 'true';
 });

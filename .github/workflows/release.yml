@@ -21,6 +21,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,8 +33,16 @@ jobs:
         shell: bash
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # A prerelease version (e.g. 1.1.0-dev.2) contains a hyphen. These build
+          # the lightweight dev channel; clean versions build the full stable set.
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -75,7 +84,7 @@ jobs:
         run: npm ci
 
       - name: Build macOS app
-        run: npm run build:mac
+        run: npm run ${{ needs.validate.outputs.prerelease == 'true' && 'build:mac:dev' || 'build:mac' }}
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -115,7 +124,7 @@ jobs:
         run: npm ci
 
       - name: Build Windows app
-        run: npm run build:win
+        run: npm run ${{ needs.validate.outputs.prerelease == 'true' && 'build:win:dev' || 'build:win' }}
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4

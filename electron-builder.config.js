@@ -2,9 +2,13 @@
 
 const buildHash = (process.env.VOICE_ROOM_BUILD_HASH || '').trim();
 const outputDir = (process.env.VOICE_ROOM_DIST_DIR || 'dist').trim();
+// Dev builds (prerelease tags / `--dev`) ship a lightweight artifact set with no
+// auto-update plumbing: just the macOS .dmg installers and a single portable
+// Windows .exe — matching the older releases. Stable builds add the auto-update
+// targets (mac .zip, Windows nsis installer) plus their latest*.yml + .blockmap.
+const isDevBuild = (process.env.VOICE_ROOM_DEV_BUILD || '') === '1';
 
-// Base artifact name shared by every target. Both Windows targets emit a .exe,
-// so each one appends a distinct suffix below to avoid clobbering the other.
+// Base artifact name shared by every target.
 //
 // The product slug is hard-coded as "Voice-Room" instead of ${productName}
 // on purpose: productName is "Voice Room" (with a space), and a space in the
@@ -64,16 +68,23 @@ module.exports = {
     hardenedRuntime: false,
     icon: 'assets/logo/icon.icns',
     identity: null,
-    target: [
-      {
-        target: 'dmg',
-        arch: ['arm64', 'x64']
-      },
-      {
-        target: 'zip',
-        arch: ['arm64', 'x64']
-      }
-    ],
+    target: isDevBuild
+      ? [
+          {
+            target: 'dmg',
+            arch: ['arm64', 'x64']
+          }
+        ]
+      : [
+          {
+            target: 'dmg',
+            arch: ['arm64', 'x64']
+          },
+          {
+            target: 'zip',
+            arch: ['arm64', 'x64']
+          }
+        ],
     extendInfo: {
       NSMicrophoneUsageDescription: 'Voice Room использует микрофон для голосового чата.',
       NSScreenCaptureDescription: 'Voice Room использует запись экрана для демонстрации экрана участникам комнаты.',
@@ -84,26 +95,31 @@ module.exports = {
   win: {
     icon: 'assets/logo/icon.ico',
     legalTrademarks: 'Voice Room',
-    target: [
-      // nsis = installed app that electron-updater can auto-update (this target
-      // emits latest.yml + .blockmap, which the update gate needs). portable =
-      // no-install standalone .exe kept as a convenience download.
-      // Caveat: only the nsis install auto-updates in place; a portable copy that
-      // hits the update gate will download and run the nsis installer instead.
-      {
-        target: 'nsis',
-        arch: ['x64']
-      },
-      {
-        target: 'portable',
-        arch: ['x64']
-      }
-    ]
+    // Dev: single portable .exe (no auto-update; the dev channel skips the update
+    // gate anyway). Stable: nsis installer (emits latest.yml + .blockmap so
+    // electron-updater can auto-update in place) plus the portable .exe as a
+    // no-install convenience download.
+    target: isDevBuild
+      ? [
+          {
+            target: 'portable',
+            arch: ['x64']
+          }
+        ]
+      : [
+          {
+            target: 'nsis',
+            arch: ['x64']
+          },
+          {
+            target: 'portable',
+            arch: ['x64']
+          }
+        ]
   },
+  // Only nsis needs a suffix: in stable builds it coexists with the portable .exe,
+  // so it takes "-setup" while portable keeps the plain base name.
   nsis: {
     artifactName: `${artifactBase}-setup.\${ext}`
-  },
-  portable: {
-    artifactName: `${artifactBase}-portable.\${ext}`
   }
 };

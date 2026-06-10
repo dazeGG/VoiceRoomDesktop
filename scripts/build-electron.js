@@ -52,6 +52,7 @@ run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), .
 const env = {
   ...process.env,
   VOICE_ROOM_BUILD_HASH: buildHash,
+  VOICE_ROOM_DEV_BUILD: dev ? '1' : '',
   VOICE_ROOM_DIST_DIR: dev ? path.join('dist', 'dev', buildHash) : ''
 };
 

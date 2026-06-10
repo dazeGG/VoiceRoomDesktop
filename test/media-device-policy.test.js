@@ -2,24 +2,28 @@
 
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
-const { filterEnumeratedMediaDevices } = require('../electron/media-device-policy');
+const {
+  buildDefaultToConcreteRemaps,
+  filterEnumeratedMediaDevices,
+  remapMediaStreamConstraints
+} = require('../electron/media-device-policy');
+
+const builtInDevices = [
+  { deviceId: 'default', kind: 'audioinput', label: 'Default - MacBook Microphone', groupId: 'g1' },
+  { deviceId: 'abc', kind: 'audioinput', label: 'MacBook Microphone', groupId: 'g1' },
+  { deviceId: 'xyz', kind: 'audioinput', label: 'AirPods', groupId: 'g2' },
+  { deviceId: 'default', kind: 'audiooutput', label: 'Default - MacBook Speakers', groupId: 'g3' },
+  { deviceId: 'def', kind: 'audiooutput', label: 'MacBook Speakers', groupId: 'g3' }
+];
 
 describe('filterEnumeratedMediaDevices', () => {
-  it('removes built-in audio duplicates when a default entry exists', () => {
-    const devices = [
-      { deviceId: 'default', kind: 'audioinput', label: 'Default - MacBook Microphone', groupId: 'g1' },
-      { deviceId: 'abc', kind: 'audioinput', label: 'MacBook Microphone', groupId: 'g1' },
-      { deviceId: 'xyz', kind: 'audioinput', label: 'AirPods', groupId: 'g2' },
-      { deviceId: 'default', kind: 'audiooutput', label: 'Default - MacBook Speakers', groupId: 'g3' },
-      { deviceId: 'def', kind: 'audiooutput', label: 'MacBook Speakers', groupId: 'g3' }
-    ];
-
+  it('removes default pseudo-devices when a concrete duplicate exists', () => {
     assert.deepEqual(
-      filterEnumeratedMediaDevices(devices),
+      filterEnumeratedMediaDevices(builtInDevices),
       [
-        { deviceId: 'default', kind: 'audioinput', label: 'Default - MacBook Microphone', groupId: 'g1' },
+        { deviceId: 'abc', kind: 'audioinput', label: 'MacBook Microphone', groupId: 'g1' },
         { deviceId: 'xyz', kind: 'audioinput', label: 'AirPods', groupId: 'g2' },
-        { deviceId: 'default', kind: 'audiooutput', label: 'Default - MacBook Speakers', groupId: 'g3' }
+        { deviceId: 'def', kind: 'audiooutput', label: 'MacBook Speakers', groupId: 'g3' }
       ]
     );
   });
@@ -30,7 +34,15 @@ describe('filterEnumeratedMediaDevices', () => {
       { deviceId: 'abc', kind: 'audioinput', label: 'USB Mic' }
     ];
 
-    assert.deepEqual(filterEnumeratedMediaDevices(devices), [devices[0]]);
+    assert.deepEqual(filterEnumeratedMediaDevices(devices), [devices[1]]);
+  });
+
+  it('keeps default when no concrete duplicate exists', () => {
+    const devices = [
+      { deviceId: 'default', kind: 'audioinput', label: 'Default - MacBook Microphone', groupId: 'g1' }
+    ];
+
+    assert.deepEqual(filterEnumeratedMediaDevices(devices), devices);
   });
 
   it('keeps all devices when no default entry exists', () => {
@@ -49,6 +61,34 @@ describe('filterEnumeratedMediaDevices', () => {
       { deviceId: 'cam', kind: 'videoinput', label: 'FaceTime HD Camera', groupId: 'g4' }
     ];
 
-    assert.deepEqual(filterEnumeratedMediaDevices(devices), [devices[0], devices[2]]);
+    assert.deepEqual(filterEnumeratedMediaDevices(devices), [devices[1], devices[2]]);
+  });
+});
+
+describe('buildDefaultToConcreteRemaps', () => {
+  it('maps default pseudo-devices to their concrete duplicates', () => {
+    assert.deepEqual(
+      [...buildDefaultToConcreteRemaps(builtInDevices).entries()],
+      [
+        ['audioinput:default', 'abc'],
+        ['audiooutput:default', 'def']
+      ]
+    );
+  });
+});
+
+describe('remapMediaStreamConstraints', () => {
+  it('rewrites exact default device ids to concrete ids', () => {
+    const remaps = buildDefaultToConcreteRemaps(builtInDevices);
+    const remapDeviceId = (deviceId) => remaps.get(`audioinput:${deviceId}`) || deviceId;
+
+    assert.deepEqual(
+      remapMediaStreamConstraints({
+        audio: { deviceId: { exact: 'default' } }
+      }, remapDeviceId),
+      {
+        audio: { deviceId: { exact: 'abc' } }
+      }
+    );
   });
 });

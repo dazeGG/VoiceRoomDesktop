@@ -78,9 +78,49 @@ function isTrustedOrigin(origin) {
   return Boolean(TRUSTED_ORIGIN) && origin === TRUSTED_ORIGIN;
 }
 
-function isPermissionWebContentsTrusted(webContents) {
-  if (!webContents || webContents.isDestroyed?.()) return true;
-  return isTrustedUrl(webContents.getURL());
+function getOriginFromUrl(rawUrl) {
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return '';
+  }
+}
+
+function isTransitionalWebContentsUrl(rawUrl) {
+  if (!rawUrl) return true;
+  const normalized = rawUrl.trim().toLowerCase();
+  return normalized === 'about:blank' || normalized.startsWith('about:');
+}
+
+function resolvePermissionContextOrigin(webContents, details = {}, requestingOrigin = '') {
+  if (isTrustedOrigin(requestingOrigin)) return requestingOrigin;
+
+  const securityOrigin = typeof details.securityOrigin === 'string' ? details.securityOrigin : '';
+  if (isTrustedOrigin(securityOrigin)) return securityOrigin;
+
+  const requestingUrlOrigin = getOriginFromUrl(details.requestingUrl);
+  if (isTrustedOrigin(requestingUrlOrigin)) return requestingUrlOrigin;
+
+  if (!webContents || webContents.isDestroyed?.()) {
+    return '';
+  }
+
+  const currentOrigin = getOriginFromUrl(webContents.getURL());
+  if (isTrustedOrigin(currentOrigin)) return currentOrigin;
+  if (isTransitionalWebContentsUrl(webContents.getURL()) && TRUSTED_ORIGIN) {
+    return TRUSTED_ORIGIN;
+  }
+
+  return '';
+}
+
+function isPermissionContextTrusted(webContents, details = {}, requestingOrigin = '') {
+  return Boolean(resolvePermissionContextOrigin(webContents, details, requestingOrigin));
+}
+
+function isTrustedOrAppLoadingFrame(frame) {
+  if (isTrustedFrame(frame)) return true;
+  return isTransitionalWebContentsUrl(frame?.url) && Boolean(TRUSTED_ORIGIN);
 }
 
 function getMacMicrophoneAccessStatus() {
@@ -248,7 +288,7 @@ function configureDesktopCaptureIpc() {
   });
 
   ipcMain.handle('desktop-audio:ensure-media-access', async (event) => {
-    if (!isTrustedFrame(event.senderFrame)) {
+    if (!isTrustedOrAppLoadingFrame(event.senderFrame)) {
       throw new Error('Desktop audio is only available for the configured Voice Room URL.');
     }
 
@@ -666,8 +706,13 @@ function configurePermissions() {
       return;
     }
 
-    if (!isPermissionWebContentsTrusted(webContents)) {
-      log.warn('Denied permission request from untrusted page:', permission, webContents?.getURL?.());
+    if (!isPermissionContextTrusted(webContents, details)) {
+      log.warn(
+        'Denied permission request from untrusted page:',
+        permission,
+        webContents?.getURL?.(),
+        details.requestingUrl
+      );
       callback(false);
       return;
     }
@@ -688,14 +733,11 @@ function configurePermissions() {
     callback(true);
   });
 
-  defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+  defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details = {}) => {
     if (!ALLOWED_SESSION_PERMISSIONS.has(permission)) {
       return false;
     }
-    if (!isTrustedOrigin(requestingOrigin)) {
-      return false;
-    }
-    return isPermissionWebContentsTrusted(webContents);
+    return isPermissionContextTrusted(webContents, details, requestingOrigin);
   });
 
   defaultSession.setDisplayMediaRequestHandler(

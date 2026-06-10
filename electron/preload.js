@@ -43,6 +43,26 @@ contextBridge.exposeInMainWorld('voiceRoomRecovery', {
   reload: () => ipcRenderer.invoke('window:reload-main')
 });
 
+async function warmUpMediaDeviceAccess() {
+  try {
+    await ipcRenderer.invoke('desktop-audio:ensure-media-access');
+  } catch {
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) return;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+  } catch {
+    // Web app can retry and surface its own permission UI.
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.dataset.electron = 'true';
+  void warmUpMediaDeviceAccess();
 });

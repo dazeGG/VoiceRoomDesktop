@@ -1,0 +1,79 @@
+:root {
+  color-scheme: dark;
+  --paper: oklch(15.5% 0.015 92);
+  --ink: oklch(94% 0.012 92);
+  --muted: oklch(69% 0.028 88);
+  --control: oklch(23% 0.016 92);
+  --control-hover: oklch(30% 0.018 92);
+  --control-line: oklch(41% 0.018 92);
+  --control-active: oklch(84% 0.012 92);
+  --focus-ring: oklch(78% 0.12 164);
+  font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.recovery-shell {
+  display: grid;
+  min-height: 100vh;
+  align-content: center;
+  justify-items: start;
+  gap: 12px;
+  padding: 32px;
+}
+
+.recovery-eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.recovery-message {
+  margin: 0;
+  max-width: 42ch;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.recovery-reload {
+  min-width: 44px;
+  min-height: 44px;
+  margin-top: 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  padding: 0 18px;
+  background: var(--control-active);
+  color: oklch(9% 0.012 92);
+  font-weight: 900;
+}
+
+.recovery-reload:hover {
+  background: oklch(89% 0.01 92);
+}

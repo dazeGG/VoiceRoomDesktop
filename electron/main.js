@@ -531,6 +531,42 @@ function configureWindowIpc() {
 
     return Boolean(BrowserWindow.fromWebContents(event.sender)?.isFullScreen());
   });
+
+  ipcMain.handle('window:reload-main', (event) => {
+    const frameUrl = event.senderFrame?.url || '';
+    if (!frameUrl.includes('renderer-recovery.html')) {
+      throw new Error('Reload is only available from the recovery screen.');
+    }
+
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) return { ok: false };
+
+    return loadMainApplication(window).then(() => ({ ok: true }));
+  });
+}
+
+function isRecoveryUrl(rawUrl) {
+  return String(rawUrl || '').includes('renderer-recovery.html');
+}
+
+function showRendererRecovery(window, details = {}) {
+  if (!window || window.isDestroyed()) return;
+
+  console.error('Renderer process gone:', details);
+  window.loadFile(path.join(__dirname, 'renderer-recovery.html')).catch((error) => {
+    console.error('Failed to open recovery screen:', error);
+  });
+}
+
+function loadMainApplication(window) {
+  if (!APP_URL) {
+    dialog.showErrorBox('Voice Room', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
+    return Promise.resolve();
+  }
+
+  return window.loadURL(APP_URL).catch((error) => {
+    dialog.showErrorBox('Voice Room', `Не удалось открыть ${APP_URL}\n\n${error.message}`);
+  });
 }
 
 function configurePermissions() {
@@ -621,18 +657,17 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    console.error('Renderer process gone:', details);
+    showRendererRecovery(mainWindow, details);
   });
 
   if (process.platform === 'darwin') {
     mainWindow.webContents.on('did-finish-load', () => {
+      if (isRecoveryUrl(mainWindow.webContents.getURL())) return;
       mainWindow.webContents.insertCSS(DESKTOP_DRAG_REGION_CSS).catch(() => {});
     });
   }
 
-  mainWindow.loadURL(APP_URL).catch((error) => {
-    dialog.showErrorBox('Voice Room', `Не удалось открыть ${APP_URL}\n\n${error.message}`);
-  });
+  loadMainApplication(mainWindow);
 }
 
 function createPickerPreviewWindow() {

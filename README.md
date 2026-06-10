@@ -113,8 +113,11 @@ VOICE_ROOM_URL=https://voice.example.com
 
 ## Commands
 
+`npm run preview:picker` opens the picker UI with mock sources only. It does not use the Electron preload bridge, so it is for layout review rather than real screen capture.
+
 ```bash
 npm run electron
+npm run preview:picker
 npm run build
 npm run build:mac
 npm run build:win

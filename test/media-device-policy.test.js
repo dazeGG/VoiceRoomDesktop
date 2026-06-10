@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 const {
   buildDefaultToConcreteRemaps,
   filterEnumeratedMediaDevices,
+  getMediaDeviceFilterInjectScript,
   remapMediaStreamConstraints
 } = require('../electron/media-device-policy');
 
@@ -74,6 +75,17 @@ describe('buildDefaultToConcreteRemaps', () => {
         ['audiooutput:default', 'def']
       ]
     );
+  });
+});
+
+describe('getMediaDeviceFilterInjectScript', () => {
+  it('embeds audio device helpers instead of referencing module scope', () => {
+    const script = getMediaDeviceFilterInjectScript();
+
+    assert.match(script, /const AUDIO_DEVICE_KINDS = new Set\(\["audioinput", "audiooutput"\]\);/);
+    assert.match(script, /function findConcreteDuplicate/);
+    assert.match(script, /return filterEnumeratedMediaDevices\(devices\);/);
+    assert.doesNotMatch(script, /const filter =/);
   });
 });
 

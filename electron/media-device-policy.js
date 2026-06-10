@@ -78,15 +78,26 @@ function remapMediaStreamConstraints(constraints, remapDeviceId) {
   return next;
 }
 
+function getInjectableMediaDeviceRuntime() {
+  return [
+    'const AUDIO_DEVICE_KINDS = new Set(["audioinput", "audiooutput"]);',
+    getDefaultDeviceName.toString(),
+    isConcreteDuplicateOfDefault.toString(),
+    findConcreteDuplicate.toString(),
+    buildDefaultToConcreteRemaps.toString(),
+    filterEnumeratedMediaDevices.toString(),
+    remapAudioConstraint.toString(),
+    remapMediaStreamConstraints.toString()
+  ].join('\n');
+}
+
 function getMediaDeviceFilterInjectScript() {
   return `(() => {
     if (window.__voiceRoomMediaDeviceFilterInstalled) return;
     window.__voiceRoomMediaDeviceFilterInstalled = true;
     if (!navigator.mediaDevices?.enumerateDevices) return;
 
-    const filter = ${filterEnumeratedMediaDevices.toString()};
-    const buildDefaultToConcreteRemaps = ${buildDefaultToConcreteRemaps.toString()};
-    const remapMediaStreamConstraints = ${remapMediaStreamConstraints.toString()};
+    ${getInjectableMediaDeviceRuntime()}
 
     let deviceIdRemaps = new Map();
     const originalEnumerateDevices = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
@@ -107,7 +118,7 @@ function getMediaDeviceFilterInjectScript() {
     navigator.mediaDevices.enumerateDevices = async function voiceRoomEnumerateDevices() {
       const devices = await originalEnumerateDevices();
       deviceIdRemaps = buildDefaultToConcreteRemaps(devices);
-      return filter(devices);
+      return filterEnumeratedMediaDevices(devices);
     };
 
     if (navigator.mediaDevices.getUserMedia) {
@@ -134,6 +145,7 @@ function getMediaDeviceFilterInjectScript() {
 module.exports = {
   buildDefaultToConcreteRemaps,
   filterEnumeratedMediaDevices,
+  getInjectableMediaDeviceRuntime,
   getMediaDeviceFilterInjectScript,
   remapMediaStreamConstraints
 };

@@ -12,6 +12,33 @@ Electron desktop shell for Voice Room. It opens the hosted Voice Room web app fr
 
 CI produces macOS and Windows release artifacts only. Use the browser on unsupported platforms.
 
+## Microphone and speaker devices
+
+The hosted web app lists microphones and speakers through `navigator.mediaDevices`. Until microphone access is granted, Chromium returns placeholder devices with empty `label` and `deviceId`.
+
+Desktop shell behavior:
+
+- grants `media` and `speaker-selection` permissions for the configured Voice Room origin
+- on macOS, triggers the system microphone prompt through `systemPreferences.askForMediaAccess('microphone')`
+- exposes `window.voiceRoomDesktopAudio.ensureMediaAccess()` for the web app to request macOS access before device enumeration
+
+Recommended web app flow:
+
+```js
+if (window.voiceRoomDesktopAudio?.ensureMediaAccess) {
+  await window.voiceRoomDesktopAudio.ensureMediaAccess();
+}
+
+await navigator.mediaDevices.getUserMedia({ audio: true });
+const devices = await navigator.mediaDevices.enumerateDevices();
+```
+
+If macOS microphone access was denied earlier, open system settings with:
+
+```js
+await window.voiceRoomDesktopAudio.openSettings({ target: 'microphone' });
+```
+
 ## Desktop stream audio
 
 The desktop shell exposes one UI-level audio intent for screen sharing: `Звук стрима`.

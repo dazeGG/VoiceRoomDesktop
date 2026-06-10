@@ -1,24 +1,13 @@
 :root {
-  color-scheme: dark;
-  --paper: oklch(15.5% 0.015 92);
   --paper-deep: oklch(10.5% 0.012 92);
   --panel: oklch(20% 0.017 92);
   --panel-strong: oklch(25% 0.019 92);
   --panel-gradient-top: oklch(22% 0.018 92 / 0.96);
   --panel-gradient-bottom: oklch(15% 0.014 92 / 0.98);
-  --control: oklch(23% 0.016 92);
-  --control-hover: oklch(30% 0.018 92);
-  --control-active: oklch(84% 0.012 92);
-  --control-active-hover: oklch(89% 0.01 92);
-  --control-line: oklch(41% 0.018 92);
   --control-muted: oklch(28% 0.018 92);
   --control-surface: oklch(14% 0.014 92 / 0.9);
   --control-pressed: oklch(17% 0.014 92 / 0.9);
-  --ink: oklch(94% 0.012 92);
   --ink-strong: oklch(96% 0.008 92);
-  --ink-inverse: oklch(9% 0.012 92);
-  --muted: oklch(69% 0.028 88);
-  --line: oklch(35% 0.025 92);
   --border: oklch(34% 0.02 92);
   --border-soft: oklch(36% 0.02 92);
   --surface: oklch(15% 0.014 92);
@@ -39,21 +28,13 @@
   --accent-ghost-min: oklch(84% 0.012 92 / 0.06);
   --switch-track: oklch(19% 0.014 92);
   --switch-thumb: oklch(78% 0.012 92);
-  --disabled-surface: oklch(12% 0.012 92 / 0.8);
-  --disabled-border: oklch(30% 0.018 92 / 0.86);
-  --disabled-ink: oklch(60% 0.018 92);
-  --focus-ring: oklch(78% 0.12 164);
   --shadow: 0 24px 70px oklch(6% 0.02 92 / 0.46);
-  --radius-sm: 8px;
   --radius-md: 14px;
   --space-2xs: 4px;
   --space-xs: 8px;
   --space-sm: 12px;
   --space-md: 16px;
   --space-lg: 24px;
-  --touch-target: 44px;
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
 }
 
 * {
@@ -83,7 +64,10 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.56;
+  border-color: var(--disabled-border);
+  background: var(--disabled-surface);
+  color: var(--disabled-ink);
+  opacity: 1;
 }
 
 button:focus-visible,
@@ -125,7 +109,7 @@ button:focus-visible,
   margin: 0 0 4px;
   color: var(--muted);
   font-size: 0.76rem;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -186,7 +170,7 @@ h1 {
   padding: 8px 14px;
   background: transparent;
   color: var(--muted);
-  font-weight: 820;
+  font-weight: 800;
   transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out), color 140ms var(--ease-out);
 }
 
@@ -195,7 +179,15 @@ h1 {
   color: var(--ink);
 }
 
-.screen-source-tab[aria-pressed="true"],
+.screen-source-tab:disabled,
+.screen-profile-segments button:disabled {
+  opacity: 0.56;
+  background: var(--control-muted);
+  border-color: var(--control-line);
+  color: var(--muted);
+}
+
+.screen-source-tab[aria-selected="true"],
 .screen-profile-segments button[aria-pressed="true"] {
   border-color: color-mix(in oklch, var(--control-line), var(--ink) 16%);
   background: var(--control-pressed);
@@ -367,7 +359,7 @@ h1 {
 .screen-profile-group-title {
   color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 820;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
@@ -395,7 +387,7 @@ h1 {
   background: var(--control-surface);
   color: var(--ink);
   font-size: 0.88rem;
-  font-weight: 850;
+  font-weight: 800;
 }
 
 .screen-audio-toggle input {
@@ -450,7 +442,7 @@ h1 {
   padding: 0 20px;
   background: var(--control-active);
   color: var(--ink-inverse);
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .screen-profile-start:hover {
@@ -478,7 +470,7 @@ h1 {
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 760px) {
   .screen-source-options {
     grid-template-columns: 1fr;
   }

@@ -1,16 +1,3 @@
-:root {
-  color-scheme: dark;
-  --paper: oklch(15.5% 0.015 92);
-  --ink: oklch(94% 0.012 92);
-  --muted: oklch(69% 0.028 88);
-  --control: oklch(23% 0.016 92);
-  --control-hover: oklch(30% 0.018 92);
-  --control-line: oklch(41% 0.018 92);
-  --control-active: oklch(84% 0.012 92);
-  --focus-ring: oklch(78% 0.12 164);
-  font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-}
-
 * {
   box-sizing: border-box;
 }
@@ -45,7 +32,7 @@ button:focus-visible {
   margin: 0;
   color: var(--muted);
   font-size: 0.74rem;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -63,17 +50,17 @@ h1 {
 }
 
 .recovery-reload {
-  min-width: 44px;
-  min-height: 44px;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
   margin-top: 8px;
   border: 1px solid var(--control-line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 18px;
   background: var(--control-active);
-  color: oklch(9% 0.012 92);
-  font-weight: 900;
+  color: var(--ink-inverse);
+  font-weight: 800;
 }
 
 .recovery-reload:hover {
-  background: oklch(89% 0.01 92);
+  background: var(--control-active-hover);
 }

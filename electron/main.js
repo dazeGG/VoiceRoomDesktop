@@ -9,6 +9,7 @@ const {
   stopSafeSystemAudioCapture
 } = require('./native-audio');
 const { runUpdateGate } = require('./update-gate');
+const log = require('./logger');
 const {
   createScreenProfileId,
   normalizeDesktopAudioCapture,
@@ -552,9 +553,9 @@ function isRecoveryUrl(rawUrl) {
 function showRendererRecovery(window, details = {}) {
   if (!window || window.isDestroyed()) return;
 
-  console.error('Renderer process gone:', details);
+  log.error('Renderer process gone:', details);
   window.loadFile(path.join(__dirname, 'renderer-recovery.html')).catch((error) => {
-    console.error('Failed to open recovery screen:', error);
+    log.error('Failed to open recovery screen:', error);
   });
 }
 
@@ -603,7 +604,7 @@ function configurePermissions() {
         if (canCaptureLoopbackAudio) response.audio = 'loopback';
         callback(response);
       } catch (error) {
-        console.error('Display media request failed:', error);
+        log.error('Display media request failed:', error);
         callback({});
       }
     },
@@ -719,14 +720,14 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     launchApplication().catch((error) => {
-      console.error('Application launch failed:', error);
+      log.error('Application launch failed:', error);
       app.quit();
     });
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         launchApplication().catch((error) => {
-          console.error('Application relaunch failed:', error);
+          log.error('Application relaunch failed:', error);
           app.quit();
         });
       }

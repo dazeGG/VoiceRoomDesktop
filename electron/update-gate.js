@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const { shouldRunUpdateGateState } = require('./update-gate-policy');
+const log = require('./logger');
 
 const CHECK_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -155,7 +156,8 @@ function runUpdateGate(options = {}) {
         });
         downloadTimer = setTimeout(block, DOWNLOAD_TIMEOUT_MS);
         downloadTimer.unref?.();
-        autoUpdater.downloadUpdate().catch(() => {
+        autoUpdater.downloadUpdate().catch((error) => {
+          log.error('Update download failed:', error);
           block();
         });
       },
@@ -182,7 +184,8 @@ function runUpdateGate(options = {}) {
           autoUpdater.quitAndInstall(true, true);
         }, 400);
       },
-      error: () => {
+      error: (error) => {
+        log.error('Auto-updater error:', error);
         block();
       }
     });
@@ -199,12 +202,14 @@ function runUpdateGate(options = {}) {
       checkTimer = setTimeout(block, CHECK_TIMEOUT_MS);
       checkTimer.unref?.();
 
-      autoUpdater.checkForUpdates().catch(() => {
+      autoUpdater.checkForUpdates().catch((error) => {
+        log.error('Update check failed:', error);
         block();
       });
     });
 
-    splash.loadFile(path.join(__dirname, 'update-splash.html')).catch(() => {
+    splash.loadFile(path.join(__dirname, 'update-splash.html')).catch((error) => {
+      log.error('Failed to open update splash:', error);
       block();
     });
   });

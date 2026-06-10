@@ -2,6 +2,16 @@
 
 Electron desktop shell for Voice Room. It opens the hosted Voice Room web app from `VOICE_ROOM_URL` and provides desktop-only screen capture and window controls.
 
+## Supported platforms
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS 12+ (Apple Silicon / Intel) | Supported | Native safe-system audio via ScreenCaptureKit |
+| Windows 10+ (x64) | Supported | Native safe-system audio via WASAPI process loopback |
+| Linux | Not supported | No builds or native audio helpers for Linux |
+
+CI produces macOS and Windows release artifacts only. Use the browser on unsupported platforms.
+
 ## Desktop stream audio
 
 The desktop shell exposes one UI-level audio intent for screen sharing: `Звук стрима`.
@@ -91,6 +101,17 @@ Free code signing for Windows release artifacts is provided by [SignPath.io](htt
 | Approvers | [@dazeGG](https://github.com/dazeGG) |
 
 See [docs/code-signing.md](docs/code-signing.md) for the release signing flow and artifact scope.
+
+## Diagnostics
+
+Packaged builds write local log files through `electron-log` (no remote telemetry).
+
+| Platform | Log file |
+|----------|----------|
+| macOS | `~/Library/Logs/Voice Room/main.log` |
+| Windows | `%APPDATA%\\Voice Room\\logs\\main.log` |
+
+Development builds also print warnings and errors to the terminal.
 
 ## Privacy
 

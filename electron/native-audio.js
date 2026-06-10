@@ -5,6 +5,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const log = require('./logger');
 const EMPTY_AUDIO_BUFFER = Buffer.alloc(0);
 let activeSession = null;
 let nextSessionId = 1;
@@ -181,6 +182,7 @@ function startSafeSystemAudioCapture(sender, options = {}) {
   });
 
   child.on('error', (error) => {
+    log.error('Native audio helper process error:', error);
     if (!sender.isDestroyed()) {
       sender.send('desktop-audio:event', {
         event: { event: 'error', message: error.message },
@@ -190,6 +192,9 @@ function startSafeSystemAudioCapture(sender, options = {}) {
   });
 
   child.on('exit', (code, signal) => {
+    if (code !== 0) {
+      log.warn('Native audio helper exited:', { code, signal, sessionId });
+    }
     if (!sender.isDestroyed()) {
       sender.send('desktop-audio:event', {
         event: { code, event: 'exit', signal },

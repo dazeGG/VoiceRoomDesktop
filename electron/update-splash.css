@@ -1,0 +1,102 @@
+:root {
+  color-scheme: dark;
+  --paper: oklch(15.5% 0.015 92);
+  --ink: oklch(94% 0.012 92);
+  --muted: oklch(69% 0.028 88);
+  --line: oklch(35% 0.025 92);
+  --control: oklch(23% 0.016 92);
+  --control-hover: oklch(30% 0.018 92);
+  --control-line: oklch(41% 0.018 92);
+  --accent: oklch(84% 0.012 92);
+  --danger: oklch(67% 0.18 31);
+  font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-app-region: drag;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.update-shell {
+  display: grid;
+  min-height: 100vh;
+  align-content: center;
+  gap: 12px;
+  padding: 28px 32px 32px;
+}
+
+.update-eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.update-message {
+  margin: 0;
+  color: var(--muted);
+}
+
+.update-message.is-error {
+  color: var(--danger);
+}
+
+.update-progress {
+  overflow: hidden;
+  height: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: oklch(12% 0.012 92);
+}
+
+.update-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.update-progress-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.update-quit {
+  justify-self: start;
+  min-height: 40px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  padding: 0 16px;
+  background: var(--control);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.update-quit:hover {
+  background: var(--control-hover);
+}

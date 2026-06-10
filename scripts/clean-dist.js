@@ -8,11 +8,11 @@ const packageJson = require('../package.json');
 const electronBuilderConfig = require('../electron-builder.config.js');
 const productName = electronBuilderConfig.productName || packageJson.productName || packageJson.name;
 const version = packageJson.version;
-const keep = new Set([
-  `${productName}-${version}-mac-arm64.dmg`,
-  `${productName}-${version}-mac-x64.dmg`,
-  `${productName}-${version}-win-x64.exe`
-]);
+function shouldKeepFile(name) {
+  if (/\.(?:blockmap|ya?ml)$/i.test(name)) return true;
+  if (!name.startsWith(`${productName}-${version}-`)) return false;
+  return /\.(?:dmg|exe|zip)$/i.test(name);
+}
 
 async function cleanDist() {
   let entries;
@@ -25,7 +25,7 @@ async function cleanDist() {
 
   await Promise.all(
     entries.map(async (entry) => {
-      if (entry.isFile() && keep.has(entry.name)) return;
+      if (entry.isFile() && shouldKeepFile(entry.name)) return;
       await fs.rm(path.join(distDir, entry.name), { force: true, recursive: true });
     })
   );

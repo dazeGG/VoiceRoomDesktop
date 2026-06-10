@@ -5,7 +5,8 @@
   "description": "Electron desktop shell for Voice Room.",
   "main": "electron/main.js",
   "scripts": {
-    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/screen-picker-preload.js && node --check electron/screen-picker.js && node --check electron/native-audio.js && node --check scripts/build-electron.js && node --check scripts/build-native-audio.js && node --check scripts/capture-picker-preview.js && node --check scripts/clean-dist.js && node --check scripts/create-electron-config.js && node --check scripts/validate-release-version.js && node --check electron-builder.config.js",
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/screen-picker-preload.js && node --check electron/screen-picker.js && node --check electron/native-audio.js && node --check electron/desktop-capture-policy.js && node --check electron/update-gate.js && node --check electron/update-gate-policy.js && node --check electron/update-preload.js && node --check electron/update-splash.js && node --check scripts/build-electron.js && node --check scripts/build-native-audio.js && node --check scripts/capture-picker-preview.js && node --check scripts/clean-dist.js && node --check scripts/create-electron-config.js && node --check scripts/validate-release-version.js && node --check electron-builder.config.js",
+    "test": "node --test test/**/*.test.js",
     "native:build": "node scripts/build-native-audio.js",
     "release:validate": "node scripts/validate-release-version.js",
     "preview:picker": "VOICE_ROOM_PICKER_PREVIEW=1 electron .",
@@ -24,6 +25,13 @@
     "node": ">=20"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dazeGG/VoiceRoomDesktop.git"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
   "devDependencies": {
     "electron": "^42.3.3",
     "electron-builder": "^26.15.0"

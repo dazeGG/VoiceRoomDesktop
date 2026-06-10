@@ -47,6 +47,9 @@ jobs:
       - name: Check syntax
         run: npm run check
 
+      - name: Run tests
+        run: npm test
+
       - name: Validate tag matches package.json
         run: npm run release:validate -- ${{ steps.version.outputs.tag }}
 

@@ -58,6 +58,7 @@ const env = {
 
 run(process.execPath, [electronBuilderCli, '--config', 'electron-builder.config.js', '--publish', 'never', ...targets], { env });
 
-if (!dev) {
-  run(process.execPath, [path.join(rootDir, 'scripts', 'clean-dist.js')]);
-}
+// Prune intermediate build output (unpacked app dirs, helper binaries, debug
+// files) down to the publishable artifacts. clean-dist reads VOICE_ROOM_DIST_DIR
+// and VOICE_ROOM_DEV_BUILD from env, so it handles both dev and stable output.
+run(process.execPath, [path.join(rootDir, 'scripts', 'clean-dist.js')], { env });

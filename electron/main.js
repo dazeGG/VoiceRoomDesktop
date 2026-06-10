@@ -23,6 +23,14 @@ const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = APP_URL ? new URL(APP_URL).origin : '';
 const PICKER_PREVIEW_ENABLED = process.env.VOICE_ROOM_PICKER_PREVIEW === '1';
+const ALLOWED_SESSION_PERMISSIONS = new Set([
+  'clipboard-sanitized-write',
+  'display-capture',
+  'fullscreen',
+  'media',
+  'mediaKeySystem',
+  'speaker-selection'
+]);
 const DESKTOP_CAPTURE_PENDING_TTL_MS = 15_000;
 const DESKTOP_CAPTURE_SOURCE_SNAPSHOT_TTL_MS = 30_000;
 const pendingDesktopCaptureSources = new Map();
@@ -64,6 +72,66 @@ function isTrustedUrl(rawUrl) {
 
 function isTrustedFrame(frame) {
   return Boolean(frame?.url && isTrustedUrl(frame.url));
+}
+
+function isTrustedOrigin(origin) {
+  return Boolean(TRUSTED_ORIGIN) && origin === TRUSTED_ORIGIN;
+}
+
+function isPermissionWebContentsTrusted(webContents) {
+  if (!webContents || webContents.isDestroyed?.()) return true;
+  return isTrustedUrl(webContents.getURL());
+}
+
+function getMacMicrophoneAccessStatus() {
+  if (process.platform !== 'darwin') return 'not-applicable';
+  try {
+    return systemPreferences.getMediaAccessStatus('microphone');
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function ensureMacMicrophoneAccess() {
+  if (process.platform !== 'darwin') {
+    return { granted: true, platform: process.platform, status: 'not-applicable' };
+  }
+
+  const status = getMacMicrophoneAccessStatus();
+  if (status === 'granted') {
+    return { granted: true, platform: process.platform, status };
+  }
+  if (status === 'denied' || status === 'restricted') {
+    return { granted: false, platform: process.platform, status };
+  }
+
+  const granted = await systemPreferences.askForMediaAccess('microphone');
+  return {
+    granted,
+    platform: process.platform,
+    status: getMacMicrophoneAccessStatus()
+  };
+}
+
+async function grantMacMediaPermission(details = {}) {
+  const mediaTypes = Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+  const wantsAudio = mediaTypes.length === 0 || mediaTypes.includes('audio');
+  const wantsVideo = mediaTypes.includes('video');
+  const prompts = [];
+
+  if (wantsAudio) prompts.push(systemPreferences.askForMediaAccess('microphone'));
+  if (wantsVideo) prompts.push(systemPreferences.askForMediaAccess('camera'));
+
+  if (!prompts.length) return true;
+
+  const results = await Promise.all(prompts);
+  return results.every(Boolean);
+}
+
+function openMacMicrophoneSettings() {
+  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone').catch((error) => {
+    log.warn('Failed to open macOS Microphone settings:', error);
+  });
 }
 
 function getFrameKey(frame) {
@@ -179,12 +247,25 @@ function configureDesktopCaptureIpc() {
     return { sessionId: session.sessionId };
   });
 
-  ipcMain.handle('desktop-audio:open-settings', (event) => {
+  ipcMain.handle('desktop-audio:ensure-media-access', async (event) => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+    }
+
+    return ensureMacMicrophoneAccess();
+  });
+
+  ipcMain.handle('desktop-audio:open-settings', (event, options = {}) => {
     if (!isTrustedFrame(event.senderFrame)) {
       throw new Error('Desktop audio is only available for the configured Voice Room URL.');
     }
 
     if (process.platform === 'darwin') {
+      if (options.target === 'microphone') {
+        openMacMicrophoneSettings();
+        return { ok: true, target: 'mac-microphone' };
+      }
+
       openMacScreenCaptureSettings({ force: true });
       return { ok: true, target: 'mac-screen-capture' };
     }
@@ -578,15 +659,43 @@ function loadMainApplication(window) {
 function configurePermissions() {
   const defaultSession = session.defaultSession;
 
-  defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = new Set(['display-capture', 'fullscreen', 'media', 'mediaKeySystem', 'clipboard-sanitized-write']);
-    const allowed = allowedPermissions.has(permission) && isTrustedUrl(webContents.getURL());
-    callback(allowed);
+  defaultSession.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
+    if (!ALLOWED_SESSION_PERMISSIONS.has(permission)) {
+      log.warn('Denied permission request:', permission);
+      callback(false);
+      return;
+    }
+
+    if (!isPermissionWebContentsTrusted(webContents)) {
+      log.warn('Denied permission request from untrusted page:', permission, webContents?.getURL?.());
+      callback(false);
+      return;
+    }
+
+    if (permission === 'media' && process.platform === 'darwin') {
+      grantMacMediaPermission(details).then((granted) => {
+        if (!granted) {
+          log.warn('macOS media access denied:', details.mediaTypes || []);
+        }
+        callback(granted);
+      }).catch((error) => {
+        log.error('macOS media access prompt failed:', error);
+        callback(false);
+      });
+      return;
+    }
+
+    callback(true);
   });
 
   defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
-    const allowedPermissions = new Set(['display-capture', 'fullscreen', 'media', 'mediaKeySystem', 'clipboard-sanitized-write']);
-    return Boolean(TRUSTED_ORIGIN) && allowedPermissions.has(permission) && requestingOrigin === TRUSTED_ORIGIN && isTrustedUrl(webContents.getURL());
+    if (!ALLOWED_SESSION_PERMISSIONS.has(permission)) {
+      return false;
+    }
+    if (!isTrustedOrigin(requestingOrigin)) {
+      return false;
+    }
+    return isPermissionWebContentsTrusted(webContents);
   });
 
   defaultSession.setDisplayMediaRequestHandler(
@@ -724,6 +833,11 @@ if (!gotLock) {
     configureDesktopCaptureIpc();
     configureScreenPickerIpc();
     configureWindowIpc();
+
+    const micAccess = await ensureMacMicrophoneAccess();
+    if (!micAccess.granted && micAccess.status === 'denied') {
+      log.warn('Microphone access denied in macOS privacy settings.');
+    }
 
     const gate = await runUpdateGate({ previewEnabled: PICKER_PREVIEW_ENABLED });
     if (gate.ok) createWindow();

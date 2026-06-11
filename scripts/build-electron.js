@@ -48,6 +48,7 @@ fs.writeFileSync(
 
 run(process.execPath, [path.join(rootDir, 'scripts', 'create-electron-config.js')]);
 run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), ...targets]);
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-capture.js'), ...targets]);
 
 const env = {
   ...process.env,

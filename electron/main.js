@@ -9,6 +9,12 @@ const {
   startSafeSystemAudioCapture,
   stopSafeSystemAudioCapture
 } = require('./native-audio');
+const {
+  getNativeCaptureCapabilities,
+  startNativeCaptureSession,
+  stopNativeCaptureSession
+} = require('./native-capture');
+const { getNativeCaptureInjectScript } = require('./native-capture-policy');
 const { runUpdateGate } = require('./update-gate');
 const { readBuildProfile } = require('./update-gate-policy');
 const log = require('./logger');
@@ -22,15 +28,20 @@ const {
 } = require('./desktop-capture-policy');
 const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 
-// On Windows, prefer Windows Graphics Capture (WGC) over the legacy DXGI/GDI
-// capturer. The legacy backend can composite a synthetic cursor into the stream,
-// which shows up as a phantom cursor in games that hide their own cursor.
+// Windows cursor-on-stream status quo: BOTH stock Chromium backends show a
+// cursor while apps hide it. WGC lets Windows bake the real cursor into the
+// frame ignoring app-level hiding; the legacy DXGI/GDI path goes through
+// WebRTC's MouseCursorMonitorWin, which turns the hidden state (GetCursorInfo
+// flags == 0) into a phantom default arrow. Don't toggle these flags hoping
+// for correct behaviour — it only swaps one artefact for the other.
+//
+// The real fix is the native capture path (native-capture.js +
+// ScreenCursorCapture.exe), which captures via WGC without the OS cursor and
+// composites it honouring CURSOR_SHOWING. WGC stays enabled here so the
+// Chromium fallback (helper missing/unsupported) shows the real cursor — the
+// lesser evil compared to the legacy phantom arrow.
 if (process.platform === 'win32') {
-  app.commandLine.appendSwitch(
-    'enable-features',
-    'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer'
-  );
-  app.commandLine.appendSwitch('disable-features', 'WebRtcWgcRequireBorder');
+  app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcScreenCapturer');
 }
 
 const runtimeConfig = readRuntimeConfig();
@@ -47,6 +58,8 @@ const ALLOWED_SESSION_PERMISSIONS = new Set([
 ]);
 const DESKTOP_CAPTURE_PENDING_TTL_MS = 15_000;
 const DESKTOP_CAPTURE_SOURCE_SNAPSHOT_TTL_MS = 30_000;
+const GRANTED_DESKTOP_CAPTURE_TTL_MS = 10_000;
+const grantedDesktopCaptureByFrame = new Map();
 const CHROMIUM_LOG_PATH = (process.env.VOICE_ROOM_CHROMIUM_LOG || path.join(os.tmpdir(), 'voice-room-chromium.log')).trim();
 const WEBRTC_CAPTURE_VMODULE = [
   '*desktop_capture*=3',
@@ -280,7 +293,7 @@ function configureDesktopCaptureIpc() {
       enabled: selection.streamAudioEnabled,
       mode: 'safe-system'
     };
-    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions);
+    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions, { fpsId: selection.fpsId });
 
     return {
       audioCapture,
@@ -317,6 +330,33 @@ function configureDesktopCaptureIpc() {
     }
 
     return getDesktopAudioCapabilities();
+  });
+
+  ipcMain.handle('native-capture:start', (event) => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+    }
+
+    const granted = takeGrantedDesktopCapture(event.senderFrame);
+    if (!granted) return { ok: false, reason: 'no-granted-source' };
+
+    try {
+      return startNativeCaptureSession(event.sender, {
+        fps: granted.fps,
+        sourceId: granted.sourceId
+      });
+    } catch (error) {
+      log.error('Native capture session failed to start:', error);
+      return { ok: false, reason: 'start-failed' };
+    }
+  });
+
+  ipcMain.handle('native-capture:stop', (event, sessionId = '') => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+    }
+
+    return stopNativeCaptureSession(String(sessionId || ''));
   });
 
   ipcMain.handle('desktop-audio:start-safe-system', (event, options = {}) => {
@@ -395,7 +435,7 @@ function getDesktopAudioCapabilities() {
   };
 }
 
-function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopback') {
+function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopback', captureOptions = {}) {
   const previous = frameKey ? pendingDesktopCaptureSources.get(frameKey) : null;
   if (previous?.timer) clearTimeout(previous.timer);
 
@@ -408,8 +448,10 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
   timer.unref?.();
 
   const audioCapture = normalizeDesktopAudioCapture(source, audioOptions, getNativeAudioCapabilities());
+  const fps = Number(normalizeScreenFpsId(captureOptions.fpsId));
   const pendingSource = {
     audioCapture,
+    fps,
     source,
     timer
   };
@@ -418,10 +460,33 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
   latestPendingDesktopCaptureSource = {
     audioCapture: pendingSource.audioCapture,
     expiresAt: Date.now() + DESKTOP_CAPTURE_PENDING_TTL_MS,
+    fps,
     source
   };
 
   return audioCapture;
+}
+
+// Remembers which source the display-media handler just granted so the
+// injected getDisplayMedia wrapper can start the native cursor-correct
+// capture for the same source right after the stream resolves.
+function recordGrantedDesktopCapture(frame, pending) {
+  if (process.platform !== 'win32') return;
+  const frameKey = getFrameScopeKey(frame);
+  if (!frameKey || !pending?.source) return;
+  grantedDesktopCaptureByFrame.set(frameKey, {
+    fps: pending.fps || 30,
+    grantedAt: Date.now(),
+    sourceId: pending.source.id
+  });
+}
+
+function takeGrantedDesktopCapture(frame) {
+  const frameKey = getFrameScopeKey(frame);
+  const granted = frameKey ? grantedDesktopCaptureByFrame.get(frameKey) : null;
+  if (frameKey) grantedDesktopCaptureByFrame.delete(frameKey);
+  if (!granted || Date.now() - granted.grantedAt > GRANTED_DESKTOP_CAPTURE_TTL_MS) return null;
+  return granted;
 }
 
 async function getDesktopCaptureSources() {
@@ -550,9 +615,9 @@ function takeLatestPendingDesktopCaptureSource() {
     return null;
   }
 
-  const { audioCapture, source } = latestPendingDesktopCaptureSource;
+  const { audioCapture, fps, source } = latestPendingDesktopCaptureSource;
   clearPendingDesktopCaptureSource(source.id);
-  return { audioCapture, source };
+  return { audioCapture, fps, source };
 }
 
 function takePendingDesktopCaptureSource(frame, securityOrigin = '') {
@@ -755,6 +820,27 @@ function installMediaDeviceFilter(webContents) {
   webContents.on('did-navigate-in-page', inject);
 }
 
+function installNativeCaptureBridge(webContents) {
+  if (process.platform !== 'win32') return;
+
+  const capabilities = getNativeCaptureCapabilities();
+  if (!capabilities.available) {
+    log.info('Native cursor-correct capture is unavailable:', capabilities.reason);
+    return;
+  }
+
+  const script = getNativeCaptureInjectScript();
+  const inject = () => {
+    if (webContents.isDestroyed()) return;
+    webContents.executeJavaScript(script, true).catch((error) => {
+      log.warn('Failed to install native capture bridge:', error);
+    });
+  };
+
+  webContents.on('dom-ready', inject);
+  webContents.on('did-navigate-in-page', inject);
+}
+
 function installBuildLabel(webContents) {
   const profile = readBuildProfile(app.getAppPath());
   const hash = profile?.buildHash || '';
@@ -939,6 +1025,7 @@ function configurePermissions() {
           && pending.audioCapture?.mode === 'loopback';
         const response = { video: pending.source };
         if (canCaptureLoopbackAudio) response.audio = 'loopback';
+        recordGrantedDesktopCapture(request.frame, pending);
         callback(response);
       } catch (error) {
         log.error('Display media request failed:', error);
@@ -983,6 +1070,7 @@ function createWindow() {
   });
 
   installMediaDeviceFilter(mainWindow.webContents);
+  installNativeCaptureBridge(mainWindow.webContents);
   installBuildLabel(mainWindow.webContents);
   installDevDiagnosticsShortcut(mainWindow);
 

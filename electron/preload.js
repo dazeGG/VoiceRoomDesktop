@@ -34,6 +34,21 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
   stop: (sessionId) => ipcRenderer.invoke('desktop-audio:stop', sessionId)
 });
 
+contextBridge.exposeInMainWorld('voiceRoomNativeCaptureBridge', {
+  start: () => ipcRenderer.invoke('native-capture:start'),
+  stop: (sessionId) => ipcRenderer.invoke('native-capture:stop', sessionId)
+});
+
+// The frame MessagePort cannot cross the context bridge; relay it to the main
+// world (shared DOM) where the injected getDisplayMedia wrapper picks it up.
+ipcRenderer.on('native-capture:port', (event, message) => {
+  window.postMessage(
+    { sessionId: message?.sessionId, type: 'voice-room-native-capture-port' },
+    window.location.origin,
+    event.ports
+  );
+});
+
 contextBridge.exposeInMainWorld('voiceRoomWindow', {
   isFullscreen: () => ipcRenderer.invoke('window:is-fullscreen'),
   setFullscreen: (fullscreen) => ipcRenderer.invoke('window:set-fullscreen', fullscreen)

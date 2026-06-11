@@ -28,6 +28,18 @@ const {
 } = require('./desktop-capture-policy');
 const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 
+const WINDOWS_CAPTURE_CHROMIUM_FEATURES = [
+  'WebRtcAllowWgcScreenCapturer'
+];
+const WINDOWS_HW_ENCODER_CHROMIUM_FEATURES = [
+  'WebRTCHardwareVideoEncoderFrameDrop',
+  'WebRtcAV1HWEncode'
+];
+const WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES = [
+  'ForceSoftwareForRtcLowResolutions',
+  'WebRtcScreenshareSwEncoding'
+];
+
 // Windows cursor-on-stream status quo: BOTH stock Chromium backends show a
 // cursor while apps hide it. WGC lets Windows bake the real cursor into the
 // frame ignoring app-level hiding; the legacy DXGI/GDI path goes through
@@ -41,7 +53,18 @@ const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 // Chromium fallback (helper missing/unsupported) shows the real cursor — the
 // lesser evil compared to the legacy phantom arrow.
 if (process.platform === 'win32') {
-  app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcScreenCapturer');
+  const enabledFeatures = [...WINDOWS_CAPTURE_CHROMIUM_FEATURES];
+  const disabledFeatures = [];
+
+  if (process.env.VOICE_ROOM_WEBRTC_HW_ENCODER !== '0') {
+    enabledFeatures.push(...WINDOWS_HW_ENCODER_CHROMIUM_FEATURES);
+    disabledFeatures.push(...WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES);
+  }
+
+  app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','));
+  if (disabledFeatures.length > 0) {
+    app.commandLine.appendSwitch('disable-features', disabledFeatures.join(','));
+  }
 }
 
 const runtimeConfig = readRuntimeConfig();

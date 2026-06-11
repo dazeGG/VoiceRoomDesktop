@@ -183,7 +183,7 @@ function drainFrames(session) {
     session.expectedFrame = null;
     const payload = takeBytes(session, frame.payloadBytes);
     postToRenderer(session, {
-      data: payload,
+      data: toFrameArrayBuffer(payload),
       flags: frame.flags,
       height: frame.height,
       timestampMs: frame.timestampMs,
@@ -225,6 +225,13 @@ function takeBytes(session, length) {
     }
   }
   return result;
+}
+
+function toFrameArrayBuffer(buffer) {
+  if (buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength) {
+    return buffer.buffer;
+  }
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
 function postToRenderer(session, message) {

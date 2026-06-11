@@ -44,6 +44,13 @@ function getNativeCaptureInjectScript() {
       let closed = false;
       let sawFrame = false;
 
+      const normalizeFrameData = (data) => {
+        if (data instanceof ArrayBuffer) return data;
+        if (!ArrayBuffer.isView(data)) return null;
+        if (data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) return data.buffer;
+        return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      };
+
       const stop = () => {
         if (closed) return;
         closed = true;
@@ -71,11 +78,14 @@ function getNativeCaptureInjectScript() {
 
         let frame = null;
         try {
-          frame = new VideoFrame(message.data, {
+          const data = normalizeFrameData(message.data);
+          if (!data) return;
+          frame = new VideoFrame(data, {
             codedHeight: message.height,
             codedWidth: message.width,
             format: 'BGRX',
-            timestamp: Math.round(performance.now() * 1000)
+            timestamp: Math.round(performance.now() * 1000),
+            transfer: [data]
           });
         } catch {
           return;

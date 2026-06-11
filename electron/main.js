@@ -9,7 +9,6 @@ const {
   stopSafeSystemAudioCapture
 } = require('./native-audio');
 const { runUpdateGate } = require('./update-gate');
-const { readBuildProfile } = require('./update-gate-policy');
 const log = require('./logger');
 const { WINDOW_BACKGROUND } = require('./shell-theme');
 const {
@@ -20,34 +19,6 @@ const {
   normalizeScreenQualityId
 } = require('./desktop-capture-policy');
 const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
-
-// On Windows, prefer the Windows Graphics Capture (WGC) backend for screen/window
-// sharing instead of the legacy DXGI/GDI desktop-duplication path. The legacy path
-// composites a synthetic system cursor onto the captured frame, which shows up as a
-// "phantom" cursor in the stream for full-screen games (e.g. PUBG) that hide their
-// own cursor. WGC reports cursor visibility correctly, so the phantom disappears
-// while the real desktop cursor is still streamed.
-//
-// Caveats (must be relayed to streamers):
-//   - WGC cannot capture exclusive-fullscreen surfaces, so the game has to run in
-//     borderless / windowed-fullscreen; otherwise Chromium falls back to the legacy
-//     capturer and the phantom cursor comes back. This is the dominant factor for the
-//     phantom-cursor symptom — the switches below only help once the game is borderless.
-//   - On Windows 11 24H2+ Chromium already prefers WGC by an OS-version gate, so
-//     these switches are largely a no-op there; they matter on older Windows builds
-//     where WGC is gated off by default.
-//   - Unknown/renamed feature names are silently ignored by Chromium, so appending
-//     them stays safe across Electron/Chromium upgrades.
-// Verify it is active via chrome://webrtc-internals (the capturer name) while sharing.
-if (process.platform === 'win32') {
-  app.commandLine.appendSwitch(
-    'enable-features',
-    'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer'
-  );
-  // WGC draws a coloured capture border around the shared surface on builds that
-  // require it; turn that requirement off so the border does not leak into the stream.
-  app.commandLine.appendSwitch('disable-features', 'WebRtcWgcRequireBorder');
-}
 
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
@@ -740,39 +711,6 @@ function installMediaDeviceFilter(webContents) {
   webContents.on('did-navigate-in-page', inject);
 }
 
-// Bakes a small, unobtrusive "build: <version> · <hash>" label into the bottom-left
-// corner of the remote app. The hash comes from build-profile.json (written at build
-// time), so nothing is computed at runtime. The label is fixed-position, faint and
-// click-through so it never gets in the way of the underlying UI.
-function installBuildLabel(webContents) {
-  const profile = readBuildProfile(app.getAppPath());
-  const hash = profile?.buildHash || '';
-  const text = hash ? `build: ${app.getVersion()} · ${hash}` : `build: ${app.getVersion()}`;
-  const label = JSON.stringify(text);
-  const script = `(function(){
-    var id='voice-room-build-label';
-    var existing=document.getElementById(id);
-    if(existing){existing.textContent=${label};return;}
-    var el=document.createElement('div');
-    el.id=id;
-    el.textContent=${label};
-    el.style.cssText='position:fixed;left:8px;bottom:6px;z-index:2147483647;'+
-      'font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;'+
-      'color:currentColor;opacity:0.35;pointer-events:none;user-select:none;white-space:nowrap;';
-    (document.body||document.documentElement).appendChild(el);
-  })();`;
-
-  const inject = () => {
-    if (webContents.isDestroyed()) return;
-    webContents.executeJavaScript(script, true).catch((error) => {
-      log.warn('Failed to inject build label:', error);
-    });
-  };
-
-  webContents.on('dom-ready', inject);
-  webContents.on('did-navigate-in-page', inject);
-}
-
 function configurePermissions() {
   const defaultSession = session.defaultSession;
 
@@ -879,7 +817,6 @@ function createWindow() {
   });
 
   installMediaDeviceFilter(mainWindow.webContents);
-  installBuildLabel(mainWindow.webContents);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: 'allow' };

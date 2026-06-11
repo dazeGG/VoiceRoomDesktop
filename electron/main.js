@@ -20,6 +20,17 @@ const {
 } = require('./desktop-capture-policy');
 const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 
+// On Windows, prefer Windows Graphics Capture (WGC) over the legacy DXGI/GDI
+// capturer. The legacy backend can composite a synthetic cursor into the stream,
+// which shows up as a phantom cursor in games that hide their own cursor.
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer'
+  );
+  app.commandLine.appendSwitch('disable-features', 'WebRtcWgcRequireBorder');
+}
+
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = APP_URL ? new URL(APP_URL).origin : '';
@@ -73,6 +84,10 @@ function isTrustedUrl(rawUrl) {
 
 function isTrustedFrame(frame) {
   return Boolean(frame?.url && isTrustedUrl(frame.url));
+}
+
+function isTrustedDisplayMediaRequest(request) {
+  return isTrustedFrame(request.frame) || isTrustedOrigin(request.securityOrigin);
 }
 
 function isTrustedOrigin(origin) {
@@ -180,6 +195,17 @@ function getFrameKey(frame) {
   return `${frame.processId}:${frame.routingId}`;
 }
 
+function getFrameScopeKey(frame) {
+  try {
+    const topFrame = frame?.top;
+    if (topFrame && !topFrame.isDestroyed?.()) return getFrameKey(topFrame);
+  } catch {
+    // Fall back to the requesting frame if Electron cannot resolve the top frame.
+  }
+
+  return getFrameKey(frame);
+}
+
 function serializeDesktopSource(source) {
   const thumbnail = source.thumbnail && !source.thumbnail.isEmpty()
     ? source.thumbnail.resize({ height: 180 }).toDataURL()
@@ -203,7 +229,7 @@ function configureDesktopCaptureIpc() {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
     }
 
-    const frameKey = getFrameKey(event.senderFrame);
+    const frameKey = getFrameScopeKey(event.senderFrame);
     const sources = await getDesktopCaptureSources();
     if (frameKey) storeDesktopCaptureSourceSnapshot(frameKey, sources);
 
@@ -211,7 +237,7 @@ function configureDesktopCaptureIpc() {
   });
 
   ipcMain.handle('desktop-capture:open-picker', async (event, options = {}) => {
-    const frameKey = getFrameKey(event.senderFrame);
+    const frameKey = getFrameScopeKey(event.senderFrame);
     if (!isTrustedFrame(event.senderFrame)) {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
     }
@@ -254,7 +280,7 @@ function configureDesktopCaptureIpc() {
   });
 
   ipcMain.handle('desktop-capture:select-source', async (event, sourceId, audioOptions = 'loopback') => {
-    const frameKey = getFrameKey(event.senderFrame);
+    const frameKey = getFrameScopeKey(event.senderFrame);
     if (!isTrustedFrame(event.senderFrame)) {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
     }
@@ -504,19 +530,7 @@ function openMacScreenCaptureSettings(options = {}) {
   });
 }
 
-function takePendingDesktopCaptureSource(frame) {
-  const frameKey = getFrameKey(frame);
-  if (frameKey) {
-    const pending = pendingDesktopCaptureSources.get(frameKey);
-    pendingDesktopCaptureSources.delete(frameKey);
-    if (pending?.timer) clearTimeout(pending.timer);
-    if (pending?.source) {
-      clearPendingDesktopCaptureSource(pending.source.id);
-      return pending;
-    }
-    return null;
-  }
-
+function takeLatestPendingDesktopCaptureSource() {
   if (!latestPendingDesktopCaptureSource || latestPendingDesktopCaptureSource.expiresAt < Date.now()) {
     latestPendingDesktopCaptureSource = null;
     return null;
@@ -525,6 +539,22 @@ function takePendingDesktopCaptureSource(frame) {
   const { audioCapture, source } = latestPendingDesktopCaptureSource;
   clearPendingDesktopCaptureSource(source.id);
   return { audioCapture, source };
+}
+
+function takePendingDesktopCaptureSource(frame, securityOrigin = '') {
+  const frameKey = getFrameScopeKey(frame);
+  if (frameKey) {
+    const pending = pendingDesktopCaptureSources.get(frameKey);
+    pendingDesktopCaptureSources.delete(frameKey);
+    if (pending?.timer) clearTimeout(pending.timer);
+    if (pending?.source) {
+      clearPendingDesktopCaptureSource(pending.source.id);
+      return pending;
+    }
+  }
+
+  if (!isTrustedFrame(frame) && !isTrustedOrigin(securityOrigin)) return null;
+  return takeLatestPendingDesktopCaptureSource();
 }
 
 function clearPendingDesktopCaptureSource(sourceId) {
@@ -757,12 +787,12 @@ function configurePermissions() {
 
   defaultSession.setDisplayMediaRequestHandler(
     async (request, callback) => {
-      if (!isTrustedFrame(request.frame)) {
+      if (!isTrustedDisplayMediaRequest(request)) {
         callback({});
         return;
       }
 
-      const pending = takePendingDesktopCaptureSource(request.frame);
+      const pending = takePendingDesktopCaptureSource(request.frame, request.securityOrigin);
       if (!pending?.source) {
         callback({});
         return;

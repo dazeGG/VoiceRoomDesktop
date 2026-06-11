@@ -1,17 +1,6 @@
 'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
-const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
-
-function injectMainWorldScript(source) {
-  const script = document.createElement('script');
-  script.textContent = source;
-  const parent = document.head || document.documentElement || document;
-  parent.appendChild(script);
-  script.remove();
-}
-
-injectMainWorldScript(getMediaDeviceFilterInjectScript());
 
 contextBridge.exposeInMainWorld('voiceRoomRuntime', {
   isDesktop: true,

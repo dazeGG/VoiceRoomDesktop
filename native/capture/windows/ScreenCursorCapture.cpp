@@ -13,8 +13,9 @@
 //   stdout — binary frame stream: 24-byte header + top-down payload.
 //            header: u32 magic 'VRF1', u32 width, u32 height, u32 flags
 //            (bit0 = cursor drawn, bit1 = NV12 payload), i64 timestampMs.
-//            NV12 is tightly packed Y plane + interleaved UV plane. Odd-sized
-//            frames fall back to top-down BGRX with stride == width * 4.
+//            NV12 is tightly packed Y plane + interleaved UV plane. If GPU NV12
+//            conversion is unavailable, frames fall back to top-down BGRX with
+//            stride == width * 4.
 //   stderr — one JSON event per line: format / log / error / closed / exit.
 //   args   — --source screen:<index> | window:<hwnd>  [--fps 15|30|60]
 //
@@ -189,58 +190,63 @@ static bool GetWindowContentOrigin(HWND hwnd, POINT* origin) {
 
 class FrameWriter {
  public:
-  bool EnsureSize(uint32_t width, uint32_t height) {
-    if (width == width_ && height == height_ && bitmap_) return true;
-    Reset();
-
-    BITMAPINFO info = {};
-    info.bmiHeader.biSize = sizeof(info.bmiHeader);
-    info.bmiHeader.biWidth = static_cast<LONG>(width);
-    // Negative height makes the DIB top-down, matching both the WGC texture
-    // layout and the BGRA byte order the renderer feeds into VideoFrame.
-    info.bmiHeader.biHeight = -static_cast<LONG>(height);
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-
-    dc_ = CreateCompatibleDC(nullptr);
-    if (!dc_) return false;
-    bitmap_ = CreateDIBSection(dc_, &info, DIB_RGB_COLORS, &bits_, nullptr, 0);
-    if (!bitmap_ || !bits_) {
-      Reset();
-      return false;
+  void Initialize(ID3D11Device* device, ID3D11DeviceContext* context) {
+    d3dDevice_ = device;
+    d3dContext_ = context;
+    videoDevice_ = nullptr;
+    videoContext_ = nullptr;
+    if (d3dDevice_) {
+      d3dDevice_->QueryInterface(__uuidof(ID3D11VideoDevice), videoDevice_.put_void());
     }
-    previousObject_ = SelectObject(dc_, bitmap_);
-    width_ = width;
-    height_ = height;
-    return true;
+    if (d3dContext_) {
+      d3dContext_->QueryInterface(__uuidof(ID3D11VideoContext), videoContext_.put_void());
+    }
   }
 
-  // Copies the mapped GPU texture into the DIB, draws the cursor when the OS
-  // reports it visible, and streams the result to stdout. Returns false when
-  // stdout is gone (parent exited) so the capture loop can stop.
-  bool WriteFrame(const uint8_t* source,
-                  uint32_t sourceStride,
+  // Composites the cursor on a GPU BGRA texture, converts that texture to NV12
+  // with the D3D11 video processor, and streams the mapped NV12 payload. Returns
+  // false when stdout is gone (parent exited) so the capture loop can stop.
+  bool WriteFrame(ID3D11Texture2D* source,
                   uint32_t width,
                   uint32_t height,
                   const POINT& contentOrigin) {
-    if (!EnsureSize(width, height)) return true;
+    if (!source || !d3dDevice_ || !d3dContext_ || width == 0 || height == 0) return true;
+    if (!EnsureBgraResources(width, height)) return true;
 
-    const uint32_t rowBytes = width * 4;
-    auto* destination = static_cast<uint8_t*>(bits_);
-    for (uint32_t row = 0; row < height; ++row) {
-      std::memcpy(destination + static_cast<size_t>(row) * rowBytes,
-                  source + static_cast<size_t>(row) * sourceStride,
-                  rowBytes);
-    }
+    D3D11_BOX sourceBox = {};
+    sourceBox.right = width;
+    sourceBox.bottom = height;
+    sourceBox.back = 1;
+    d3dContext_->CopySubresourceRegion(bgraTexture_.get(), 0, 0, 0, 0, source, 0, &sourceBox);
 
     const bool cursorDrawn = DrawCursor(contentOrigin);
-    const bool useNv12 = (width % 2) == 0 && (height % 2) == 0;
+    if ((width % 2) == 0 && (height % 2) == 0 && EnsureVideoProcessor(width, height)) {
+      d3dContext_->CopyResource(processorInputTexture_.get(), bgraTexture_.get());
+      const WriteStatus status = TryWriteGpuNv12(width, height, cursorDrawn);
+      if (status == WriteStatus::kWrote) return true;
+      if (status == WriteStatus::kPipeClosed) return false;
+      DisableVideoProcessorForSize(width, height);
+      if (!gpuFallbackLogged_) {
+        LogEvent("log", "GPU NV12 conversion failed; falling back to BGRX frames.");
+        gpuFallbackLogged_ = true;
+      }
+    }
 
+    return WriteBgrxFrame(width, height, cursorDrawn);
+  }
+
+  ~FrameWriter() { Reset(); }
+
+ private:
+  enum class WriteStatus {
+    kWrote,
+    kFailedBeforeWrite,
+    kPipeClosed
+  };
+
+  static bool WriteFrameHeader(uint32_t width, uint32_t height, uint32_t flags) {
     uint8_t header[24];
     const uint32_t magic = 0x31465256;  // 'VRF1'
-    const uint32_t flags = (cursorDrawn ? kFrameFlagCursorDrawn : 0u)
-        | (useNv12 ? kFrameFlagFormatNv12 : 0u);
     const int64_t timestampMs = static_cast<int64_t>(GetTickCount64());
     std::memcpy(header, &magic, 4);
     std::memcpy(header + 4, &width, 4);
@@ -248,80 +254,7 @@ class FrameWriter {
     std::memcpy(header + 12, &flags, 4);
     std::memcpy(header + 16, &timestampMs, 8);
 
-    if (std::fwrite(header, 1, sizeof(header), stdout) != sizeof(header)) return false;
-    if (useNv12) {
-      const size_t yPlaneBytes = static_cast<size_t>(width) * height;
-      const size_t payload = yPlaneBytes + yPlaneBytes / 2;
-      nv12_.resize(payload);
-      ConvertBgraToNv12(destination, rowBytes, width, height, nv12_.data());
-      if (std::fwrite(nv12_.data(), 1, payload, stdout) != payload) return false;
-    } else {
-      const size_t payload = static_cast<size_t>(rowBytes) * height;
-      if (std::fwrite(bits_, 1, payload, stdout) != payload) return false;
-    }
-    std::fflush(stdout);
-    return true;
-  }
-
-  ~FrameWriter() { Reset(); }
-
- private:
-  static uint8_t ClampByte(int value) {
-    if (value < 0) return 0;
-    if (value > 255) return 255;
-    return static_cast<uint8_t>(value);
-  }
-
-  static uint8_t LumaBt709(uint8_t r, uint8_t g, uint8_t b) {
-    return ClampByte(16 + ((47 * r + 157 * g + 16 * b + 128) >> 8));
-  }
-
-  static int ChromaUBt709(uint8_t r, uint8_t g, uint8_t b) {
-    return 128 + ((-26 * r - 87 * g + 112 * b + 128) >> 8);
-  }
-
-  static int ChromaVBt709(uint8_t r, uint8_t g, uint8_t b) {
-    return 128 + ((112 * r - 102 * g - 10 * b + 128) >> 8);
-  }
-
-  static void ConvertBgraToNv12(const uint8_t* source,
-                                uint32_t sourceStride,
-                                uint32_t width,
-                                uint32_t height,
-                                uint8_t* destination) {
-    uint8_t* yPlane = destination;
-    uint8_t* uvPlane = destination + static_cast<size_t>(width) * height;
-
-    for (uint32_t row = 0; row < height; ++row) {
-      const uint8_t* sourceRow = source + static_cast<size_t>(row) * sourceStride;
-      uint8_t* yRow = yPlane + static_cast<size_t>(row) * width;
-      for (uint32_t col = 0; col < width; ++col) {
-        const uint8_t* pixel = sourceRow + static_cast<size_t>(col) * 4;
-        yRow[col] = LumaBt709(pixel[2], pixel[1], pixel[0]);
-      }
-    }
-
-    for (uint32_t row = 0; row < height; row += 2) {
-      uint8_t* uvRow = uvPlane + static_cast<size_t>(row / 2) * width;
-      const uint8_t* row0 = source + static_cast<size_t>(row) * sourceStride;
-      const uint8_t* row1 = source + static_cast<size_t>(row + 1) * sourceStride;
-      for (uint32_t col = 0; col < width; col += 2) {
-        const uint8_t* p00 = row0 + static_cast<size_t>(col) * 4;
-        const uint8_t* p01 = p00 + 4;
-        const uint8_t* p10 = row1 + static_cast<size_t>(col) * 4;
-        const uint8_t* p11 = p10 + 4;
-        const int u = ChromaUBt709(p00[2], p00[1], p00[0])
-            + ChromaUBt709(p01[2], p01[1], p01[0])
-            + ChromaUBt709(p10[2], p10[1], p10[0])
-            + ChromaUBt709(p11[2], p11[1], p11[0]);
-        const int v = ChromaVBt709(p00[2], p00[1], p00[0])
-            + ChromaVBt709(p01[2], p01[1], p01[0])
-            + ChromaVBt709(p10[2], p10[1], p10[0])
-            + ChromaVBt709(p11[2], p11[1], p11[0]);
-        uvRow[col] = ClampByte((u + 2) / 4);
-        uvRow[col + 1] = ClampByte((v + 2) / 4);
-      }
-    }
+    return std::fwrite(header, 1, sizeof(header), stdout) == sizeof(header);
   }
 
   bool DrawCursor(const POINT& contentOrigin) {
@@ -343,32 +276,276 @@ class FrameWriter {
     if (iconInfo.hbmMask) DeleteObject(iconInfo.hbmMask);
     if (iconInfo.hbmColor) DeleteObject(iconInfo.hbmColor);
 
-    // DrawIconEx on the DIB DC handles masked and XOR (inverting I-beam)
-    // cursors. Animated cursors render their first frame, which is enough.
-    const BOOL drawn = DrawIconEx(dc_, x, y, info.hCursor, 0, 0, 0, nullptr, DI_NORMAL);
+    winrt::com_ptr<IDXGISurface1> surface;
+    if (FAILED(bgraTexture_->QueryInterface(__uuidof(IDXGISurface1), surface.put_void()))) {
+      return false;
+    }
+
+    HDC dc = nullptr;
+    d3dContext_->Flush();
+    if (FAILED(surface->GetDC(FALSE, &dc))) return false;
+
+    // DrawIconEx on the GDI-compatible D3D surface handles masked and XOR
+    // (inverting I-beam) cursors. Animated cursors render their first frame.
+    const BOOL drawn = DrawIconEx(dc, x, y, info.hCursor, 0, 0, 0, nullptr, DI_NORMAL);
     GdiFlush();
-    return drawn != FALSE;
+    const HRESULT releaseHr = surface->ReleaseDC(nullptr);
+    return drawn != FALSE && SUCCEEDED(releaseHr);
+  }
+
+  bool EnsureBgraResources(uint32_t width, uint32_t height) {
+    if (width == width_ && height == height_ && bgraTexture_ && bgraStagingTexture_) return true;
+    Reset();
+    videoProcessorUnavailable_ = false;
+    unavailableVideoWidth_ = 0;
+    unavailableVideoHeight_ = 0;
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    desc.MiscFlags = D3D11_RESOURCE_MISC_GDI_COMPATIBLE;
+    HRESULT hr = d3dDevice_->CreateTexture2D(&desc, nullptr, bgraTexture_.put());
+    if (FAILED(hr)) {
+      Reset();
+      return false;
+    }
+
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    desc.MiscFlags = 0;
+    hr = d3dDevice_->CreateTexture2D(&desc, nullptr, bgraStagingTexture_.put());
+    if (FAILED(hr)) {
+      Reset();
+      return false;
+    }
+
+    width_ = width;
+    height_ = height;
+    return true;
+  }
+
+  bool EnsureVideoProcessor(uint32_t width, uint32_t height) {
+    if (!videoDevice_ || !videoContext_) return false;
+    if (videoProcessorUnavailable_ && unavailableVideoWidth_ == width && unavailableVideoHeight_ == height) {
+      return false;
+    }
+    if (videoWidth_ == width && videoHeight_ == height && videoProcessor_
+        && inputView_ && outputView_ && processorInputTexture_ && nv12Texture_ && nv12StagingTexture_) {
+      return true;
+    }
+    ResetVideoResources();
+
+    D3D11_TEXTURE2D_DESC inputDesc = {};
+    inputDesc.Width = width;
+    inputDesc.Height = height;
+    inputDesc.MipLevels = 1;
+    inputDesc.ArraySize = 1;
+    inputDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    inputDesc.SampleDesc.Count = 1;
+    inputDesc.Usage = D3D11_USAGE_DEFAULT;
+    inputDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    HRESULT hr = d3dDevice_->CreateTexture2D(&inputDesc, nullptr, processorInputTexture_.put());
+    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+
+    D3D11_VIDEO_PROCESSOR_CONTENT_DESC content = {};
+    content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+    content.InputFrameRate.Numerator = 30;
+    content.InputFrameRate.Denominator = 1;
+    content.InputWidth = width;
+    content.InputHeight = height;
+    content.OutputFrameRate.Numerator = 30;
+    content.OutputFrameRate.Denominator = 1;
+    content.OutputWidth = width;
+    content.OutputHeight = height;
+    content.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+
+    hr = videoDevice_->CreateVideoProcessorEnumerator(&content, enumerator_.put());
+    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+
+    UINT bgraSupport = 0;
+    UINT nv12Support = 0;
+    hr = enumerator_->CheckVideoProcessorFormat(DXGI_FORMAT_B8G8R8A8_UNORM, &bgraSupport);
+    if (FAILED(hr) || !(bgraSupport & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT)) {
+      return DisableVideoProcessorForSize(width, height);
+    }
+    hr = enumerator_->CheckVideoProcessorFormat(DXGI_FORMAT_NV12, &nv12Support);
+    if (FAILED(hr) || !(nv12Support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT)) {
+      return DisableVideoProcessorForSize(width, height);
+    }
+
+    hr = videoDevice_->CreateVideoProcessor(enumerator_.get(), 0, videoProcessor_.put());
+    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+
+    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inputViewDesc = {};
+    inputViewDesc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+    hr = videoDevice_->CreateVideoProcessorInputView(
+        processorInputTexture_.get(), enumerator_.get(), &inputViewDesc, inputView_.put());
+    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+
+    D3D11_TEXTURE2D_DESC nv12Desc = {};
+    nv12Desc.Width = width;
+    nv12Desc.Height = height;
+    nv12Desc.MipLevels = 1;
+    nv12Desc.ArraySize = 1;
+    nv12Desc.Format = DXGI_FORMAT_NV12;
+    nv12Desc.SampleDesc.Count = 1;
+    nv12Desc.Usage = D3D11_USAGE_DEFAULT;
+    nv12Desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    hr = d3dDevice_->CreateTexture2D(&nv12Desc, nullptr, nv12Texture_.put());
+    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+
+    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC outputViewDesc = {};
+    outputViewDesc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+    hr = videoDevice_->CreateVideoProcessorOutputView(
+        nv12Texture_.get(), enumerator_.get(), &outputViewDesc, outputView_.put());
+    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+
+    nv12Desc.Usage = D3D11_USAGE_STAGING;
+    nv12Desc.BindFlags = 0;
+    nv12Desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    hr = d3dDevice_->CreateTexture2D(&nv12Desc, nullptr, nv12StagingTexture_.put());
+    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+
+    RECT rect = {};
+    rect.right = static_cast<LONG>(width);
+    rect.bottom = static_cast<LONG>(height);
+    videoContext_->VideoProcessorSetStreamFrameFormat(videoProcessor_.get(), 0,
+                                                       D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+    videoContext_->VideoProcessorSetStreamAutoProcessingMode(videoProcessor_.get(), 0, FALSE);
+    videoContext_->VideoProcessorSetStreamSourceRect(videoProcessor_.get(), 0, TRUE, &rect);
+    videoContext_->VideoProcessorSetStreamDestRect(videoProcessor_.get(), 0, TRUE, &rect);
+    videoContext_->VideoProcessorSetOutputTargetRect(videoProcessor_.get(), TRUE, &rect);
+
+    videoWidth_ = width;
+    videoHeight_ = height;
+    return true;
+  }
+
+  bool DisableVideoProcessorForSize(uint32_t width, uint32_t height) {
+    ResetVideoResources();
+    videoProcessorUnavailable_ = true;
+    unavailableVideoWidth_ = width;
+    unavailableVideoHeight_ = height;
+    return false;
+  }
+
+  WriteStatus TryWriteGpuNv12(uint32_t width, uint32_t height, bool cursorDrawn) {
+    D3D11_VIDEO_PROCESSOR_STREAM stream = {};
+    stream.Enable = TRUE;
+    stream.pInputSurface = inputView_.get();
+    HRESULT hr = videoContext_->VideoProcessorBlt(videoProcessor_.get(), outputView_.get(), 0, 1, &stream);
+    if (FAILED(hr)) return WriteStatus::kFailedBeforeWrite;
+
+    d3dContext_->CopyResource(nv12StagingTexture_.get(), nv12Texture_.get());
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    hr = d3dContext_->Map(nv12StagingTexture_.get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr)) return WriteStatus::kFailedBeforeWrite;
+
+    PackNv12(mapped, width, height);
+    d3dContext_->Unmap(nv12StagingTexture_.get(), 0);
+
+    const uint32_t flags = (cursorDrawn ? kFrameFlagCursorDrawn : 0u) | kFrameFlagFormatNv12;
+    if (!WriteFrameHeader(width, height, flags)) return WriteStatus::kPipeClosed;
+    if (std::fwrite(nv12_.data(), 1, nv12_.size(), stdout) != nv12_.size()) return WriteStatus::kPipeClosed;
+    std::fflush(stdout);
+    return WriteStatus::kWrote;
+  }
+
+  void PackNv12(const D3D11_MAPPED_SUBRESOURCE& mapped, uint32_t width, uint32_t height) {
+    const size_t yPlaneBytes = static_cast<size_t>(width) * height;
+    nv12_.resize(yPlaneBytes + yPlaneBytes / 2);
+
+    const auto* source = static_cast<const uint8_t*>(mapped.pData);
+    for (uint32_t row = 0; row < height; ++row) {
+      std::memcpy(nv12_.data() + static_cast<size_t>(row) * width,
+                  source + static_cast<size_t>(row) * mapped.RowPitch,
+                  width);
+    }
+
+    const uint8_t* sourceUv = source + static_cast<size_t>(mapped.RowPitch) * height;
+    uint8_t* destinationUv = nv12_.data() + yPlaneBytes;
+    for (uint32_t row = 0; row < height / 2; ++row) {
+      std::memcpy(destinationUv + static_cast<size_t>(row) * width,
+                  sourceUv + static_cast<size_t>(row) * mapped.RowPitch,
+                  width);
+    }
+  }
+
+  bool WriteBgrxFrame(uint32_t width, uint32_t height, bool cursorDrawn) {
+    d3dContext_->CopyResource(bgraStagingTexture_.get(), bgraTexture_.get());
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    if (FAILED(d3dContext_->Map(bgraStagingTexture_.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+      return true;
+    }
+
+    const uint32_t flags = cursorDrawn ? kFrameFlagCursorDrawn : 0u;
+    bool ok = WriteFrameHeader(width, height, flags);
+    const size_t rowBytes = static_cast<size_t>(width) * 4;
+    if (ok) {
+      if (mapped.RowPitch == rowBytes) {
+        const size_t payload = rowBytes * height;
+        ok = std::fwrite(mapped.pData, 1, payload, stdout) == payload;
+      } else {
+        const auto* source = static_cast<const uint8_t*>(mapped.pData);
+        for (uint32_t row = 0; ok && row < height; ++row) {
+          ok = std::fwrite(source + static_cast<size_t>(row) * mapped.RowPitch, 1, rowBytes, stdout) == rowBytes;
+        }
+      }
+    }
+    d3dContext_->Unmap(bgraStagingTexture_.get(), 0);
+    if (ok) std::fflush(stdout);
+    return ok;
+  }
+
+  void ResetVideoResources() {
+    inputView_ = nullptr;
+    outputView_ = nullptr;
+    videoProcessor_ = nullptr;
+    enumerator_ = nullptr;
+    processorInputTexture_ = nullptr;
+    nv12Texture_ = nullptr;
+    nv12StagingTexture_ = nullptr;
+    videoWidth_ = 0;
+    videoHeight_ = 0;
   }
 
   void Reset() {
-    if (dc_ && previousObject_) SelectObject(dc_, previousObject_);
-    if (bitmap_) DeleteObject(bitmap_);
-    if (dc_) DeleteDC(dc_);
-    dc_ = nullptr;
-    bitmap_ = nullptr;
-    previousObject_ = nullptr;
-    bits_ = nullptr;
+    ResetVideoResources();
+    bgraTexture_ = nullptr;
+    bgraStagingTexture_ = nullptr;
     width_ = 0;
     height_ = 0;
   }
 
-  HDC dc_ = nullptr;
-  HBITMAP bitmap_ = nullptr;
-  HGDIOBJ previousObject_ = nullptr;
-  void* bits_ = nullptr;
+  ID3D11Device* d3dDevice_ = nullptr;
+  ID3D11DeviceContext* d3dContext_ = nullptr;
+  winrt::com_ptr<ID3D11VideoDevice> videoDevice_;
+  winrt::com_ptr<ID3D11VideoContext> videoContext_;
+  winrt::com_ptr<ID3D11Texture2D> bgraTexture_;
+  winrt::com_ptr<ID3D11Texture2D> bgraStagingTexture_;
+  winrt::com_ptr<ID3D11Texture2D> processorInputTexture_;
+  winrt::com_ptr<ID3D11Texture2D> nv12Texture_;
+  winrt::com_ptr<ID3D11Texture2D> nv12StagingTexture_;
+  winrt::com_ptr<ID3D11VideoProcessorEnumerator> enumerator_;
+  winrt::com_ptr<ID3D11VideoProcessor> videoProcessor_;
+  winrt::com_ptr<ID3D11VideoProcessorInputView> inputView_;
+  winrt::com_ptr<ID3D11VideoProcessorOutputView> outputView_;
   std::vector<uint8_t> nv12_;
   uint32_t width_ = 0;
   uint32_t height_ = 0;
+  uint32_t videoWidth_ = 0;
+  uint32_t videoHeight_ = 0;
+  bool gpuFallbackLogged_ = false;
+  bool videoProcessorUnavailable_ = false;
+  uint32_t unavailableVideoWidth_ = 0;
+  uint32_t unavailableVideoHeight_ = 0;
 };
 
 class CaptureSession {
@@ -396,6 +573,7 @@ class CaptureSession {
       return false;
     }
     d3dDevice_->GetImmediateContext(d3dContext_.put());
+    writer_.Initialize(d3dDevice_.get(), d3dContext_.get());
 
     winrt::com_ptr<IDXGIDevice> dxgiDevice = d3dDevice_.as<IDXGIDevice>();
     winrt::com_ptr<IInspectable> inspectable;
@@ -513,11 +691,6 @@ class CaptureSession {
 
     D3D11_TEXTURE2D_DESC desc = {};
     texture->GetDesc(&desc);
-    if (!EnsureStagingTexture(desc.Width, desc.Height, desc.Format)) return;
-
-    d3dContext_->CopyResource(stagingTexture_.get(), texture.get());
-    D3D11_MAPPED_SUBRESOURCE mapped = {};
-    if (FAILED(d3dContext_->Map(stagingTexture_.get(), 0, D3D11_MAP_READ, 0, &mapped))) return;
 
     POINT contentOrigin = {};
     bool originKnown = true;
@@ -530,36 +703,13 @@ class CaptureSession {
 
     const uint32_t width = std::min<uint32_t>(desc.Width, static_cast<uint32_t>(contentSize_.Width));
     const uint32_t height = std::min<uint32_t>(desc.Height, static_cast<uint32_t>(contentSize_.Height));
-    const bool ok = originKnown
-        ? writer_.WriteFrame(static_cast<const uint8_t*>(mapped.pData), mapped.RowPitch, width, height, contentOrigin)
-        : true;
-    d3dContext_->Unmap(stagingTexture_.get(), 0);
+    const bool ok = originKnown ? writer_.WriteFrame(texture.get(), width, height, contentOrigin) : true;
 
     if (!ok) {
       // stdout pipe is gone — the parent process exited.
       g_running = false;
       if (g_stopEvent) SetEvent(g_stopEvent);
     }
-  }
-
-  bool EnsureStagingTexture(uint32_t width, uint32_t height, DXGI_FORMAT format) {
-    if (stagingTexture_) {
-      D3D11_TEXTURE2D_DESC desc = {};
-      stagingTexture_->GetDesc(&desc);
-      if (desc.Width == width && desc.Height == height && desc.Format == format) return true;
-      stagingTexture_ = nullptr;
-    }
-
-    D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = width;
-    desc.Height = height;
-    desc.MipLevels = 1;
-    desc.ArraySize = 1;
-    desc.Format = format;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_STAGING;
-    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    return SUCCEEDED(d3dDevice_->CreateTexture2D(&desc, nullptr, stagingTexture_.put()));
   }
 
   CaptureTarget target_;
@@ -570,7 +720,6 @@ class CaptureSession {
 
   winrt::com_ptr<ID3D11Device> d3dDevice_;
   winrt::com_ptr<ID3D11DeviceContext> d3dContext_;
-  winrt::com_ptr<ID3D11Texture2D> stagingTexture_;
   wgd3d::IDirect3DDevice device_{nullptr};
   wgc::GraphicsCaptureItem item_{nullptr};
   wgc::Direct3D11CaptureFramePool framePool_{nullptr};

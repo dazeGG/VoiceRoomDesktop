@@ -122,13 +122,18 @@ function getNativeCaptureInjectScript() {
         native = createNativeVideoTrack(port, session.sessionId);
         await native.waitForFirstFrame(4000);
 
-        const replaced = new MediaStream();
-        replaced.addTrack(native.generator);
-        for (const track of stream.getAudioTracks()) replaced.addTrack(track);
-        for (const track of stream.getVideoTracks()) {
+        // Replace only the video track, keeping the original MediaStream object
+        // and its audio tracks in place. The web app associates the stream's
+        // audio (loopback track here, or a safe-system track it mixes in later)
+        // with this exact stream identity, so returning a freshly built
+        // MediaStream can silently drop the stream's sound.
+        const previousVideoTracks = stream.getVideoTracks();
+        stream.addTrack(native.generator);
+        for (const track of previousVideoTracks) {
+          stream.removeTrack(track);
           try { track.stop(); } catch {}
         }
-        return replaced;
+        return stream;
       } catch {
         native?.stop?.();
         if (session?.ok) bridge.stop?.(session.sessionId)?.catch?.(() => {});

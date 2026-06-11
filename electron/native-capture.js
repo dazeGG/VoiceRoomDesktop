@@ -9,9 +9,11 @@ const log = require('./logger');
 
 // Binary frame protocol shared with native/capture/windows/ScreenCursorCapture.cpp:
 // 24-byte header (u32 magic 'VRF1', u32 width, u32 height, u32 flags,
-// i64 timestampMs) followed by width * height * 4 bytes of top-down BGRA.
+// i64 timestampMs) followed by top-down frame payload. flags bit0 means
+// cursor drawn; bit1 means NV12 payload, otherwise width * height * 4 BGRX.
 const FRAME_MAGIC = 0x31465256;
 const FRAME_HEADER_BYTES = 24;
+const FRAME_FLAG_FORMAT_NV12 = 1 << 1;
 const MAX_FRAME_DIMENSION = 16384;
 const PORT_CHANNEL = 'native-capture:port';
 
@@ -169,10 +171,15 @@ function drainFrames(session) {
         stopNativeCaptureSession(session.id);
         return;
       }
+      if ((flags & FRAME_FLAG_FORMAT_NV12) && ((width % 2) !== 0 || (height % 2) !== 0)) {
+        log.error('Native NV12 frame has odd dimensions, stopping session.');
+        stopNativeCaptureSession(session.id);
+        return;
+      }
       session.expectedFrame = {
         flags,
         height,
-        payloadBytes: width * height * 4,
+        payloadBytes: getFramePayloadBytes(width, height, flags),
         timestampMs,
         width
       };
@@ -185,12 +192,20 @@ function drainFrames(session) {
     postToRenderer(session, {
       data: toFrameArrayBuffer(payload),
       flags: frame.flags,
+      format: (frame.flags & FRAME_FLAG_FORMAT_NV12) ? 'NV12' : 'BGRX',
       height: frame.height,
       timestampMs: frame.timestampMs,
       type: 'frame',
       width: frame.width
     });
   }
+}
+
+function getFramePayloadBytes(width, height, flags) {
+  if (flags & FRAME_FLAG_FORMAT_NV12) {
+    return width * height + Math.floor(width * height / 2);
+  }
+  return width * height * 4;
 }
 
 // Consumes exactly `length` bytes from the buffered stdout chunks with a

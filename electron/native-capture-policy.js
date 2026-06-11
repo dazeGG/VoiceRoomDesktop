@@ -80,13 +80,27 @@ function getNativeCaptureInjectScript() {
         try {
           const data = normalizeFrameData(message.data);
           if (!data) return;
-          frame = new VideoFrame(data, {
+          const format = message.format === 'NV12' ? 'NV12' : 'BGRX';
+          const init = {
             codedHeight: message.height,
             codedWidth: message.width,
-            format: 'BGRX',
+            format,
             timestamp: Math.round(performance.now() * 1000),
             transfer: [data]
-          });
+          };
+          if (format === 'NV12') {
+            init.layout = [
+              { offset: 0, stride: message.width },
+              { offset: message.width * message.height, stride: message.width }
+            ];
+            init.colorSpace = {
+              fullRange: false,
+              matrix: 'bt709',
+              primaries: 'bt709',
+              transfer: 'bt709'
+            };
+          }
+          frame = new VideoFrame(data, init);
         } catch {
           return;
         }

@@ -10,9 +10,11 @@
 // cursor ourselves, honouring CURSOR_SHOWING.
 //
 // Protocol (mirrors SafeSystemAudioCapture):
-//   stdout — binary frame stream: 24-byte header + top-down BGRA payload.
+//   stdout — binary frame stream: 24-byte header + top-down payload.
 //            header: u32 magic 'VRF1', u32 width, u32 height, u32 flags
-//            (bit0 = cursor drawn), i64 timestampMs. stride == width * 4.
+//            (bit0 = cursor drawn, bit1 = NV12 payload), i64 timestampMs.
+//            NV12 is tightly packed Y plane + interleaved UV plane. Odd-sized
+//            frames fall back to top-down BGRX with stride == width * 4.
 //   stderr — one JSON event per line: format / log / error / closed / exit.
 //   args   — --source screen:<index> | window:<hwnd>  [--fps 15|30|60]
 //
@@ -46,6 +48,7 @@
 #include <csignal>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace wgc = winrt::Windows::Graphics::Capture;
 namespace wgd = winrt::Windows::Graphics::DirectX;
@@ -53,6 +56,8 @@ namespace wgd3d = winrt::Windows::Graphics::DirectX::Direct3D11;
 
 static std::atomic<bool> g_running{true};
 static HANDLE g_stopEvent = nullptr;
+static constexpr uint32_t kFrameFlagCursorDrawn = 1u;
+static constexpr uint32_t kFrameFlagFormatNv12 = 1u << 1;
 
 static void HandleSignal(int) {
   g_running = false;
@@ -70,7 +75,7 @@ static void LogEvent(const char* event, const std::string& message = "") {
 
 static void LogFormat(uint32_t width, uint32_t height, uint32_t fps) {
   std::fprintf(stderr,
-               "{\"event\":\"format\",\"width\":%u,\"height\":%u,\"fps\":%u,\"pixelFormat\":\"bgra\"}\n",
+               "{\"event\":\"format\",\"width\":%u,\"height\":%u,\"fps\":%u,\"pixelFormat\":\"nv12\"}\n",
                width, height, fps);
   std::fflush(stderr);
 }
@@ -230,10 +235,12 @@ class FrameWriter {
     }
 
     const bool cursorDrawn = DrawCursor(contentOrigin);
+    const bool useNv12 = (width % 2) == 0 && (height % 2) == 0;
 
     uint8_t header[24];
     const uint32_t magic = 0x31465256;  // 'VRF1'
-    const uint32_t flags = cursorDrawn ? 1u : 0u;
+    const uint32_t flags = (cursorDrawn ? kFrameFlagCursorDrawn : 0u)
+        | (useNv12 ? kFrameFlagFormatNv12 : 0u);
     const int64_t timestampMs = static_cast<int64_t>(GetTickCount64());
     std::memcpy(header, &magic, 4);
     std::memcpy(header + 4, &width, 4);
@@ -242,8 +249,16 @@ class FrameWriter {
     std::memcpy(header + 16, &timestampMs, 8);
 
     if (std::fwrite(header, 1, sizeof(header), stdout) != sizeof(header)) return false;
-    const size_t payload = static_cast<size_t>(rowBytes) * height;
-    if (std::fwrite(bits_, 1, payload, stdout) != payload) return false;
+    if (useNv12) {
+      const size_t yPlaneBytes = static_cast<size_t>(width) * height;
+      const size_t payload = yPlaneBytes + yPlaneBytes / 2;
+      nv12_.resize(payload);
+      ConvertBgraToNv12(destination, rowBytes, width, height, nv12_.data());
+      if (std::fwrite(nv12_.data(), 1, payload, stdout) != payload) return false;
+    } else {
+      const size_t payload = static_cast<size_t>(rowBytes) * height;
+      if (std::fwrite(bits_, 1, payload, stdout) != payload) return false;
+    }
     std::fflush(stdout);
     return true;
   }
@@ -251,6 +266,64 @@ class FrameWriter {
   ~FrameWriter() { Reset(); }
 
  private:
+  static uint8_t ClampByte(int value) {
+    if (value < 0) return 0;
+    if (value > 255) return 255;
+    return static_cast<uint8_t>(value);
+  }
+
+  static uint8_t LumaBt709(uint8_t r, uint8_t g, uint8_t b) {
+    return ClampByte(16 + ((47 * r + 157 * g + 16 * b + 128) >> 8));
+  }
+
+  static int ChromaUBt709(uint8_t r, uint8_t g, uint8_t b) {
+    return 128 + ((-26 * r - 87 * g + 112 * b + 128) >> 8);
+  }
+
+  static int ChromaVBt709(uint8_t r, uint8_t g, uint8_t b) {
+    return 128 + ((112 * r - 102 * g - 10 * b + 128) >> 8);
+  }
+
+  static void ConvertBgraToNv12(const uint8_t* source,
+                                uint32_t sourceStride,
+                                uint32_t width,
+                                uint32_t height,
+                                uint8_t* destination) {
+    uint8_t* yPlane = destination;
+    uint8_t* uvPlane = destination + static_cast<size_t>(width) * height;
+
+    for (uint32_t row = 0; row < height; ++row) {
+      const uint8_t* sourceRow = source + static_cast<size_t>(row) * sourceStride;
+      uint8_t* yRow = yPlane + static_cast<size_t>(row) * width;
+      for (uint32_t col = 0; col < width; ++col) {
+        const uint8_t* pixel = sourceRow + static_cast<size_t>(col) * 4;
+        yRow[col] = LumaBt709(pixel[2], pixel[1], pixel[0]);
+      }
+    }
+
+    for (uint32_t row = 0; row < height; row += 2) {
+      uint8_t* uvRow = uvPlane + static_cast<size_t>(row / 2) * width;
+      const uint8_t* row0 = source + static_cast<size_t>(row) * sourceStride;
+      const uint8_t* row1 = source + static_cast<size_t>(row + 1) * sourceStride;
+      for (uint32_t col = 0; col < width; col += 2) {
+        const uint8_t* p00 = row0 + static_cast<size_t>(col) * 4;
+        const uint8_t* p01 = p00 + 4;
+        const uint8_t* p10 = row1 + static_cast<size_t>(col) * 4;
+        const uint8_t* p11 = p10 + 4;
+        const int u = ChromaUBt709(p00[2], p00[1], p00[0])
+            + ChromaUBt709(p01[2], p01[1], p01[0])
+            + ChromaUBt709(p10[2], p10[1], p10[0])
+            + ChromaUBt709(p11[2], p11[1], p11[0]);
+        const int v = ChromaVBt709(p00[2], p00[1], p00[0])
+            + ChromaVBt709(p01[2], p01[1], p01[0])
+            + ChromaVBt709(p10[2], p10[1], p10[0])
+            + ChromaVBt709(p11[2], p11[1], p11[0]);
+        uvRow[col] = ClampByte((u + 2) / 4);
+        uvRow[col + 1] = ClampByte((v + 2) / 4);
+      }
+    }
+  }
+
   bool DrawCursor(const POINT& contentOrigin) {
     CURSORINFO info = {};
     info.cbSize = sizeof(info);
@@ -293,6 +366,7 @@ class FrameWriter {
   HBITMAP bitmap_ = nullptr;
   HGDIOBJ previousObject_ = nullptr;
   void* bits_ = nullptr;
+  std::vector<uint8_t> nv12_;
   uint32_t width_ = 0;
   uint32_t height_ = 0;
 };

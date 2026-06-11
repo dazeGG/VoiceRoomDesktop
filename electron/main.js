@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, shell, session, systemPreferences } = require('electron');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const {
   getNativeAudioCapabilities,
@@ -46,6 +47,14 @@ const ALLOWED_SESSION_PERMISSIONS = new Set([
 ]);
 const DESKTOP_CAPTURE_PENDING_TTL_MS = 15_000;
 const DESKTOP_CAPTURE_SOURCE_SNAPSHOT_TTL_MS = 30_000;
+const CHROMIUM_LOG_PATH = (process.env.VOICE_ROOM_CHROMIUM_LOG || path.join(os.tmpdir(), 'voice-room-chromium.log')).trim();
+const WEBRTC_CAPTURE_VMODULE = [
+  '*desktop_capture*=3',
+  '*screen_capturer_win*=3',
+  '*window_capturer_win*=3',
+  '*desktop_and_cursor_composer*=3',
+  '*wgc*=3'
+].join(',');
 const pendingDesktopCaptureSources = new Map();
 const desktopCaptureSourceSnapshots = new Map();
 const desktopCapturePickerSessions = new Map();
@@ -67,6 +76,8 @@ const DESKTOP_DRAG_REGION_CSS = `
     z-index: 2147483647;
   }
 `;
+
+configureDevChromiumLogging();
 
 function readRuntimeConfig() {
   const configPath = path.join(__dirname, 'runtime-config.json');
@@ -778,6 +789,21 @@ function isDevDiagnosticsEnabled() {
   return readBuildProfile(app.getAppPath())?.channel === 'dev';
 }
 
+function configureDevChromiumLogging() {
+  if (!isDevDiagnosticsEnabled()) return;
+
+  try {
+    fs.rmSync(CHROMIUM_LOG_PATH, { force: true });
+  } catch (error) {
+    log.warn('Failed to clear Chromium log:', error);
+  }
+
+  app.commandLine.appendSwitch('enable-logging', 'file');
+  app.commandLine.appendSwitch('log-file', CHROMIUM_LOG_PATH);
+  app.commandLine.appendSwitch('v', '1');
+  app.commandLine.appendSwitch('vmodule', WEBRTC_CAPTURE_VMODULE);
+}
+
 function openWebRtcInternalsWindow(parentWindow) {
   if (!isDevDiagnosticsEnabled()) return;
 
@@ -813,6 +839,22 @@ function openWebRtcInternalsWindow(parentWindow) {
   });
 }
 
+function openChromiumLogFile() {
+  if (!isDevDiagnosticsEnabled()) return;
+
+  if (!fs.existsSync(CHROMIUM_LOG_PATH)) {
+    log.warn('Chromium log file is not available yet:', CHROMIUM_LOG_PATH);
+    shell.openPath(path.dirname(CHROMIUM_LOG_PATH)).catch((error) => {
+      log.warn('Failed to open Chromium log directory:', error);
+    });
+    return;
+  }
+
+  shell.openPath(CHROMIUM_LOG_PATH).catch((error) => {
+    log.warn('Failed to open Chromium log:', error);
+  });
+}
+
 function installDevDiagnosticsShortcut(window) {
   if (!isDevDiagnosticsEnabled()) return;
 
@@ -821,10 +863,17 @@ function installDevDiagnosticsShortcut(window) {
     if (!input.shift || (!input.control && !input.meta)) return;
 
     const key = String(input.key || '').toLowerCase();
-    if (key !== 'w' && input.code !== 'KeyW') return;
+    const code = String(input.code || '');
+    const opensInternals = key === 'w' || code === 'KeyW';
+    const opensLog = key === 'l' || code === 'KeyL';
+    if (!opensInternals && !opensLog) return;
 
     event.preventDefault();
-    openWebRtcInternalsWindow(window);
+    if (opensInternals) {
+      openWebRtcInternalsWindow(window);
+    } else {
+      openChromiumLogFile();
+    }
   });
 }
 

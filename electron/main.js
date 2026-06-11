@@ -9,6 +9,7 @@ const {
   stopSafeSystemAudioCapture
 } = require('./native-audio');
 const { runUpdateGate } = require('./update-gate');
+const { readBuildProfile } = require('./update-gate-policy');
 const log = require('./logger');
 const { WINDOW_BACKGROUND } = require('./shell-theme');
 const {
@@ -48,9 +49,11 @@ const DESKTOP_CAPTURE_SOURCE_SNAPSHOT_TTL_MS = 30_000;
 const pendingDesktopCaptureSources = new Map();
 const desktopCaptureSourceSnapshots = new Map();
 const desktopCapturePickerSessions = new Map();
+const WEBRTC_INTERNALS_URL = 'chrome://webrtc-internals/';
 let latestPendingDesktopCaptureSource = null;
 let lastScreenCaptureSettingsOpenAt = 0;
 let nextDesktopCapturePickerSessionId = 1;
+let webRtcInternalsWindow = null;
 
 const DESKTOP_DRAG_REGION_CSS = `
   body::before {
@@ -741,6 +744,90 @@ function installMediaDeviceFilter(webContents) {
   webContents.on('did-navigate-in-page', inject);
 }
 
+function installBuildLabel(webContents) {
+  const profile = readBuildProfile(app.getAppPath());
+  const hash = profile?.buildHash || '';
+  const text = hash ? `build: ${app.getVersion()} · ${hash}` : `build: ${app.getVersion()}`;
+  const label = JSON.stringify(text);
+  const script = `(function(){
+    var id='voice-room-build-label';
+    var existing=document.getElementById(id);
+    if(existing){existing.textContent=${label};return;}
+    var el=document.createElement('div');
+    el.id=id;
+    el.textContent=${label};
+    el.style.cssText='position:fixed;left:8px;bottom:6px;z-index:2147483647;'+
+      'font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;'+
+      'color:currentColor;opacity:0.35;pointer-events:none;user-select:none;white-space:nowrap;';
+    (document.body||document.documentElement).appendChild(el);
+  })();`;
+
+  const inject = () => {
+    if (webContents.isDestroyed()) return;
+    webContents.executeJavaScript(script, true).catch((error) => {
+      log.warn('Failed to inject build label:', error);
+    });
+  };
+
+  webContents.on('dom-ready', inject);
+  webContents.on('did-navigate-in-page', inject);
+}
+
+function isDevDiagnosticsEnabled() {
+  if (!app.isPackaged) return true;
+  return readBuildProfile(app.getAppPath())?.channel === 'dev';
+}
+
+function openWebRtcInternalsWindow(parentWindow) {
+  if (!isDevDiagnosticsEnabled()) return;
+
+  if (webRtcInternalsWindow && !webRtcInternalsWindow.isDestroyed()) {
+    if (webRtcInternalsWindow.isMinimized()) webRtcInternalsWindow.restore();
+    webRtcInternalsWindow.show();
+    webRtcInternalsWindow.focus();
+    return;
+  }
+
+  webRtcInternalsWindow = new BrowserWindow({
+    backgroundColor: WINDOW_BACKGROUND,
+    height: 820,
+    parent: parentWindow || undefined,
+    show: false,
+    title: 'Voice Room WebRTC Internals',
+    width: 1180,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+
+  webRtcInternalsWindow.once('ready-to-show', () => {
+    if (!webRtcInternalsWindow?.isDestroyed()) webRtcInternalsWindow.show();
+  });
+  webRtcInternalsWindow.once('closed', () => {
+    webRtcInternalsWindow = null;
+  });
+  webRtcInternalsWindow.loadURL(WEBRTC_INTERNALS_URL).catch((error) => {
+    log.warn('Failed to open WebRTC internals:', error);
+  });
+}
+
+function installDevDiagnosticsShortcut(window) {
+  if (!isDevDiagnosticsEnabled()) return;
+
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    if (!input.shift || (!input.control && !input.meta)) return;
+
+    const key = String(input.key || '').toLowerCase();
+    if (key !== 'w' && input.code !== 'KeyW') return;
+
+    event.preventDefault();
+    openWebRtcInternalsWindow(window);
+  });
+}
+
 function configurePermissions() {
   const defaultSession = session.defaultSession;
 
@@ -847,6 +934,8 @@ function createWindow() {
   });
 
   installMediaDeviceFilter(mainWindow.webContents);
+  installBuildLabel(mainWindow.webContents);
+  installDevDiagnosticsShortcut(mainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: 'allow' };

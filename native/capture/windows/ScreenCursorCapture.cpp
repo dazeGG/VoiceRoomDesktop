@@ -221,8 +221,17 @@ class FrameWriter {
 
     const bool cursorDrawn = DrawCursor(contentOrigin);
     if ((width % 2) == 0 && (height % 2) == 0 && EnsureVideoProcessor(width, height)) {
-      d3dContext_->CopyResource(processorInputTexture_.get(), bgraTexture_.get());
-      const WriteStatus status = TryWriteGpuNv12(width, height, cursorDrawn);
+      if (inputMode_ == VideoProcessorInputMode::kCopied) {
+        d3dContext_->CopyResource(processorInputTexture_.get(), bgraTexture_.get());
+      }
+      WriteStatus status = TryWriteGpuNv12(width, height, cursorDrawn);
+      if (status == WriteStatus::kFailedBeforeWrite && inputMode_ == VideoProcessorInputMode::kDirect) {
+        DisableDirectVideoProcessorInputForSize(width, height);
+        if (EnsureVideoProcessor(width, height)) {
+          d3dContext_->CopyResource(processorInputTexture_.get(), bgraTexture_.get());
+          status = TryWriteGpuNv12(width, height, cursorDrawn);
+        }
+      }
       if (status == WriteStatus::kWrote) return true;
       if (status == WriteStatus::kPipeClosed) return false;
       DisableVideoProcessorForSize(width, height);
@@ -242,6 +251,12 @@ class FrameWriter {
     kWrote,
     kFailedBeforeWrite,
     kPipeClosed
+  };
+
+  enum class VideoProcessorInputMode {
+    kNone,
+    kDirect,
+    kCopied
   };
 
   static bool WriteFrameHeader(uint32_t width, uint32_t height, uint32_t flags) {
@@ -269,28 +284,57 @@ class FrameWriter {
     if (!(info.flags & CURSOR_SHOWING) || (info.flags & CURSOR_SUPPRESSED)) return false;
     if (!info.hCursor) return false;
 
-    ICONINFO iconInfo = {};
-    if (!GetIconInfo(info.hCursor, &iconInfo)) return false;
-    const int x = static_cast<int>(info.ptScreenPos.x - contentOrigin.x - static_cast<LONG>(iconInfo.xHotspot));
-    const int y = static_cast<int>(info.ptScreenPos.y - contentOrigin.y - static_cast<LONG>(iconInfo.yHotspot));
-    if (iconInfo.hbmMask) DeleteObject(iconInfo.hbmMask);
-    if (iconInfo.hbmColor) DeleteObject(iconInfo.hbmColor);
-
-    winrt::com_ptr<IDXGISurface1> surface;
-    if (FAILED(bgraTexture_->QueryInterface(__uuidof(IDXGISurface1), surface.put_void()))) {
+    if (!EnsureCursorMetrics(info.hCursor)) return false;
+    const int x = static_cast<int>(info.ptScreenPos.x - contentOrigin.x - cursorHotspotX_);
+    const int y = static_cast<int>(info.ptScreenPos.y - contentOrigin.y - cursorHotspotY_);
+    if (x >= static_cast<int>(width_) || y >= static_cast<int>(height_)
+        || x + cursorWidth_ <= 0 || y + cursorHeight_ <= 0) {
       return false;
     }
 
+    if (!cursorSurface_) return false;
+
     HDC dc = nullptr;
     d3dContext_->Flush();
-    if (FAILED(surface->GetDC(FALSE, &dc))) return false;
+    if (FAILED(cursorSurface_->GetDC(FALSE, &dc))) return false;
 
     // DrawIconEx on the GDI-compatible D3D surface handles masked and XOR
     // (inverting I-beam) cursors. Animated cursors render their first frame.
     const BOOL drawn = DrawIconEx(dc, x, y, info.hCursor, 0, 0, 0, nullptr, DI_NORMAL);
     GdiFlush();
-    const HRESULT releaseHr = surface->ReleaseDC(nullptr);
+    const HRESULT releaseHr = cursorSurface_->ReleaseDC(nullptr);
     return drawn != FALSE && SUCCEEDED(releaseHr);
+  }
+
+  bool EnsureCursorMetrics(HCURSOR cursor) {
+    if (cursor == cachedCursor_ && cursorWidth_ > 0 && cursorHeight_ > 0) return true;
+
+    ICONINFO iconInfo = {};
+    if (!GetIconInfo(cursor, &iconInfo)) return false;
+
+    BITMAP bitmap = {};
+    HBITMAP sizeBitmap = iconInfo.hbmColor ? iconInfo.hbmColor : iconInfo.hbmMask;
+    const bool hasBitmap = sizeBitmap
+        && GetObject(sizeBitmap, sizeof(bitmap), &bitmap) == sizeof(bitmap)
+        && bitmap.bmWidth > 0 && bitmap.bmHeight > 0;
+
+    cachedCursor_ = nullptr;
+    cursorHotspotX_ = 0;
+    cursorHotspotY_ = 0;
+    cursorWidth_ = 0;
+    cursorHeight_ = 0;
+
+    if (hasBitmap) {
+      cachedCursor_ = cursor;
+      cursorHotspotX_ = static_cast<int>(iconInfo.xHotspot);
+      cursorHotspotY_ = static_cast<int>(iconInfo.yHotspot);
+      cursorWidth_ = bitmap.bmWidth;
+      cursorHeight_ = iconInfo.hbmColor ? bitmap.bmHeight : bitmap.bmHeight / 2;
+    }
+
+    if (iconInfo.hbmMask) DeleteObject(iconInfo.hbmMask);
+    if (iconInfo.hbmColor) DeleteObject(iconInfo.hbmColor);
+    return cachedCursor_ == cursor && cursorWidth_ > 0 && cursorHeight_ > 0;
   }
 
   bool EnsureBgraResources(uint32_t width, uint32_t height) {
@@ -311,6 +355,11 @@ class FrameWriter {
     desc.BindFlags = D3D11_BIND_RENDER_TARGET;
     desc.MiscFlags = D3D11_RESOURCE_MISC_GDI_COMPATIBLE;
     HRESULT hr = d3dDevice_->CreateTexture2D(&desc, nullptr, bgraTexture_.put());
+    if (FAILED(hr)) {
+      Reset();
+      return false;
+    }
+    hr = bgraTexture_->QueryInterface(__uuidof(IDXGISurface1), cursorSurface_.put_void());
     if (FAILED(hr)) {
       Reset();
       return false;
@@ -336,23 +385,10 @@ class FrameWriter {
     if (videoProcessorUnavailable_ && unavailableVideoWidth_ == width && unavailableVideoHeight_ == height) {
       return false;
     }
-    if (videoWidth_ == width && videoHeight_ == height && videoProcessor_
-        && inputView_ && outputView_ && processorInputTexture_ && nv12Texture_ && nv12StagingTexture_) {
+    if (HasVideoProcessorResources(width, height)) {
       return true;
     }
     ResetVideoResources();
-
-    D3D11_TEXTURE2D_DESC inputDesc = {};
-    inputDesc.Width = width;
-    inputDesc.Height = height;
-    inputDesc.MipLevels = 1;
-    inputDesc.ArraySize = 1;
-    inputDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    inputDesc.SampleDesc.Count = 1;
-    inputDesc.Usage = D3D11_USAGE_DEFAULT;
-    inputDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
-    HRESULT hr = d3dDevice_->CreateTexture2D(&inputDesc, nullptr, processorInputTexture_.put());
-    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
 
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC content = {};
     content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
@@ -366,7 +402,7 @@ class FrameWriter {
     content.OutputHeight = height;
     content.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
 
-    hr = videoDevice_->CreateVideoProcessorEnumerator(&content, enumerator_.put());
+    HRESULT hr = videoDevice_->CreateVideoProcessorEnumerator(&content, enumerator_.put());
     if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
 
     UINT bgraSupport = 0;
@@ -383,11 +419,7 @@ class FrameWriter {
     hr = videoDevice_->CreateVideoProcessor(enumerator_.get(), 0, videoProcessor_.put());
     if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
 
-    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inputViewDesc = {};
-    inputViewDesc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
-    hr = videoDevice_->CreateVideoProcessorInputView(
-        processorInputTexture_.get(), enumerator_.get(), &inputViewDesc, inputView_.put());
-    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+    if (!EnsureVideoProcessorInput(width, height)) return DisableVideoProcessorForSize(width, height);
 
     D3D11_TEXTURE2D_DESC nv12Desc = {};
     nv12Desc.Width = width;
@@ -428,6 +460,62 @@ class FrameWriter {
     return true;
   }
 
+  bool HasVideoProcessorResources(uint32_t width, uint32_t height) const {
+    if (videoWidth_ != width || videoHeight_ != height) return false;
+    if (!videoProcessor_ || !inputView_ || !outputView_ || !nv12Texture_ || !nv12StagingTexture_) return false;
+    if (inputMode_ == VideoProcessorInputMode::kDirect) return true;
+    return inputMode_ == VideoProcessorInputMode::kCopied && processorInputTexture_;
+  }
+
+  bool EnsureVideoProcessorInput(uint32_t width, uint32_t height) {
+    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inputViewDesc = {};
+    inputViewDesc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+
+    if (!(directInputUnavailable_ && directInputUnavailableWidth_ == width && directInputUnavailableHeight_ == height)) {
+      HRESULT hr = videoDevice_->CreateVideoProcessorInputView(
+          bgraTexture_.get(), enumerator_.get(), &inputViewDesc, inputView_.put());
+      if (SUCCEEDED(hr)) {
+        inputMode_ = VideoProcessorInputMode::kDirect;
+        return true;
+      }
+      MarkDirectVideoProcessorInputUnavailable(width, height);
+    }
+
+    D3D11_TEXTURE2D_DESC inputDesc = {};
+    inputDesc.Width = width;
+    inputDesc.Height = height;
+    inputDesc.MipLevels = 1;
+    inputDesc.ArraySize = 1;
+    inputDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    inputDesc.SampleDesc.Count = 1;
+    inputDesc.Usage = D3D11_USAGE_DEFAULT;
+    inputDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    HRESULT hr = d3dDevice_->CreateTexture2D(&inputDesc, nullptr, processorInputTexture_.put());
+    if (FAILED(hr)) return false;
+
+    hr = videoDevice_->CreateVideoProcessorInputView(
+        processorInputTexture_.get(), enumerator_.get(), &inputViewDesc, inputView_.put());
+    if (FAILED(hr)) return false;
+
+    inputMode_ = VideoProcessorInputMode::kCopied;
+    return true;
+  }
+
+  void MarkDirectVideoProcessorInputUnavailable(uint32_t width, uint32_t height) {
+    directInputUnavailable_ = true;
+    directInputUnavailableWidth_ = width;
+    directInputUnavailableHeight_ = height;
+    if (!directInputFallbackLogged_) {
+      LogEvent("log", "Direct GPU NV12 input failed; falling back to copied input.");
+      directInputFallbackLogged_ = true;
+    }
+  }
+
+  void DisableDirectVideoProcessorInputForSize(uint32_t width, uint32_t height) {
+    ResetVideoResources();
+    MarkDirectVideoProcessorInputUnavailable(width, height);
+  }
+
   bool DisableVideoProcessorForSize(uint32_t width, uint32_t height) {
     ResetVideoResources();
     videoProcessorUnavailable_ = true;
@@ -448,12 +536,18 @@ class FrameWriter {
     hr = d3dContext_->Map(nv12StagingTexture_.get(), 0, D3D11_MAP_READ, 0, &mapped);
     if (FAILED(hr)) return WriteStatus::kFailedBeforeWrite;
 
-    PackNv12(mapped, width, height);
-    d3dContext_->Unmap(nv12StagingTexture_.get(), 0);
-
     const uint32_t flags = (cursorDrawn ? kFrameFlagCursorDrawn : 0u) | kFrameFlagFormatNv12;
-    if (!WriteFrameHeader(width, height, flags)) return WriteStatus::kPipeClosed;
-    if (std::fwrite(nv12_.data(), 1, nv12_.size(), stdout) != nv12_.size()) return WriteStatus::kPipeClosed;
+    bool ok = WriteFrameHeader(width, height, flags);
+    const size_t yPlaneBytes = static_cast<size_t>(width) * height;
+    const size_t payload = yPlaneBytes + yPlaneBytes / 2;
+    if (ok && mapped.RowPitch == width) {
+      ok = std::fwrite(mapped.pData, 1, payload, stdout) == payload;
+    } else if (ok) {
+      PackNv12(mapped, width, height);
+      ok = std::fwrite(nv12_.data(), 1, nv12_.size(), stdout) == nv12_.size();
+    }
+    d3dContext_->Unmap(nv12StagingTexture_.get(), 0);
+    if (!ok) return WriteStatus::kPipeClosed;
     std::fflush(stdout);
     return WriteStatus::kWrote;
   }
@@ -512,14 +606,19 @@ class FrameWriter {
     processorInputTexture_ = nullptr;
     nv12Texture_ = nullptr;
     nv12StagingTexture_ = nullptr;
+    inputMode_ = VideoProcessorInputMode::kNone;
     videoWidth_ = 0;
     videoHeight_ = 0;
   }
 
   void Reset() {
     ResetVideoResources();
+    cursorSurface_ = nullptr;
     bgraTexture_ = nullptr;
     bgraStagingTexture_ = nullptr;
+    directInputUnavailable_ = false;
+    directInputUnavailableWidth_ = 0;
+    directInputUnavailableHeight_ = 0;
     width_ = 0;
     height_ = 0;
   }
@@ -528,6 +627,7 @@ class FrameWriter {
   ID3D11DeviceContext* d3dContext_ = nullptr;
   winrt::com_ptr<ID3D11VideoDevice> videoDevice_;
   winrt::com_ptr<ID3D11VideoContext> videoContext_;
+  winrt::com_ptr<IDXGISurface1> cursorSurface_;
   winrt::com_ptr<ID3D11Texture2D> bgraTexture_;
   winrt::com_ptr<ID3D11Texture2D> bgraStagingTexture_;
   winrt::com_ptr<ID3D11Texture2D> processorInputTexture_;
@@ -538,14 +638,24 @@ class FrameWriter {
   winrt::com_ptr<ID3D11VideoProcessorInputView> inputView_;
   winrt::com_ptr<ID3D11VideoProcessorOutputView> outputView_;
   std::vector<uint8_t> nv12_;
+  HCURSOR cachedCursor_ = nullptr;
+  int cursorHotspotX_ = 0;
+  int cursorHotspotY_ = 0;
+  int cursorWidth_ = 0;
+  int cursorHeight_ = 0;
   uint32_t width_ = 0;
   uint32_t height_ = 0;
   uint32_t videoWidth_ = 0;
   uint32_t videoHeight_ = 0;
+  VideoProcessorInputMode inputMode_ = VideoProcessorInputMode::kNone;
   bool gpuFallbackLogged_ = false;
+  bool directInputFallbackLogged_ = false;
   bool videoProcessorUnavailable_ = false;
   uint32_t unavailableVideoWidth_ = 0;
   uint32_t unavailableVideoHeight_ = 0;
+  bool directInputUnavailable_ = false;
+  uint32_t directInputUnavailableWidth_ = 0;
+  uint32_t directInputUnavailableHeight_ = 0;
 };
 
 class CaptureSession {

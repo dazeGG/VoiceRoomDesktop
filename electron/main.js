@@ -1190,8 +1190,6 @@ function createWindow() {
     },
     width: 1180
   });
-  mainWindow.voiceRoomWindowRole = 'main';
-
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -1235,18 +1233,6 @@ function createWindow() {
   loadMainApplication(mainWindow);
 }
 
-function restoreWindow(window) {
-  if (!window || window.isDestroyed()) return false;
-  if (window.isMinimized()) window.restore();
-  if (!window.isVisible()) window.show();
-  window.focus();
-  return true;
-}
-
-function getTaggedMainWindow() {
-  return BrowserWindow.getAllWindows().find((window) => window.voiceRoomWindowRole === 'main') || null;
-}
-
 function resolveWindowsTrayIconPath() {
   const packagedIconPath = path.join(app.getAppPath(), 'assets', 'logo', 'icon.ico');
   if (fs.existsSync(packagedIconPath)) return packagedIconPath;
@@ -1284,8 +1270,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (windowLifecycle.restoreMainWindow()) return;
-    restoreWindow(getTaggedMainWindow());
+    windowLifecycle.restoreMainWindow();
   });
 
   app.on('before-quit', () => {

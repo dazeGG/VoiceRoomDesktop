@@ -156,14 +156,13 @@ describe('window lifecycle controller', () => {
     assert.equal(controller.shouldQuitForWindowAllClosed(), true);
   });
 
-  it('keeps tray ownership at app-shell bootstrap before the main window attaches', () => {
+  it('does not keep a Windows app alive before the main app shell enables tray', () => {
     const { controller, trayInstances } = createControllerHarness();
 
-    controller.installTray();
-
-    assert.equal(controller.hasTray(), true);
-    assert.equal(trayInstances.length, 1);
+    assert.equal(controller.hasTray(), false);
+    assert.equal(trayInstances.length, 0);
     assert.equal(controller.restoreMainWindow(), false);
+    assert.equal(controller.shouldQuitForWindowAllClosed(), true);
   });
 
   it('does not install tray behavior on macOS', () => {

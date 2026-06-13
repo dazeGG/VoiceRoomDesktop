@@ -1201,6 +1201,7 @@ function createWindow() {
   installBuildLabel(mainWindow.webContents);
   installDevDiagnosticsShortcut(mainWindow);
   windowLifecycle.attachMainWindow(mainWindow);
+  windowLifecycle.installTray();
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: 'allow' };
@@ -1307,8 +1308,6 @@ if (!gotLock) {
   }
 
   app.whenReady().then(() => {
-    windowLifecycle.installTray();
-
     launchApplication().catch((error) => {
       log.error('Application launch failed:', error);
       app.quit();

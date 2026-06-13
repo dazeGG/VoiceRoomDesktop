@@ -10,6 +10,11 @@ const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high']);
 const SCREEN_FPS_IDS = new Set(['15', '30']);
 const DEFAULT_SCREEN_QUALITY_ID = 'balanced';
 const DEFAULT_SCREEN_FPS_ID = '30';
+const SCREEN_QUALITY_MAX_HEIGHTS = new Map([
+  ['low', 720],
+  ['balanced', 1080],
+  ['high', 1440]
+]);
 
 function modeToCapabilityKey(mode) {
   if (mode === 'safe-system') return 'safeSystem';
@@ -72,6 +77,10 @@ function normalizeScreenQualityId(qualityId) {
   return SCREEN_QUALITY_IDS.has(qualityId) ? qualityId : DEFAULT_SCREEN_QUALITY_ID;
 }
 
+function getScreenQualityMaxHeight(qualityId) {
+  return SCREEN_QUALITY_MAX_HEIGHTS.get(normalizeScreenQualityId(qualityId)) || 1080;
+}
+
 function normalizeScreenFpsId(fpsId) {
   return SCREEN_FPS_IDS.has(fpsId) ? fpsId : DEFAULT_SCREEN_FPS_ID;
 }
@@ -87,6 +96,7 @@ function normalizeDesktopCapturePickerSelection(selection) {
 
 module.exports = {
   createScreenProfileId,
+  getScreenQualityMaxHeight,
   normalizeDesktopAudioCapture,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,

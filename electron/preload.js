@@ -11,7 +11,12 @@ contextBridge.exposeInMainWorld('voiceRoomRuntime', {
 contextBridge.exposeInMainWorld('voiceRoomDesktopCapture', {
   getSources: () => ipcRenderer.invoke('desktop-capture:get-sources'),
   openPicker: (options) => ipcRenderer.invoke('desktop-capture:open-picker', options),
-  selectSource: (sourceId, audioOptions) => ipcRenderer.invoke('desktop-capture:select-source', sourceId, audioOptions)
+  selectSource: (sourceId, audioOptions, captureOptions) => ipcRenderer.invoke(
+    'desktop-capture:select-source',
+    sourceId,
+    audioOptions,
+    captureOptions
+  )
 });
 
 contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {

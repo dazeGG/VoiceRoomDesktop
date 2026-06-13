@@ -43,11 +43,15 @@ function startSession(options, port) {
   }
 
   const fps = Number.isInteger(options.fps) && options.fps > 0 && options.fps <= 60 ? options.fps : 30;
+  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
+    ? options.maxHeight
+    : 1080;
   const session = {
     child: null,
     forceKillTimer: null,
     fps,
     frameState: createFrameState(),
+    maxHeight,
     port,
     stopped: false
   };
@@ -61,7 +65,14 @@ function startSession(options, port) {
 
   let child = null;
   try {
-    child = spawn(options.helperPath, ['--source', String(options.sourceId), '--fps', String(fps)], {
+    child = spawn(options.helperPath, [
+      '--source',
+      String(options.sourceId),
+      '--fps',
+      String(fps),
+      '--max-height',
+      String(maxHeight)
+    ], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
     });
@@ -101,11 +112,14 @@ function startSession(options, port) {
         postToRenderer(session, {
           fps: Number(event.fps) || fps,
           height: Number(event.height) || 0,
+          pixelFormat: event.pixelFormat || '',
           type: 'format',
           width: Number(event.width) || 0
         });
       } else if (event.event === 'error') {
         log('warn', 'Native capture helper error.', event.message || '');
+      } else if (event.event === 'warning') {
+        log('warn', 'Native capture helper warning.', event.message || '');
       } else if (event.event !== 'exit') {
         log('info', 'Native capture helper.', event.message || event.event);
       }

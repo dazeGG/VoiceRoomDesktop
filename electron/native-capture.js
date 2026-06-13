@@ -69,6 +69,10 @@ function startNativeCaptureSession(webContents, options = {}) {
 
   const helperPath = findScreenCursorCaptureHelper().path;
   const fps = Number.isInteger(options.fps) && options.fps > 0 && options.fps <= 60 ? options.fps : 30;
+  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
+    ? options.maxHeight
+    : 1080;
+  const qualityId = String(options.qualityId || 'balanced');
   const sessionId = String(nextSessionId++);
   const { port1, port2 } = new MessageChannelMain();
   let relay = null;
@@ -139,7 +143,7 @@ function startNativeCaptureSession(webContents, options = {}) {
   });
 
   try {
-    relay.postMessage({ fps, helperPath, sourceId, type: 'start' }, [port1]);
+    relay.postMessage({ fps, helperPath, maxHeight, qualityId, sourceId, type: 'start' }, [port1]);
     webContents.postMessage(PORT_CHANNEL, { sessionId }, [port2]);
   } catch (error) {
     log.error('Native capture relay setup failed:', error);
@@ -147,7 +151,7 @@ function startNativeCaptureSession(webContents, options = {}) {
     return { ok: false, reason: 'spawn-error' };
   }
 
-  return { fps, ok: true, sessionId };
+  return { fps, maxHeight, ok: true, qualityId, sessionId };
 }
 
 function stopNativeCaptureSession(sessionId = '') {

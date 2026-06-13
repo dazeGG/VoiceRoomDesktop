@@ -16,8 +16,9 @@
 //            NV12 is tightly packed Y plane + interleaved UV plane. If GPU NV12
 //            conversion is unavailable, frames fall back to top-down BGRX with
 //            stride == width * 4.
-//   stderr — one JSON event per line: format / log / error / closed / exit.
+//   stderr — one JSON event per line: format / log / warning / error / closed / exit.
 //   args   — --source screen:<index> | window:<hwnd>  [--fps 15|30|60]
+//            [--max-height 720|1080|1440]
 //
 // Exit codes: 0 clean stop, 2 capture unsupported on this Windows build,
 // 1 any other failure (details on stderr).
@@ -79,6 +80,30 @@ static void LogFormat(uint32_t width, uint32_t height, uint32_t fps) {
                "{\"event\":\"format\",\"width\":%u,\"height\":%u,\"fps\":%u,\"pixelFormat\":\"nv12\"}\n",
                width, height, fps);
   std::fflush(stderr);
+}
+
+struct FrameSize {
+  uint32_t width = 0;
+  uint32_t height = 0;
+};
+
+static uint32_t MakeEvenDimension(uint32_t value) {
+  if (value < 2) return 0;
+  return value & ~1u;
+}
+
+static FrameSize ComputeOutputSize(uint32_t width, uint32_t height, uint32_t maxHeight) {
+  if (width == 0 || height == 0 || maxHeight < 2 || height <= maxHeight) {
+    return {width, height};
+  }
+
+  const uint32_t outputHeight = MakeEvenDimension(std::min(height, maxHeight));
+  if (outputHeight == 0) return {width, height};
+
+  const uint64_t roundedWidth = (static_cast<uint64_t>(width) * outputHeight + height / 2) / height;
+  const uint32_t outputWidth = MakeEvenDimension(static_cast<uint32_t>(std::max<uint64_t>(2, roundedWidth)));
+  if (outputWidth == 0) return {width, height};
+  return {outputWidth, outputHeight};
 }
 
 static void Fail(const char* message, HRESULT hr = S_OK) {
@@ -209,9 +234,11 @@ class FrameWriter {
   bool WriteFrame(ID3D11Texture2D* source,
                   uint32_t width,
                   uint32_t height,
-                  const POINT& contentOrigin) {
+                  const POINT& contentOrigin,
+                  uint32_t maxHeight) {
     if (!source || !d3dDevice_ || !d3dContext_ || width == 0 || height == 0) return true;
     if (!EnsureBgraResources(width, height)) return true;
+    const FrameSize outputSize = ComputeOutputSize(width, height, maxHeight);
 
     D3D11_BOX sourceBox = {};
     sourceBox.right = width;
@@ -220,23 +247,24 @@ class FrameWriter {
     d3dContext_->CopySubresourceRegion(bgraTexture_.get(), 0, 0, 0, 0, source, 0, &sourceBox);
 
     const bool cursorDrawn = DrawCursor(contentOrigin);
-    if ((width % 2) == 0 && (height % 2) == 0 && EnsureVideoProcessor(width, height)) {
+    if ((outputSize.width % 2) == 0 && (outputSize.height % 2) == 0
+        && EnsureVideoProcessor(width, height, outputSize.width, outputSize.height)) {
       if (inputMode_ == VideoProcessorInputMode::kCopied) {
         d3dContext_->CopyResource(processorInputTexture_.get(), bgraTexture_.get());
       }
-      WriteStatus status = TryWriteGpuNv12(width, height, cursorDrawn);
+      WriteStatus status = TryWriteGpuNv12(outputSize.width, outputSize.height, cursorDrawn);
       if (status == WriteStatus::kFailedBeforeWrite && inputMode_ == VideoProcessorInputMode::kDirect) {
         DisableDirectVideoProcessorInputForSize(width, height);
-        if (EnsureVideoProcessor(width, height)) {
+        if (EnsureVideoProcessor(width, height, outputSize.width, outputSize.height)) {
           d3dContext_->CopyResource(processorInputTexture_.get(), bgraTexture_.get());
-          status = TryWriteGpuNv12(width, height, cursorDrawn);
+          status = TryWriteGpuNv12(outputSize.width, outputSize.height, cursorDrawn);
         }
       }
       if (status == WriteStatus::kWrote) return true;
       if (status == WriteStatus::kPipeClosed) return false;
-      DisableVideoProcessorForSize(width, height);
+      DisableVideoProcessorForSize(width, height, outputSize.width, outputSize.height);
       if (!gpuFallbackLogged_) {
-        LogEvent("log", "GPU NV12 conversion failed; falling back to BGRX frames.");
+        LogEvent("warning", "GPU NV12 conversion failed; falling back to full-resolution BGRX frames.");
         gpuFallbackLogged_ = true;
       }
     }
@@ -341,8 +369,10 @@ class FrameWriter {
     if (width == width_ && height == height_ && bgraTexture_ && bgraStagingTexture_) return true;
     Reset();
     videoProcessorUnavailable_ = false;
-    unavailableVideoWidth_ = 0;
-    unavailableVideoHeight_ = 0;
+    unavailableVideoInputWidth_ = 0;
+    unavailableVideoInputHeight_ = 0;
+    unavailableVideoOutputWidth_ = 0;
+    unavailableVideoOutputHeight_ = 0;
 
     D3D11_TEXTURE2D_DESC desc = {};
     desc.Width = width;
@@ -380,12 +410,19 @@ class FrameWriter {
     return true;
   }
 
-  bool EnsureVideoProcessor(uint32_t width, uint32_t height) {
+  bool EnsureVideoProcessor(uint32_t inputWidth,
+                            uint32_t inputHeight,
+                            uint32_t outputWidth,
+                            uint32_t outputHeight) {
     if (!videoDevice_ || !videoContext_) return false;
-    if (videoProcessorUnavailable_ && unavailableVideoWidth_ == width && unavailableVideoHeight_ == height) {
+    if (videoProcessorUnavailable_
+        && unavailableVideoInputWidth_ == inputWidth
+        && unavailableVideoInputHeight_ == inputHeight
+        && unavailableVideoOutputWidth_ == outputWidth
+        && unavailableVideoOutputHeight_ == outputHeight) {
       return false;
     }
-    if (HasVideoProcessorResources(width, height)) {
+    if (HasVideoProcessorResources(inputWidth, inputHeight, outputWidth, outputHeight)) {
       return true;
     }
     ResetVideoResources();
@@ -394,36 +431,38 @@ class FrameWriter {
     content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
     content.InputFrameRate.Numerator = 30;
     content.InputFrameRate.Denominator = 1;
-    content.InputWidth = width;
-    content.InputHeight = height;
+    content.InputWidth = inputWidth;
+    content.InputHeight = inputHeight;
     content.OutputFrameRate.Numerator = 30;
     content.OutputFrameRate.Denominator = 1;
-    content.OutputWidth = width;
-    content.OutputHeight = height;
+    content.OutputWidth = outputWidth;
+    content.OutputHeight = outputHeight;
     content.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
 
     HRESULT hr = videoDevice_->CreateVideoProcessorEnumerator(&content, enumerator_.put());
-    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+    if (FAILED(hr)) return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
 
     UINT bgraSupport = 0;
     UINT nv12Support = 0;
     hr = enumerator_->CheckVideoProcessorFormat(DXGI_FORMAT_B8G8R8A8_UNORM, &bgraSupport);
     if (FAILED(hr) || !(bgraSupport & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT)) {
-      return DisableVideoProcessorForSize(width, height);
+      return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
     }
     hr = enumerator_->CheckVideoProcessorFormat(DXGI_FORMAT_NV12, &nv12Support);
     if (FAILED(hr) || !(nv12Support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT)) {
-      return DisableVideoProcessorForSize(width, height);
+      return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
     }
 
     hr = videoDevice_->CreateVideoProcessor(enumerator_.get(), 0, videoProcessor_.put());
-    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+    if (FAILED(hr)) return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
 
-    if (!EnsureVideoProcessorInput(width, height)) return DisableVideoProcessorForSize(width, height);
+    if (!EnsureVideoProcessorInput(inputWidth, inputHeight)) {
+      return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
+    }
 
     D3D11_TEXTURE2D_DESC nv12Desc = {};
-    nv12Desc.Width = width;
-    nv12Desc.Height = height;
+    nv12Desc.Width = outputWidth;
+    nv12Desc.Height = outputHeight;
     nv12Desc.MipLevels = 1;
     nv12Desc.ArraySize = 1;
     nv12Desc.Format = DXGI_FORMAT_NV12;
@@ -431,37 +470,46 @@ class FrameWriter {
     nv12Desc.Usage = D3D11_USAGE_DEFAULT;
     nv12Desc.BindFlags = D3D11_BIND_RENDER_TARGET;
     hr = d3dDevice_->CreateTexture2D(&nv12Desc, nullptr, nv12Texture_.put());
-    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+    if (FAILED(hr)) return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
 
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC outputViewDesc = {};
     outputViewDesc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
     hr = videoDevice_->CreateVideoProcessorOutputView(
         nv12Texture_.get(), enumerator_.get(), &outputViewDesc, outputView_.put());
-    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+    if (FAILED(hr)) return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
 
     nv12Desc.Usage = D3D11_USAGE_STAGING;
     nv12Desc.BindFlags = 0;
     nv12Desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     hr = d3dDevice_->CreateTexture2D(&nv12Desc, nullptr, nv12StagingTexture_.put());
-    if (FAILED(hr)) return DisableVideoProcessorForSize(width, height);
+    if (FAILED(hr)) return DisableVideoProcessorForSize(inputWidth, inputHeight, outputWidth, outputHeight);
 
-    RECT rect = {};
-    rect.right = static_cast<LONG>(width);
-    rect.bottom = static_cast<LONG>(height);
+    RECT sourceRect = {};
+    sourceRect.right = static_cast<LONG>(inputWidth);
+    sourceRect.bottom = static_cast<LONG>(inputHeight);
+    RECT outputRect = {};
+    outputRect.right = static_cast<LONG>(outputWidth);
+    outputRect.bottom = static_cast<LONG>(outputHeight);
     videoContext_->VideoProcessorSetStreamFrameFormat(videoProcessor_.get(), 0,
                                                        D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
     videoContext_->VideoProcessorSetStreamAutoProcessingMode(videoProcessor_.get(), 0, FALSE);
-    videoContext_->VideoProcessorSetStreamSourceRect(videoProcessor_.get(), 0, TRUE, &rect);
-    videoContext_->VideoProcessorSetStreamDestRect(videoProcessor_.get(), 0, TRUE, &rect);
-    videoContext_->VideoProcessorSetOutputTargetRect(videoProcessor_.get(), TRUE, &rect);
+    videoContext_->VideoProcessorSetStreamSourceRect(videoProcessor_.get(), 0, TRUE, &sourceRect);
+    videoContext_->VideoProcessorSetStreamDestRect(videoProcessor_.get(), 0, TRUE, &outputRect);
+    videoContext_->VideoProcessorSetOutputTargetRect(videoProcessor_.get(), TRUE, &outputRect);
 
-    videoWidth_ = width;
-    videoHeight_ = height;
+    videoInputWidth_ = inputWidth;
+    videoInputHeight_ = inputHeight;
+    videoOutputWidth_ = outputWidth;
+    videoOutputHeight_ = outputHeight;
     return true;
   }
 
-  bool HasVideoProcessorResources(uint32_t width, uint32_t height) const {
-    if (videoWidth_ != width || videoHeight_ != height) return false;
+  bool HasVideoProcessorResources(uint32_t inputWidth,
+                                  uint32_t inputHeight,
+                                  uint32_t outputWidth,
+                                  uint32_t outputHeight) const {
+    if (videoInputWidth_ != inputWidth || videoInputHeight_ != inputHeight) return false;
+    if (videoOutputWidth_ != outputWidth || videoOutputHeight_ != outputHeight) return false;
     if (!videoProcessor_ || !inputView_ || !outputView_ || !nv12Texture_ || !nv12StagingTexture_) return false;
     if (inputMode_ == VideoProcessorInputMode::kDirect) return true;
     return inputMode_ == VideoProcessorInputMode::kCopied && processorInputTexture_;
@@ -516,11 +564,16 @@ class FrameWriter {
     MarkDirectVideoProcessorInputUnavailable(width, height);
   }
 
-  bool DisableVideoProcessorForSize(uint32_t width, uint32_t height) {
+  bool DisableVideoProcessorForSize(uint32_t inputWidth,
+                                    uint32_t inputHeight,
+                                    uint32_t outputWidth,
+                                    uint32_t outputHeight) {
     ResetVideoResources();
     videoProcessorUnavailable_ = true;
-    unavailableVideoWidth_ = width;
-    unavailableVideoHeight_ = height;
+    unavailableVideoInputWidth_ = inputWidth;
+    unavailableVideoInputHeight_ = inputHeight;
+    unavailableVideoOutputWidth_ = outputWidth;
+    unavailableVideoOutputHeight_ = outputHeight;
     return false;
   }
 
@@ -607,8 +660,10 @@ class FrameWriter {
     nv12Texture_ = nullptr;
     nv12StagingTexture_ = nullptr;
     inputMode_ = VideoProcessorInputMode::kNone;
-    videoWidth_ = 0;
-    videoHeight_ = 0;
+    videoInputWidth_ = 0;
+    videoInputHeight_ = 0;
+    videoOutputWidth_ = 0;
+    videoOutputHeight_ = 0;
   }
 
   void Reset() {
@@ -645,14 +700,18 @@ class FrameWriter {
   int cursorHeight_ = 0;
   uint32_t width_ = 0;
   uint32_t height_ = 0;
-  uint32_t videoWidth_ = 0;
-  uint32_t videoHeight_ = 0;
+  uint32_t videoInputWidth_ = 0;
+  uint32_t videoInputHeight_ = 0;
+  uint32_t videoOutputWidth_ = 0;
+  uint32_t videoOutputHeight_ = 0;
   VideoProcessorInputMode inputMode_ = VideoProcessorInputMode::kNone;
   bool gpuFallbackLogged_ = false;
   bool directInputFallbackLogged_ = false;
   bool videoProcessorUnavailable_ = false;
-  uint32_t unavailableVideoWidth_ = 0;
-  uint32_t unavailableVideoHeight_ = 0;
+  uint32_t unavailableVideoInputWidth_ = 0;
+  uint32_t unavailableVideoInputHeight_ = 0;
+  uint32_t unavailableVideoOutputWidth_ = 0;
+  uint32_t unavailableVideoOutputHeight_ = 0;
   bool directInputUnavailable_ = false;
   uint32_t directInputUnavailableWidth_ = 0;
   uint32_t directInputUnavailableHeight_ = 0;
@@ -660,9 +719,10 @@ class FrameWriter {
 
 class CaptureSession {
  public:
-  bool Start(const CaptureTarget& target, uint32_t fps) {
+  bool Start(const CaptureTarget& target, uint32_t fps, uint32_t maxHeight) {
     target_ = target;
     fps_ = fps == 0 ? 30 : fps;
+    maxHeight_ = maxHeight;
     minFrameIntervalQpc_ = 0;
 
     LARGE_INTEGER frequency = {};
@@ -736,7 +796,11 @@ class CaptureSession {
           OnFrameArrived(pool);
         });
 
-    LogFormat(static_cast<uint32_t>(contentSize_.Width), static_cast<uint32_t>(contentSize_.Height), fps_);
+    const FrameSize outputSize = ComputeOutputSize(
+        static_cast<uint32_t>(contentSize_.Width),
+        static_cast<uint32_t>(contentSize_.Height),
+        maxHeight_);
+    LogFormat(outputSize.width, outputSize.height, fps_);
     session_.StartCapture();
     return true;
   }
@@ -789,7 +853,11 @@ class CaptureSession {
     if (frameSize.Width != contentSize_.Width || frameSize.Height != contentSize_.Height) {
       contentSize_ = frameSize;
       pool.Recreate(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, contentSize_);
-      LogFormat(static_cast<uint32_t>(contentSize_.Width), static_cast<uint32_t>(contentSize_.Height), fps_);
+      const FrameSize outputSize = ComputeOutputSize(
+          static_cast<uint32_t>(contentSize_.Width),
+          static_cast<uint32_t>(contentSize_.Height),
+          maxHeight_);
+      LogFormat(outputSize.width, outputSize.height, fps_);
       return;
     }
 
@@ -813,7 +881,7 @@ class CaptureSession {
 
     const uint32_t width = std::min<uint32_t>(desc.Width, static_cast<uint32_t>(contentSize_.Width));
     const uint32_t height = std::min<uint32_t>(desc.Height, static_cast<uint32_t>(contentSize_.Height));
-    const bool ok = originKnown ? writer_.WriteFrame(texture.get(), width, height, contentOrigin) : true;
+    const bool ok = originKnown ? writer_.WriteFrame(texture.get(), width, height, contentOrigin, maxHeight_) : true;
 
     if (!ok) {
       // stdout pipe is gone — the parent process exited.
@@ -824,6 +892,7 @@ class CaptureSession {
 
   CaptureTarget target_;
   uint32_t fps_ = 30;
+  uint32_t maxHeight_ = 1080;
   int64_t minFrameIntervalQpc_ = 0;
   int64_t lastFrameQpc_ = 0;
   bool unsupported_ = false;
@@ -870,11 +939,12 @@ int wmain(int argc, wchar_t** argv) {
 
   const std::wstring sourceArg = ReadStringArg(argc, argv, L"--source");
   const uint32_t fps = ReadUIntArg(argc, argv, L"--fps", 30);
+  const uint32_t maxHeight = ReadUIntArg(argc, argv, L"--max-height", 1080);
 
   bool isWindow = false;
   uint64_t sourceValue = 0;
   if (sourceArg.empty() || !ParseSourceArg(sourceArg, &isWindow, &sourceValue)) {
-    Fail("Usage: --source screen:<index>|window:<hwnd> [--fps 30]");
+    Fail("Usage: --source screen:<index>|window:<hwnd> [--fps 30] [--max-height 1080]");
     return 1;
   }
 
@@ -902,7 +972,7 @@ int wmain(int argc, wchar_t** argv) {
     CaptureSession session;
     bool started = false;
     try {
-      started = session.Start(target, fps);
+      started = session.Start(target, fps, maxHeight);
     } catch (const winrt::hresult_error& error) {
       Fail("Capture session failed to start.", error.code());
     }

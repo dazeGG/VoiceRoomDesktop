@@ -13,4 +13,10 @@ describe('electron-builder config', () => {
     assert.ok(builderConfig.files.includes('electron/native-capture-relay.js'));
     assert.ok(builderConfig.files.includes('electron/windows-capture-policy.js'));
   });
+
+  it('packages Windows tray lifecycle helper and icon', () => {
+    assert.ok(builderConfig.files.includes('electron/window-lifecycle-policy.js'));
+    assert.ok(builderConfig.files.includes('electron/window-lifecycle.js'));
+    assert.ok(builderConfig.files.includes('assets/logo/icon.ico'));
+  });
 });

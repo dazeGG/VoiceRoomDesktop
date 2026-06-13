@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, shell, session, systemPreferences } = require('electron');
+const { app, BrowserWindow, Menu, Tray, desktopCapturer, dialog, ipcMain, shell, session, systemPreferences } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -29,6 +29,7 @@ const {
 } = require('./desktop-capture-policy');
 const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 const { getWindowsCaptureFeaturePolicy } = require('./windows-capture-policy');
+const { createWindowLifecycleController } = require('./window-lifecycle');
 
 const WINDOWS_HW_ENCODER_CHROMIUM_FEATURES = [
   'WebRTCHardwareVideoEncoderFrameDrop',
@@ -133,6 +134,14 @@ const DESKTOP_DRAG_REGION_CSS = `
 `;
 
 configureDevChromiumLogging();
+
+const windowLifecycle = createWindowLifecycleController({
+  Menu,
+  Tray,
+  app,
+  platform: process.platform,
+  resolveTrayIconPath: resolveWindowsTrayIconPath
+});
 
 function readRuntimeConfig() {
   const configPath = path.join(__dirname, 'runtime-config.json');
@@ -1181,7 +1190,6 @@ function createWindow() {
     },
     width: 1180
   });
-
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -1190,6 +1198,8 @@ function createWindow() {
   installNativeCaptureBridge(mainWindow.webContents);
   installBuildLabel(mainWindow.webContents);
   installDevDiagnosticsShortcut(mainWindow);
+  windowLifecycle.attachMainWindow(mainWindow);
+  windowLifecycle.installTray();
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedUrl(url)) return { action: 'allow' };
@@ -1223,6 +1233,12 @@ function createWindow() {
   loadMainApplication(mainWindow);
 }
 
+function resolveWindowsTrayIconPath() {
+  const packagedIconPath = path.join(app.getAppPath(), 'assets', 'logo', 'icon.ico');
+  if (fs.existsSync(packagedIconPath)) return packagedIconPath;
+  return path.join(__dirname, '..', 'assets', 'logo', 'icon.ico');
+}
+
 function createPickerPreviewWindow() {
   const previewWindow = new BrowserWindow({
     backgroundColor: WINDOW_BACKGROUND,
@@ -1254,10 +1270,11 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    const [window] = BrowserWindow.getAllWindows();
-    if (!window) return;
-    if (window.isMinimized()) window.restore();
-    window.focus();
+    windowLifecycle.restoreMainWindow();
+  });
+
+  app.on('before-quit', () => {
+    windowLifecycle.requestQuit();
   });
 
   async function launchApplication() {
@@ -1293,5 +1310,7 @@ if (!gotLock) {
 }
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (windowLifecycle.shouldQuitForWindowAllClosed()) {
+    app.quit();
+  }
 });

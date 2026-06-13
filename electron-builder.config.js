@@ -37,6 +37,7 @@ module.exports = {
     'native/bin/**/*'
   ],
   files: [
+    'assets/logo/icon.ico',
     'electron/build-profile.json',
     'electron/desktop-capture-policy.js',
     'electron/logger.js',
@@ -48,6 +49,8 @@ module.exports = {
     'electron/native-capture-frames.js',
     'electron/native-capture-policy.js',
     'electron/windows-capture-policy.js',
+    'electron/window-lifecycle-policy.js',
+    'electron/window-lifecycle.js',
     'electron/native-capture-relay.js',
     'electron/shell-theme.js',
     'electron/shell-tokens.css',

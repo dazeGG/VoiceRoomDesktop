@@ -9,6 +9,13 @@
 // game capture) is to capture frames *without* the OS cursor and composite the
 // cursor ourselves, honouring CURSOR_SHOWING.
 //
+// Backends: screens use DXGI Desktop Duplication, windows use WGC. WGC paints a
+// yellow capture border that cannot be turned off on Windows 10 (the
+// IsBorderRequired toggle is Windows 11 only), so monitors go through
+// Duplication, which draws no border and hands back a cursor-free desktop image
+// that feeds the same cursor-compositing FrameWriter. Windows have no
+// border-free GPU backend, so they stay on WGC.
+//
 // Protocol (mirrors SafeSystemAudioCapture):
 //   stdout — binary frame stream: 24-byte header + top-down payload.
 //            header: u32 magic 'VRF1', u32 width, u32 height, u32 flags
@@ -50,6 +57,7 @@
 #include <csignal>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace wgc = winrt::Windows::Graphics::Capture;
@@ -730,10 +738,42 @@ class CaptureSession {
       minFrameIntervalQpc_ = frequency.QuadPart / fps_;
     }
 
-    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+    // Screens use DXGI Desktop Duplication, windows use WGC. Duplication is the
+    // only backend that does not paint the OS capture border (WGC draws a yellow
+    // frame that cannot be removed on Windows 10, where IsBorderRequired does
+    // not exist). It also hands us the desktop image *without* the cursor, so
+    // FrameWriter::DrawCursor keeps compositing a cursor that honours
+    // CURSOR_SHOWING — same correct hiding behaviour as the WGC path.
+    return target_.isWindow ? StartWindowCapture() : StartScreenCapture();
+  }
+
+  bool IsUnsupported() const { return unsupported_; }
+
+  void Stop() {
+    // Desktop Duplication path: signal already set via g_running; join the loop.
+    if (duplicationThread_.joinable()) duplicationThread_.join();
+    duplication_ = nullptr;
+
+    // WGC path.
+    frameArrivedRevoker_.revoke();
+    closedRevoker_.revoke();
+    if (session_) session_.Close();
+    if (framePool_) framePool_.Close();
+    session_ = nullptr;
+    framePool_ = nullptr;
+    item_ = nullptr;
+  }
+
+ private:
+  bool CreateDevice(IDXGIAdapter* adapter) {
+    // A specific adapter (Desktop Duplication needs the device on the output's
+    // adapter) must use DRIVER_TYPE_UNKNOWN; the default-adapter path keeps the
+    // hardware-then-WARP fallback the WGC backend relied on.
+    const D3D_DRIVER_TYPE driverType = adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+    HRESULT hr = D3D11CreateDevice(adapter, driverType, nullptr,
                                    D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
                                    D3D11_SDK_VERSION, d3dDevice_.put(), nullptr, nullptr);
-    if (FAILED(hr)) {
+    if (FAILED(hr) && !adapter) {
       hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
                              D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
                              D3D11_SDK_VERSION, d3dDevice_.put(), nullptr, nullptr);
@@ -744,10 +784,53 @@ class CaptureSession {
     }
     d3dDevice_->GetImmediateContext(d3dContext_.put());
     writer_.Initialize(d3dDevice_.get(), d3dContext_.get());
+    return true;
+  }
+
+  bool StartScreenCapture() {
+    winrt::com_ptr<IDXGIFactory1> factory;
+    HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), factory.put_void());
+    if (FAILED(hr)) {
+      Fail("CreateDXGIFactory1 failed.", hr);
+      return false;
+    }
+
+    winrt::com_ptr<IDXGIAdapter1> adapter;
+    winrt::com_ptr<IDXGIOutput> output;
+    if (!FindMonitorOutput(factory.get(), adapter, output)) {
+      Fail("Capture monitor output was not found.");
+      return false;
+    }
+
+    if (!CreateDevice(adapter.get())) return false;
+
+    auto output1 = output.try_as<IDXGIOutput1>();
+    if (!output1) {
+      Fail("IDXGIOutput1 is not available on this Windows build.");
+      return false;
+    }
+
+    hr = output1->DuplicateOutput(d3dDevice_.get(), duplication_.put());
+    if (FAILED(hr)) {
+      Fail("DuplicateOutput failed.", hr);
+      return false;
+    }
+
+    DXGI_OUTDUPL_DESC desc = {};
+    duplication_->GetDesc(&desc);
+    const FrameSize outputSize = ComputeOutputSize(desc.ModeDesc.Width, desc.ModeDesc.Height, maxHeight_);
+    LogFormat(outputSize.width, outputSize.height, fps_);
+
+    duplicationThread_ = std::thread([this]() { DuplicationLoop(); });
+    return true;
+  }
+
+  bool StartWindowCapture() {
+    if (!CreateDevice(nullptr)) return false;
 
     winrt::com_ptr<IDXGIDevice> dxgiDevice = d3dDevice_.as<IDXGIDevice>();
     winrt::com_ptr<IInspectable> inspectable;
-    hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.get(), inspectable.put());
+    HRESULT hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.get(), inspectable.put());
     if (FAILED(hr)) {
       Fail("CreateDirect3D11DeviceFromDXGIDevice failed.", hr);
       return false;
@@ -755,13 +838,8 @@ class CaptureSession {
     device_ = inspectable.as<wgd3d::IDirect3DDevice>();
 
     auto interopFactory = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
-    if (target_.isWindow) {
-      hr = interopFactory->CreateForWindow(target_.window, winrt::guid_of<wgc::GraphicsCaptureItem>(),
-                                           winrt::put_abi(item_));
-    } else {
-      hr = interopFactory->CreateForMonitor(target_.monitor, winrt::guid_of<wgc::GraphicsCaptureItem>(),
-                                            winrt::put_abi(item_));
-    }
+    hr = interopFactory->CreateForWindow(target_.window, winrt::guid_of<wgc::GraphicsCaptureItem>(),
+                                         winrt::put_abi(item_));
     if (FAILED(hr) || !item_) {
       Fail("GraphicsCaptureItem creation failed.", hr);
       return false;
@@ -805,19 +883,89 @@ class CaptureSession {
     return true;
   }
 
-  bool IsUnsupported() const { return unsupported_; }
-
-  void Stop() {
-    frameArrivedRevoker_.revoke();
-    closedRevoker_.revoke();
-    if (session_) session_.Close();
-    if (framePool_) framePool_.Close();
-    session_ = nullptr;
-    framePool_ = nullptr;
-    item_ = nullptr;
+  bool FindMonitorOutput(IDXGIFactory1* factory,
+                         winrt::com_ptr<IDXGIAdapter1>& outAdapter,
+                         winrt::com_ptr<IDXGIOutput>& outOutput) {
+    for (UINT adapterIndex = 0;; ++adapterIndex) {
+      winrt::com_ptr<IDXGIAdapter1> adapter;
+      if (factory->EnumAdapters1(adapterIndex, adapter.put()) == DXGI_ERROR_NOT_FOUND) break;
+      for (UINT outputIndex = 0;; ++outputIndex) {
+        winrt::com_ptr<IDXGIOutput> output;
+        if (adapter->EnumOutputs(outputIndex, output.put()) == DXGI_ERROR_NOT_FOUND) break;
+        DXGI_OUTPUT_DESC outputDesc = {};
+        if (SUCCEEDED(output->GetDesc(&outputDesc)) && outputDesc.Monitor == target_.monitor) {
+          outAdapter = adapter;
+          outOutput = output;
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
- private:
+  bool RecreateDuplication() {
+    duplication_ = nullptr;
+    winrt::com_ptr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), factory.put_void()))) return false;
+    winrt::com_ptr<IDXGIAdapter1> adapter;
+    winrt::com_ptr<IDXGIOutput> output;
+    if (!FindMonitorOutput(factory.get(), adapter, output)) return false;
+    auto output1 = output.try_as<IDXGIOutput1>();
+    if (!output1) return false;
+    return SUCCEEDED(output1->DuplicateOutput(d3dDevice_.get(), duplication_.put()));
+  }
+
+  void DuplicationLoop() {
+    // Cursor coordinates are translated against the monitor origin, matching the
+    // screen branch of the old WGC OnFrameArrived path.
+    const POINT origin = {target_.monitorRect.left, target_.monitorRect.top};
+    while (g_running) {
+      DXGI_OUTDUPL_FRAME_INFO info = {};
+      winrt::com_ptr<IDXGIResource> resource;
+      HRESULT hr = duplication_->AcquireNextFrame(250, &info, resource.put());
+      if (hr == DXGI_ERROR_WAIT_TIMEOUT) continue;
+      if (hr == DXGI_ERROR_ACCESS_LOST) {
+        // Resolution/mode change, UAC desktop switch, etc. Rebuild and retry.
+        if (RecreateDuplication()) continue;
+        break;
+      }
+      if (FAILED(hr)) {
+        Fail("AcquireNextFrame failed.", hr);
+        break;
+      }
+
+      bool emit = true;
+      if (minFrameIntervalQpc_ > 0) {
+        LARGE_INTEGER now = {};
+        QueryPerformanceCounter(&now);
+        if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < minFrameIntervalQpc_) {
+          emit = false;
+        } else {
+          lastFrameQpc_ = now.QuadPart;
+        }
+      }
+
+      bool pipeAlive = true;
+      if (emit) {
+        auto texture = resource.try_as<ID3D11Texture2D>();
+        if (texture) {
+          D3D11_TEXTURE2D_DESC desc = {};
+          texture->GetDesc(&desc);
+          pipeAlive = writer_.WriteFrame(texture.get(), desc.Width, desc.Height, origin, maxHeight_);
+        }
+      }
+
+      duplication_->ReleaseFrame();
+
+      if (!pipeAlive) {
+        // stdout pipe is gone — the parent process exited.
+        g_running = false;
+        if (g_stopEvent) SetEvent(g_stopEvent);
+        break;
+      }
+    }
+  }
+
   void TryDisableBorder() {
     // Best-effort: the capture border toggle only exists on newer builds and
     // may require capture access. A visible border is cosmetic, never fatal.
@@ -919,6 +1067,9 @@ class CaptureSession {
   wgc::GraphicsCaptureItem::Closed_revoker closedRevoker_;
   wgc::Direct3D11CaptureFramePool::FrameArrived_revoker frameArrivedRevoker_;
 
+  winrt::com_ptr<IDXGIOutputDuplication> duplication_;
+  std::thread duplicationThread_;
+
   std::mutex frameMutex_;
   FrameWriter writer_;
 };
@@ -959,7 +1110,9 @@ int wmain(int argc, wchar_t** argv) {
     return 1;
   }
 
-  if (!wgc::GraphicsCaptureSession::IsSupported()) {
+  // Window capture relies on WGC; screen capture uses DXGI Desktop Duplication
+  // (supported since Windows 8) and does not need WGC at all.
+  if (isWindow && !wgc::GraphicsCaptureSession::IsSupported()) {
     LogEvent("error", "Windows.Graphics.Capture is not supported on this Windows build.");
     return 2;
   }

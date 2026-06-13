@@ -1,17 +1,47 @@
 'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
+const {
+  NATIVE_CAPTURE_PORT_MESSAGE_TYPE,
+  NATIVE_CAPTURE_PROTOCOL_VERSION
+} = require('./native-capture-contract');
 
-contextBridge.exposeInMainWorld('voiceRoomRuntime', {
+const DESKTOP_VERSION_ARG = '--voice-room-desktop-version=';
+
+function getDesktopVersion() {
+  const arg = process.argv.find((value) => value.startsWith(DESKTOP_VERSION_ARG));
+  return arg ? arg.slice(DESKTOP_VERSION_ARG.length) : '';
+}
+
+function markDesktopDocument() {
+  const root = document.documentElement;
+  if (!root) return;
+  root.classList.add('is-desktop');
+  root.dataset.electron = 'true';
+}
+
+const desktopRuntime = {
   isDesktop: true,
   isElectron: true,
-  platform: process.platform
-});
+  platform: process.platform,
+  version: getDesktopVersion()
+};
+
+markDesktopDocument();
+
+contextBridge.exposeInMainWorld('voiceRoomRuntime', desktopRuntime);
+
+contextBridge.exposeInMainWorld('voiceRoomDesktop', desktopRuntime);
 
 contextBridge.exposeInMainWorld('voiceRoomDesktopCapture', {
   getSources: () => ipcRenderer.invoke('desktop-capture:get-sources'),
   openPicker: (options) => ipcRenderer.invoke('desktop-capture:open-picker', options),
-  selectSource: (sourceId, audioOptions) => ipcRenderer.invoke('desktop-capture:select-source', sourceId, audioOptions)
+  selectSource: (sourceId, audioOptions, captureOptions) => ipcRenderer.invoke(
+    'desktop-capture:select-source',
+    sourceId,
+    audioOptions,
+    captureOptions
+  )
 });
 
 contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
@@ -35,6 +65,8 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
 });
 
 contextBridge.exposeInMainWorld('voiceRoomNativeCaptureBridge', {
+  commitPrepared: (sourceId) => ipcRenderer.invoke('native-capture:commit-prepared', sourceId),
+  prepare: () => ipcRenderer.invoke('native-capture:prepare'),
   start: () => ipcRenderer.invoke('native-capture:start'),
   stop: (sessionId) => ipcRenderer.invoke('native-capture:stop', sessionId)
 });
@@ -43,7 +75,13 @@ contextBridge.exposeInMainWorld('voiceRoomNativeCaptureBridge', {
 // world (shared DOM) where the injected getDisplayMedia wrapper picks it up.
 ipcRenderer.on('native-capture:port', (event, message) => {
   window.postMessage(
-    { sessionId: message?.sessionId, type: 'voice-room-native-capture-port' },
+    {
+      protocolVersion: message?.protocolVersion === NATIVE_CAPTURE_PROTOCOL_VERSION
+        ? NATIVE_CAPTURE_PROTOCOL_VERSION
+        : message?.protocolVersion,
+      sessionId: message?.sessionId,
+      type: NATIVE_CAPTURE_PORT_MESSAGE_TYPE
+    },
     window.location.origin,
     event.ports
   );
@@ -78,6 +116,6 @@ async function warmUpMediaDeviceAccess() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  document.documentElement.dataset.electron = 'true';
+  markDesktopDocument();
   void warmUpMediaDeviceAccess();
 });

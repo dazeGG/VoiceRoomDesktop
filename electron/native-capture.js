@@ -1,18 +1,12 @@
 'use strict';
 
-const { app, MessageChannelMain } = require('electron');
-const { spawn } = require('node:child_process');
+const { app, MessageChannelMain, utilityProcess } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const log = require('./logger');
+const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./native-capture-contract');
 
-// Binary frame protocol shared with native/capture/windows/ScreenCursorCapture.cpp:
-// 24-byte header (u32 magic 'VRF1', u32 width, u32 height, u32 flags,
-// i64 timestampMs) followed by width * height * 4 bytes of top-down BGRA.
-const FRAME_MAGIC = 0x31465256;
-const FRAME_HEADER_BYTES = 24;
-const MAX_FRAME_DIMENSION = 16384;
 const PORT_CHANNEL = 'native-capture:port';
 
 let activeSession = null;
@@ -76,20 +70,31 @@ function startNativeCaptureSession(webContents, options = {}) {
 
   const helperPath = findScreenCursorCaptureHelper().path;
   const fps = Number.isInteger(options.fps) && options.fps > 0 && options.fps <= 60 ? options.fps : 30;
+  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
+    ? options.maxHeight
+    : 1080;
+  const qualityId = String(options.qualityId || 'balanced');
   const sessionId = String(nextSessionId++);
-  const child = spawn(helperPath, ['--source', sourceId, '--fps', String(fps)], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true
-  });
-
   const { port1, port2 } = new MessageChannelMain();
+  let relay = null;
+  try {
+    relay = utilityProcess.fork(path.join(__dirname, 'native-capture-relay.js'), [], {
+      serviceName: 'Voice Room Native Capture Relay',
+      stdio: 'ignore'
+    });
+  } catch (error) {
+    log.error('Native capture relay failed to start:', error);
+    try {
+      port1.close();
+      port2.close();
+    } catch {}
+    return { ok: false, reason: 'spawn-error' };
+  }
+
   const session = {
-    child,
-    chunks: [],
-    chunkBytes: 0,
-    expectedFrame: null,
+    forceKillTimer: null,
     id: sessionId,
-    port: port1,
+    relay,
     stopped: false,
     webContents,
     webContentsDestroyedListener: null
@@ -99,148 +104,83 @@ function startNativeCaptureSession(webContents, options = {}) {
   session.webContentsDestroyedListener = () => stopNativeCaptureSession(sessionId);
   webContents.once('destroyed', session.webContentsDestroyedListener);
 
-  port1.on('message', (event) => {
-    if (event.data?.type === 'stop') stopNativeCaptureSession(sessionId);
-  });
-  port1.on('close', () => stopNativeCaptureSession(sessionId));
-  port1.start();
-
-  child.stdout.on('data', (chunk) => {
-    if (activeSession !== session || session.stopped) return;
-    session.chunks.push(chunk);
-    session.chunkBytes += chunk.length;
-    drainFrames(session);
-  });
-
-  child.stderr.on('data', (chunk) => {
-    for (const line of String(chunk).split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      let event = null;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        event = { event: 'log', message: line };
+  relay.on('message', (message) => {
+    if (activeSession !== session && !session.stopped) return;
+    if (session.stopped && message?.type !== 'exited') return;
+    if (message?.type === 'log') {
+      const detail = message.detail;
+      if (message.level === 'error') {
+        log.error(message.message, detail || '');
+      } else if (message.level === 'warn') {
+        log.warn(message.message, detail || '');
+      } else {
+        log.info(message.message, detail || '');
       }
-      if (event.event === 'format') {
-        postToRenderer(session, {
-          fps: Number(event.fps) || fps,
-          height: Number(event.height) || 0,
-          type: 'format',
-          width: Number(event.width) || 0
+    } else if (message?.type === 'exited') {
+      if (message.reason !== 'stopped' && message.code !== 0 && message.code !== null) {
+        log.warn('Native capture relay exited:', {
+          code: message.code,
+          reason: message.reason,
+          sessionId,
+          signal: message.signal
         });
-      } else if (event.event === 'error') {
-        log.warn('Native capture helper error:', event.message || '');
-      } else if (event.event !== 'exit') {
-        log.info('Native capture helper:', event.message || event.event);
       }
+      cleanupSession(session);
     }
   });
 
-  child.on('error', (error) => {
-    log.error('Native capture helper process error:', error);
-    endSession(session, 'spawn-error');
-  });
-
-  child.on('exit', (code, signal) => {
-    if (code !== 0 && code !== null) {
-      log.warn('Native capture helper exited:', { code, sessionId, signal });
+  relay.on('error', (error) => {
+    if (activeSession === session && !session.stopped) {
+      log.error('Native capture relay error:', error);
     }
-    endSession(session, code === 2 ? 'unsupported' : 'exited');
+    cleanupSession(session);
   });
 
-  webContents.postMessage(PORT_CHANNEL, { sessionId }, [port2]);
-  return { fps, ok: true, sessionId };
-}
+  relay.on('exit', (code) => {
+    if (activeSession === session && !session.stopped && code !== 0 && code !== null) {
+      log.warn('Native capture relay process exited:', { code, sessionId });
+    }
+    cleanupSession(session);
+  });
 
-function drainFrames(session) {
-  for (;;) {
-    if (!session.expectedFrame) {
-      if (session.chunkBytes < FRAME_HEADER_BYTES) return;
-      const header = takeBytes(session, FRAME_HEADER_BYTES);
-      const magic = header.readUInt32LE(0);
-      const width = header.readUInt32LE(4);
-      const height = header.readUInt32LE(8);
-      const flags = header.readUInt32LE(12);
-      const timestampMs = Number(header.readBigInt64LE(16));
-
-      if (magic !== FRAME_MAGIC || !width || !height
-        || width > MAX_FRAME_DIMENSION || height > MAX_FRAME_DIMENSION) {
-        log.error('Native capture stream is corrupted, stopping session.');
-        stopNativeCaptureSession(session.id);
+  try {
+    relay.postMessage({
+      fps,
+      helperPath,
+      maxHeight,
+      protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+      qualityId,
+      sourceId,
+      type: 'start'
+    }, [port1]);
+    // Return the IPC session descriptor before the DOM MessagePort is delivered.
+    // The injected getDisplayMedia wrapper installs its waitForPort listener
+    // after the invoke() promise resolves; posting on the next tick avoids a
+    // rare lost-port race while keeping the existing one-call bridge contract.
+    setImmediate(() => {
+      if (activeSession !== session || session.stopped) {
+        try {
+          port2.close();
+        } catch {}
         return;
       }
-      session.expectedFrame = {
-        flags,
-        height,
-        payloadBytes: width * height * 4,
-        timestampMs,
-        width
-      };
-    }
-
-    if (session.chunkBytes < session.expectedFrame.payloadBytes) return;
-    const frame = session.expectedFrame;
-    session.expectedFrame = null;
-    const payload = takeBytes(session, frame.payloadBytes);
-    postToRenderer(session, {
-      data: payload,
-      flags: frame.flags,
-      height: frame.height,
-      timestampMs: frame.timestampMs,
-      type: 'frame',
-      width: frame.width
+      try {
+        webContents.postMessage(PORT_CHANNEL, {
+          protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+          sessionId
+        }, [port2]);
+      } catch (error) {
+        log.error('Native capture port delivery failed:', error);
+        stopNativeCaptureSession(sessionId);
+      }
     });
-  }
-}
-
-// Consumes exactly `length` bytes from the buffered stdout chunks with a
-// single copy for multi-chunk reads (frames span ~128 pipe chunks; repeated
-// Buffer.concat per chunk would be quadratic).
-function takeBytes(session, length) {
-  session.chunkBytes -= length;
-
-  const first = session.chunks[0];
-  if (first.length === length) {
-    session.chunks.shift();
-    return first;
-  }
-  if (first.length > length) {
-    session.chunks[0] = first.subarray(length);
-    return first.subarray(0, length);
-  }
-
-  const result = Buffer.allocUnsafe(length);
-  let offset = 0;
-  while (offset < length) {
-    const chunk = session.chunks[0];
-    const needed = length - offset;
-    if (chunk.length <= needed) {
-      chunk.copy(result, offset);
-      offset += chunk.length;
-      session.chunks.shift();
-    } else {
-      chunk.copy(result, offset, 0, needed);
-      session.chunks[0] = chunk.subarray(needed);
-      offset += needed;
-    }
-  }
-  return result;
-}
-
-function postToRenderer(session, message) {
-  if (session.stopped) return;
-  try {
-    session.port.postMessage(message);
   } catch (error) {
-    log.warn('Native capture port post failed:', error);
-    stopNativeCaptureSession(session.id);
+    log.error('Native capture relay setup failed:', error);
+    stopNativeCaptureSession(sessionId);
+    return { ok: false, reason: 'spawn-error' };
   }
-}
 
-function endSession(session, reason) {
-  if (session.stopped) return;
-  postToRenderer(session, { reason, type: 'end' });
-  stopNativeCaptureSession(session.id);
+  return { fps, maxHeight, ok: true, protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, qualityId, sessionId, sourceId };
 }
 
 function stopNativeCaptureSession(sessionId = '') {
@@ -250,27 +190,37 @@ function stopNativeCaptureSession(sessionId = '') {
 
   activeSession = null;
   session.stopped = true;
-  session.chunks = [];
-  session.chunkBytes = 0;
 
   if (session.webContentsDestroyedListener && !session.webContents.isDestroyed()) {
     session.webContents.removeListener('destroyed', session.webContentsDestroyedListener);
   }
   try {
-    session.port.close();
+    session.relay.postMessage({ type: 'stop' });
   } catch {
-    // Port may already be closed from the renderer side.
+    // Relay may already be gone.
   }
 
-  const child = session.child;
-  if (child.exitCode === null && !child.killed) {
-    child.kill('SIGTERM');
-    const forceKillTimer = setTimeout(() => {
-      if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
-    }, 2000);
-    forceKillTimer.unref?.();
-  }
+  session.forceKillTimer = setTimeout(() => {
+    try {
+      if (session.relay.pid) session.relay.kill();
+    } catch {
+      // The relay may have exited between the timer check and kill.
+    }
+  }, 2000);
+  session.forceKillTimer.unref?.();
   return true;
+}
+
+function cleanupSession(session) {
+  if (activeSession === session) activeSession = null;
+  session.stopped = true;
+  if (session.forceKillTimer) {
+    clearTimeout(session.forceKillTimer);
+    session.forceKillTimer = null;
+  }
+  if (session.webContentsDestroyedListener && !session.webContents.isDestroyed()) {
+    session.webContents.removeListener('destroyed', session.webContentsDestroyedListener);
+  }
 }
 
 module.exports = {

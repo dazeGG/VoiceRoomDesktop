@@ -21,12 +21,23 @@ const log = require('./logger');
 const { WINDOW_BACKGROUND } = require('./shell-theme');
 const {
   createScreenProfileId,
+  getScreenQualityMaxHeight,
   normalizeDesktopAudioCapture,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,
   normalizeScreenQualityId
 } = require('./desktop-capture-policy');
 const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
+const { getWindowsCaptureFeaturePolicy } = require('./windows-capture-policy');
+
+const WINDOWS_HW_ENCODER_CHROMIUM_FEATURES = [
+  'WebRTCHardwareVideoEncoderFrameDrop',
+  'WebRtcAV1HWEncode'
+];
+const WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES = [
+  'ForceSoftwareForRtcLowResolutions',
+  'WebRtcScreenshareSwEncoding'
+];
 
 // Windows cursor-on-stream status quo: BOTH stock Chromium backends show a
 // cursor while apps hide it. WGC lets Windows bake the real cursor into the
@@ -36,12 +47,43 @@ const { getMediaDeviceFilterInjectScript } = require('./media-device-policy');
 // for correct behaviour — it only swaps one artefact for the other.
 //
 // The real fix is the native capture path (native-capture.js +
-// ScreenCursorCapture.exe), which captures via WGC without the OS cursor and
-// composites it honouring CURSOR_SHOWING. WGC stays enabled here so the
-// Chromium fallback (helper missing/unsupported) shows the real cursor — the
-// lesser evil compared to the legacy phantom arrow.
+// ScreenCursorCapture.exe), which captures without the OS cursor and composites
+// it honouring CURSOR_SHOWING. Keep Chromium WGC for Windows 11 and helper-missing
+// fallback paths, but avoid forcing it on Windows 10 when the helper is present
+// so the temporary Chromium grant does not keep a local yellow border visible.
 if (process.platform === 'win32') {
-  app.commandLine.appendSwitch('enable-features', 'WebRtcAllowWgcScreenCapturer');
+  const nativeCaptureCapabilitiesAtLaunch = getNativeCaptureCapabilities();
+  const windowsRelease = os.release();
+  // Chromium feature switches are process-start-only, so the WGC screen-capturer
+  // choice must be made from launch-time OS/helper state. The native helper is
+  // still rechecked when a capture starts, and the renderer keeps its existing
+  // fallback to the original Chromium stream if that later check fails.
+  const captureFeaturePolicy = getWindowsCaptureFeaturePolicy({
+    chromiumWgcOverride: process.env.VOICE_ROOM_CHROMIUM_WGC,
+    nativeCaptureAvailable: nativeCaptureCapabilitiesAtLaunch.available,
+    release: windowsRelease
+  });
+  log.info('Windows capture Chromium feature policy:', {
+    disabledFeatures: captureFeaturePolicy.disabledFeatures,
+    enabledFeatures: captureFeaturePolicy.enabledFeatures,
+    nativeCaptureAvailable: nativeCaptureCapabilitiesAtLaunch.available,
+    reason: captureFeaturePolicy.reason,
+    release: windowsRelease
+  });
+  const enabledFeatures = [...captureFeaturePolicy.enabledFeatures];
+  const disabledFeatures = [...captureFeaturePolicy.disabledFeatures];
+
+  if (process.env.VOICE_ROOM_WEBRTC_HW_ENCODER !== '0') {
+    enabledFeatures.push(...WINDOWS_HW_ENCODER_CHROMIUM_FEATURES);
+    disabledFeatures.push(...WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES);
+  }
+
+  if (enabledFeatures.length > 0) {
+    app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','));
+  }
+  if (disabledFeatures.length > 0) {
+    app.commandLine.appendSwitch('disable-features', disabledFeatures.join(','));
+  }
 }
 
 const runtimeConfig = readRuntimeConfig();
@@ -293,11 +335,15 @@ function configureDesktopCaptureIpc() {
       enabled: selection.streamAudioEnabled,
       mode: 'safe-system'
     };
-    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions, { fpsId: selection.fpsId });
+    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions, {
+      fpsId: selection.fpsId,
+      qualityId: selection.qualityId
+    });
 
     return {
       audioCapture,
       fpsId: selection.fpsId,
+      maxHeight: getScreenQualityMaxHeight(selection.qualityId),
       ok: true,
       profileId: createScreenProfileId(selection.qualityId, selection.fpsId),
       qualityId: selection.qualityId,
@@ -306,7 +352,8 @@ function configureDesktopCaptureIpc() {
     };
   });
 
-  ipcMain.handle('desktop-capture:select-source', async (event, sourceId, audioOptions = 'loopback') => {
+  ipcMain.handle('desktop-capture:select-source', async (event, sourceId, audioOptions = 'loopback', captureOptions = {}) => {
+    const normalizedCaptureOptions = typeof captureOptions === 'object' && captureOptions !== null ? captureOptions : {};
     const frameKey = getFrameScopeKey(event.senderFrame);
     if (!isTrustedFrame(event.senderFrame)) {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
@@ -317,10 +364,14 @@ function configureDesktopCaptureIpc() {
       throw new Error('Desktop capture source is no longer available.');
     }
 
-    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions);
+    const qualityId = normalizeScreenQualityId(normalizedCaptureOptions.qualityId);
+    const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions, normalizedCaptureOptions);
     return {
       audioCapture,
-      ok: true
+      fpsId: normalizeScreenFpsId(normalizedCaptureOptions.fpsId),
+      maxHeight: getScreenQualityMaxHeight(qualityId),
+      ok: true,
+      qualityId
     };
   });
 
@@ -330,6 +381,42 @@ function configureDesktopCaptureIpc() {
     }
 
     return getDesktopAudioCapabilities();
+  });
+
+  ipcMain.handle('native-capture:prepare', (event) => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+    }
+
+    const pending = peekPendingDesktopCaptureSource(event.senderFrame);
+    if (!pending?.source) return { ok: false, reason: 'no-pending-source' };
+    if (!isNativeOnlyScreenCaptureEligible(pending)) {
+      return {
+        ok: false,
+        reason: pending.source.id?.startsWith('screen:') ? 'chromium-audio-required' : 'source-not-screen'
+      };
+    }
+
+    try {
+      return startNativeCaptureSession(event.sender, {
+        fps: pending.fps,
+        maxHeight: pending.maxHeight,
+        qualityId: pending.qualityId,
+        sourceId: pending.source.id
+      });
+    } catch (error) {
+      log.error('Native capture session failed to prepare:', error);
+      return { ok: false, reason: 'start-failed' };
+    }
+  });
+
+  ipcMain.handle('native-capture:commit-prepared', (event, sourceId = '') => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+    }
+
+    clearPendingDesktopCaptureSource(String(sourceId || ''));
+    return true;
   });
 
   ipcMain.handle('native-capture:start', (event) => {
@@ -343,6 +430,8 @@ function configureDesktopCaptureIpc() {
     try {
       return startNativeCaptureSession(event.sender, {
         fps: granted.fps,
+        maxHeight: granted.maxHeight,
+        qualityId: granted.qualityId,
         sourceId: granted.sourceId
       });
     } catch (error) {
@@ -436,6 +525,7 @@ function getDesktopAudioCapabilities() {
 }
 
 function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopback', captureOptions = {}) {
+  const normalizedCaptureOptions = typeof captureOptions === 'object' && captureOptions !== null ? captureOptions : {};
   const previous = frameKey ? pendingDesktopCaptureSources.get(frameKey) : null;
   if (previous?.timer) clearTimeout(previous.timer);
 
@@ -448,10 +538,14 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
   timer.unref?.();
 
   const audioCapture = normalizeDesktopAudioCapture(source, audioOptions, getNativeAudioCapabilities());
-  const fps = Number(normalizeScreenFpsId(captureOptions.fpsId));
+  const fps = Number(normalizeScreenFpsId(normalizedCaptureOptions.fpsId));
+  const qualityId = normalizeScreenQualityId(normalizedCaptureOptions.qualityId);
+  const maxHeight = getScreenQualityMaxHeight(qualityId);
   const pendingSource = {
     audioCapture,
     fps,
+    maxHeight,
+    qualityId,
     source,
     timer
   };
@@ -461,6 +555,8 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
     audioCapture: pendingSource.audioCapture,
     expiresAt: Date.now() + DESKTOP_CAPTURE_PENDING_TTL_MS,
     fps,
+    maxHeight,
+    qualityId,
     source
   };
 
@@ -477,6 +573,8 @@ function recordGrantedDesktopCapture(frame, pending) {
   grantedDesktopCaptureByFrame.set(frameKey, {
     fps: pending.fps || 30,
     grantedAt: Date.now(),
+    maxHeight: pending.maxHeight || getScreenQualityMaxHeight(pending.qualityId),
+    qualityId: normalizeScreenQualityId(pending.qualityId),
     sourceId: pending.source.id
   });
 }
@@ -615,9 +713,9 @@ function takeLatestPendingDesktopCaptureSource() {
     return null;
   }
 
-  const { audioCapture, fps, source } = latestPendingDesktopCaptureSource;
+  const { audioCapture, fps, maxHeight, qualityId, source } = latestPendingDesktopCaptureSource;
   clearPendingDesktopCaptureSource(source.id);
-  return { audioCapture, fps, source };
+  return { audioCapture, fps, maxHeight, qualityId, source };
 }
 
 function takePendingDesktopCaptureSource(frame, securityOrigin = '') {
@@ -646,6 +744,24 @@ function clearPendingDesktopCaptureSource(sourceId) {
     if (pending.timer) clearTimeout(pending.timer);
     pendingDesktopCaptureSources.delete(frameKey);
   }
+}
+
+function peekPendingDesktopCaptureSource(frame, securityOrigin = '') {
+  const frameKey = getFrameScopeKey(frame);
+  const pending = frameKey ? pendingDesktopCaptureSources.get(frameKey) : null;
+  if (pending?.source) return pending;
+  if (!isTrustedFrame(frame) && !isTrustedOrigin(securityOrigin)) return null;
+  if (!latestPendingDesktopCaptureSource || Date.now() > latestPendingDesktopCaptureSource.expiresAt) {
+    latestPendingDesktopCaptureSource = null;
+    return null;
+  }
+  return latestPendingDesktopCaptureSource;
+}
+
+function isNativeOnlyScreenCaptureEligible(pending) {
+  return process.platform === 'win32'
+    && pending?.source?.id?.startsWith('screen:')
+    && pending.audioCapture?.mode !== 'loopback';
 }
 
 function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
@@ -1057,6 +1173,7 @@ function createWindow() {
     title: 'Voice Room',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
+      additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`],
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),

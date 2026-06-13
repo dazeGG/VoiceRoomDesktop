@@ -2,6 +2,25 @@
 
 Electron desktop shell for Voice Room. It opens the hosted Voice Room web app from `VOICE_ROOM_URL` and provides desktop-only screen capture and window controls.
 
+## Desktop runtime detection
+
+The preload exposes a stable desktop marker for the hosted web app:
+
+```js
+window.voiceRoomDesktop // { isDesktop, isElectron, platform, version }
+window.voiceRoomRuntime // same payload, kept for existing integrations
+```
+
+It also marks the document before `DOMContentLoaded`:
+
+```css
+.is-desktop .home-app {
+  display: none;
+}
+```
+
+Use the CSS hook when the web app needs to hide browser-only UI, such as the desktop download card, without a first-paint flash.
+
 ## Supported platforms
 
 | Platform | Status | Notes |
@@ -69,6 +88,8 @@ const selection = await window.voiceRoomDesktopCapture.openPicker({
 });
 
 // selection.profileId contains the chosen quality/FPS profile.
+// selection.maxHeight contains the native Windows capture height cap:
+// low = 720, balanced = 1080, high = 1440.
 // The selected source is already staged for the next getDisplayMedia call.
 // openPicker always uses safe-system audio with allowEchoFallback: false.
 // Use selectSource directly when you need Chromium loopback fallback.
@@ -109,6 +130,14 @@ The desktop shell supports one active screen share flow at a time from this clie
 - one active native safe-system audio session
 
 Starting a new share replaces the previous one. Watching other participants' streams is not limited by the desktop shell.
+
+### Windows local capture border
+
+Windows may show a local yellow border while a display or window is being captured. This is an OS capture indicator and is not expected to be encoded into the outgoing stream. For video-only screen shares on Windows, the desktop shell uses native DXGI frames directly when the native cursor-correct helper is available, so Chromium does not need to open a temporary WGC video capture that can paint the local border. Chromium loopback-audio requests and native-helper failures still fall back to the regular `getDisplayMedia` path.
+
+That fallback intentionally preserves the exact `MediaStream` object returned by Chromium: desktop audio routing and cleanup are tied to stream identity. The native capture bridge also carries an explicit session protocol version between preload, main, the relay, and the renderer wrapper so future helper/runtime changes fail closed to the Chromium stream instead of silently mixing incompatible capture paths.
+
+Window capture still depends on Windows.Graphics.Capture. The helper requests borderless capture best-effort, but Windows can ignore that request when the OS build or app capability model does not allow it. In that case capture remains functional and the local border is treated as an OS limitation rather than a stream artifact. For diagnostics, set `VOICE_ROOM_CHROMIUM_WGC=0` or `VOICE_ROOM_CHROMIUM_WGC=1` to force the Chromium screen-capturer feature off or on.
 
 ## Auto-update
 

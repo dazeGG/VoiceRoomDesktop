@@ -2,6 +2,25 @@
 
 Electron desktop shell for Voice Room. It opens the hosted Voice Room web app from `VOICE_ROOM_URL` and provides desktop-only screen capture and window controls.
 
+## Desktop runtime detection
+
+The preload exposes a stable desktop marker for the hosted web app:
+
+```js
+window.voiceRoomDesktop // { isDesktop, isElectron, platform, version }
+window.voiceRoomRuntime // same payload, kept for existing integrations
+```
+
+It also marks the document before `DOMContentLoaded`:
+
+```css
+.is-desktop .home-app {
+  display: none;
+}
+```
+
+Use the CSS hook when the web app needs to hide browser-only UI, such as the desktop download card, without a first-paint flash.
+
 ## Supported platforms
 
 | Platform | Status | Notes |

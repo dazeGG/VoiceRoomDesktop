@@ -1101,6 +1101,7 @@ function createWindow() {
     title: 'Voice Room',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
+      additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`],
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),

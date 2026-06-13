@@ -2,11 +2,32 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('voiceRoomRuntime', {
+const DESKTOP_VERSION_ARG = '--voice-room-desktop-version=';
+
+function getDesktopVersion() {
+  const arg = process.argv.find((value) => value.startsWith(DESKTOP_VERSION_ARG));
+  return arg ? arg.slice(DESKTOP_VERSION_ARG.length) : '';
+}
+
+function markDesktopDocument() {
+  const root = document.documentElement;
+  if (!root) return;
+  root.classList.add('is-desktop');
+  root.dataset.electron = 'true';
+}
+
+const desktopRuntime = {
   isDesktop: true,
   isElectron: true,
-  platform: process.platform
-});
+  platform: process.platform,
+  version: getDesktopVersion()
+};
+
+markDesktopDocument();
+
+contextBridge.exposeInMainWorld('voiceRoomRuntime', desktopRuntime);
+
+contextBridge.exposeInMainWorld('voiceRoomDesktop', desktopRuntime);
 
 contextBridge.exposeInMainWorld('voiceRoomDesktopCapture', {
   getSources: () => ipcRenderer.invoke('desktop-capture:get-sources'),
@@ -83,6 +104,6 @@ async function warmUpMediaDeviceAccess() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  document.documentElement.dataset.electron = 'true';
+  markDesktopDocument();
   void warmUpMediaDeviceAccess();
 });

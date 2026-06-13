@@ -821,12 +821,23 @@ class CaptureSession {
   void TryDisableBorder() {
     // Best-effort: the capture border toggle only exists on newer builds and
     // may require capture access. A visible border is cosmetic, never fatal.
+    if (!winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(
+            L"Windows.Graphics.Capture.GraphicsCaptureSession", L"IsBorderRequired")) {
+      return;
+    }
+
+    // Requesting borderless access throws/denies on unpackaged Win32 apps
+    // (Electron has no MSIX identity). Keep it in its own try so a failure here
+    // never skips the IsBorderRequired call below, which still removes the
+    // border on Windows 11 builds prior to 24H2 without any granted access.
     try {
-      if (winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(
-              L"Windows.Graphics.Capture.GraphicsCaptureSession", L"IsBorderRequired")) {
-        wgc::GraphicsCaptureAccess::RequestAccessAsync(wgc::GraphicsCaptureAccessKind::Borderless).get();
-        session_.IsBorderRequired(false);
-      }
+      wgc::GraphicsCaptureAccess::RequestAccessAsync(wgc::GraphicsCaptureAccessKind::Borderless).get();
+    } catch (...) {
+      LogEvent("log", "Borderless capture access request failed.");
+    }
+
+    try {
+      session_.IsBorderRequired(false);
     } catch (...) {
       LogEvent("log", "Capture border could not be disabled.");
     }

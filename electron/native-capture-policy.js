@@ -40,6 +40,9 @@ function getNativeCaptureInjectScript() {
 
     const createNativeVideoTrack = (port, sessionId) => {
       const generator = new MediaStreamTrackGenerator({ kind: 'video' });
+      try {
+        if ('contentHint' in generator) generator.contentHint = 'detail';
+      } catch {}
       const writer = generator.writable.getWriter();
       let closed = false;
       let sawFrame = false;

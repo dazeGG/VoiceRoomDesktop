@@ -2,6 +2,10 @@
 
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
+const {
+  NATIVE_CAPTURE_PROTOCOL_VERSION,
+  NATIVE_CAPTURE_PORT_MESSAGE_TYPE
+} = require('../electron/native-capture-contract');
 const { getNativeCaptureInjectScript } = require('../electron/native-capture-policy');
 
 // Runs the injected main-world script against a mock window/navigator pair.
@@ -168,7 +172,11 @@ describe('getNativeCaptureInjectScript', () => {
         listeners.set(type, handler);
         if (type === 'message') {
           setImmediate(() => handler({
-            data: { sessionId: 'native-1', type: 'voice-room-native-capture-port' },
+            data: {
+              protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+              sessionId: 'native-1',
+              type: NATIVE_CAPTURE_PORT_MESSAGE_TYPE
+            },
             ports: [port],
             source: window
           }));
@@ -177,7 +185,12 @@ describe('getNativeCaptureInjectScript', () => {
       removeEventListener(type) { listeners.delete(type); },
       voiceRoomNativeCaptureBridge: {
         commitPrepared: async (sourceId) => { committedSourceId = sourceId; },
-        prepare: async () => ({ ok: true, sessionId: 'native-1', sourceId: 'screen:1:0' }),
+        prepare: async () => ({
+          ok: true,
+          protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+          sessionId: 'native-1',
+          sourceId: 'screen:1:0'
+        }),
         start: async () => { throw new Error('should not use Chromium fallback'); },
         stop: async () => {}
       }
@@ -216,6 +229,41 @@ describe('getNativeCaptureInjectScript', () => {
     const result = await navigator.mediaDevices.getDisplayMedia({ video: true });
     assert.equal(originalCalls, 1);
     assert.equal(result, stream);
+  });
+
+  it('falls back when a native session has an incompatible protocol version', async () => {
+    let originalCalls = 0;
+    let stoppedSessionId = '';
+    const stream = createFakeStream();
+    const navigator = {
+      mediaDevices: {
+        getDisplayMedia: async () => {
+          originalCalls += 1;
+          return stream;
+        }
+      }
+    };
+    const window = {
+      addEventListener() {},
+      removeEventListener() {},
+      voiceRoomNativeCaptureBridge: {
+        prepare: async () => ({
+          ok: true,
+          protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION + 1,
+          sessionId: 'native-bad',
+          sourceId: 'screen:1:0'
+        }),
+        start: async () => ({ ok: false, reason: 'no-granted-source' }),
+        stop: async (sessionId) => { stoppedSessionId = sessionId; }
+      }
+    };
+
+    runInjectScript({ window, navigator });
+
+    const result = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    assert.equal(originalCalls, 1);
+    assert.equal(result, stream);
+    assert.equal(stoppedSessionId, 'native-bad');
   });
 
   it('does not try native-only capture when Chromium audio is requested', async () => {

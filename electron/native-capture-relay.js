@@ -6,6 +6,7 @@ const {
   appendFrameChunk,
   createFrameState
 } = require('./native-capture-frames');
+const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./native-capture-contract');
 
 const parentPort = process.parentPort;
 let activeSession = null;
@@ -37,7 +38,8 @@ function postToRenderer(session, message) {
 function startSession(options, port) {
   stopSession(activeSession, { closePort: true });
 
-  if (!port || !options?.helperPath || !options?.sourceId) {
+  if (!port || !options?.helperPath || !options?.sourceId
+    || options.protocolVersion !== NATIVE_CAPTURE_PROTOCOL_VERSION) {
     postParent({ reason: 'bad-start', type: 'exited' });
     return;
   }

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const log = require('./logger');
+const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./native-capture-contract');
 
 const PORT_CHANNEL = 'native-capture:port';
 
@@ -143,15 +144,43 @@ function startNativeCaptureSession(webContents, options = {}) {
   });
 
   try {
-    relay.postMessage({ fps, helperPath, maxHeight, qualityId, sourceId, type: 'start' }, [port1]);
-    webContents.postMessage(PORT_CHANNEL, { sessionId }, [port2]);
+    relay.postMessage({
+      fps,
+      helperPath,
+      maxHeight,
+      protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+      qualityId,
+      sourceId,
+      type: 'start'
+    }, [port1]);
+    // Return the IPC session descriptor before the DOM MessagePort is delivered.
+    // The injected getDisplayMedia wrapper installs its waitForPort listener
+    // after the invoke() promise resolves; posting on the next tick avoids a
+    // rare lost-port race while keeping the existing one-call bridge contract.
+    setImmediate(() => {
+      if (activeSession !== session || session.stopped) {
+        try {
+          port2.close();
+        } catch {}
+        return;
+      }
+      try {
+        webContents.postMessage(PORT_CHANNEL, {
+          protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+          sessionId
+        }, [port2]);
+      } catch (error) {
+        log.error('Native capture port delivery failed:', error);
+        stopNativeCaptureSession(sessionId);
+      }
+    });
   } catch (error) {
     log.error('Native capture relay setup failed:', error);
     stopNativeCaptureSession(sessionId);
     return { ok: false, reason: 'spawn-error' };
   }
 
-  return { fps, maxHeight, ok: true, qualityId, sessionId, sourceId };
+  return { fps, maxHeight, ok: true, protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, qualityId, sessionId, sourceId };
 }
 
 function stopNativeCaptureSession(sessionId = '') {

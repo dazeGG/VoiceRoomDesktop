@@ -135,6 +135,8 @@ Starting a new share replaces the previous one. Watching other participants' str
 
 Windows may show a local yellow border while a display or window is being captured. This is an OS capture indicator and is not expected to be encoded into the outgoing stream. For video-only screen shares on Windows, the desktop shell uses native DXGI frames directly when the native cursor-correct helper is available, so Chromium does not need to open a temporary WGC video capture that can paint the local border. Chromium loopback-audio requests and native-helper failures still fall back to the regular `getDisplayMedia` path.
 
+That fallback intentionally preserves the exact `MediaStream` object returned by Chromium: desktop audio routing and cleanup are tied to stream identity. The native capture bridge also carries an explicit session protocol version between preload, main, the relay, and the renderer wrapper so future helper/runtime changes fail closed to the Chromium stream instead of silently mixing incompatible capture paths.
+
 Window capture still depends on Windows.Graphics.Capture. The helper requests borderless capture best-effort, but Windows can ignore that request when the OS build or app capability model does not allow it. In that case capture remains functional and the local border is treated as an OS limitation rather than a stream artifact. For diagnostics, set `VOICE_ROOM_CHROMIUM_WGC=0` or `VOICE_ROOM_CHROMIUM_WGC=1` to force the Chromium screen-capturer feature off or on.
 
 ## Auto-update

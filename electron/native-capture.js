@@ -151,7 +151,7 @@ function startNativeCaptureSession(webContents, options = {}) {
     return { ok: false, reason: 'spawn-error' };
   }
 
-  return { fps, maxHeight, ok: true, qualityId, sessionId };
+  return { fps, maxHeight, ok: true, qualityId, sessionId, sourceId };
 }
 
 function stopNativeCaptureSession(sessionId = '') {

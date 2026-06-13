@@ -10,5 +10,6 @@ describe('electron-builder config', () => {
     assert.ok(builderConfig.files.includes('electron/native-capture.js'));
     assert.ok(builderConfig.files.includes('electron/native-capture-frames.js'));
     assert.ok(builderConfig.files.includes('electron/native-capture-relay.js'));
+    assert.ok(builderConfig.files.includes('electron/windows-capture-policy.js'));
   });
 });

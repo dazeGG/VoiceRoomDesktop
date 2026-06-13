@@ -1,11 +1,11 @@
 'use strict';
 
 // Main-world wrapper around getDisplayMedia for the native cursor-correct
-// capture path (Windows). The regular getDisplayMedia call still happens —
-// it drives the picker handshake, permissions and loopback audio — but its
-// video track (where Chromium bakes a cursor that ignores app-level hiding)
-// is swapped for a MediaStreamTrackGenerator fed by the native helper's
-// frames. Any failure falls back to the untouched Chromium stream.
+// capture path (Windows). Screen sources can use a native-first video path so
+// Chromium never opens a temporary WGC video capture that paints a local yellow
+// border. Window sources and Chromium loopback-audio requests keep the regular
+// getDisplayMedia grant first, then swap the video track for native frames. Any
+// native failure falls back to the untouched Chromium stream.
 function getNativeCaptureInjectScript() {
   return `(() => {
     if (window.__voiceRoomNativeCaptureInstalled) return;
@@ -17,6 +17,19 @@ function getNativeCaptureInjectScript() {
 
     const PORT_MESSAGE_TYPE = 'voice-room-native-capture-port';
     const originalGetDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
+
+    const hasChromiumAudioRequest = (constraints) => {
+      if (!constraints || typeof constraints !== 'object') return false;
+      return Boolean(constraints.audio);
+    };
+
+    const canTryNativeOnly = (constraints) => {
+      // Chromium loopback audio can only be obtained through the original
+      // getDisplayMedia stream. Safe-system audio is started through the
+      // desktop audio bridge, so video-only getDisplayMedia calls may skip
+      // Chromium video capture entirely.
+      return !hasChromiumAudioRequest(constraints) && typeof MediaStream !== 'undefined';
+    };
 
     const waitForPort = (sessionId, timeoutMs) => new Promise((resolve, reject) => {
       const cleanup = () => {
@@ -120,6 +133,7 @@ function getNativeCaptureInjectScript() {
       const watchdog = setInterval(() => {
         if (generator.readyState === 'ended') stop();
       }, 1000);
+      watchdog.unref?.();
 
       const waitForFirstFrame = (timeoutMs) => new Promise((resolve, reject) => {
         const startedAt = performance.now();
@@ -138,6 +152,24 @@ function getNativeCaptureInjectScript() {
     };
 
     navigator.mediaDevices.getDisplayMedia = async function voiceRoomGetDisplayMedia(constraints) {
+      if (canTryNativeOnly(constraints) && bridge.prepare) {
+        let preparedSession = null;
+        let preparedNative = null;
+        try {
+          preparedSession = await bridge.prepare();
+          if (preparedSession?.ok) {
+            const port = await waitForPort(preparedSession.sessionId, 4000);
+            preparedNative = createNativeVideoTrack(port, preparedSession.sessionId);
+            await preparedNative.waitForFirstFrame(4000);
+            bridge.commitPrepared?.(preparedSession.sourceId)?.catch?.(() => {});
+            return new MediaStream([preparedNative.generator]);
+          }
+        } catch {
+          preparedNative?.stop?.();
+          if (preparedSession?.ok) bridge.stop?.(preparedSession.sessionId)?.catch?.(() => {});
+        }
+      }
+
       const stream = await originalGetDisplayMedia(constraints);
       let session = null;
       let native = null;
@@ -150,10 +182,9 @@ function getNativeCaptureInjectScript() {
         await native.waitForFirstFrame(4000);
 
         // Replace only the video track, keeping the original MediaStream object
-        // and its audio tracks in place. The web app associates the stream's
-        // audio (loopback track here, or a safe-system track it mixes in later)
-        // with this exact stream identity, so returning a freshly built
-        // MediaStream can silently drop the stream's sound.
+        // and its audio tracks in place. The web app associates Chromium loopback
+        // audio with this exact stream identity, so returning a freshly built
+        // MediaStream on this fallback path can silently drop the stream's sound.
         const previousVideoTracks = stream.getVideoTracks();
         stream.addTrack(native.generator);
         for (const track of previousVideoTracks) {

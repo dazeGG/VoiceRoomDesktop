@@ -46,6 +46,7 @@ module.exports = {
     'electron/native-capture.js',
     'electron/native-capture-frames.js',
     'electron/native-capture-policy.js',
+    'electron/windows-capture-policy.js',
     'electron/native-capture-relay.js',
     'electron/shell-theme.js',
     'electron/shell-tokens.css',

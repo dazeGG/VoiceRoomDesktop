@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
 });
 
 contextBridge.exposeInMainWorld('voiceRoomNativeCaptureBridge', {
+  commitPrepared: (sourceId) => ipcRenderer.invoke('native-capture:commit-prepared', sourceId),
+  prepare: () => ipcRenderer.invoke('native-capture:prepare'),
   start: () => ipcRenderer.invoke('native-capture:start'),
   stop: (sessionId) => ipcRenderer.invoke('native-capture:stop', sessionId)
 });

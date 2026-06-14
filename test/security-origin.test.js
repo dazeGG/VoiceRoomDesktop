@@ -69,8 +69,19 @@ describe('security-origin', () => {
 
   it('reads the generated runtime config from the electron root', () => {
     const configPath = path.join(__dirname, '..', 'electron/runtime-config.json');
-    const expectedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const originalConfig = fs.existsSync(configPath) ? fs.readFileSync(configPath) : null;
+    const expectedConfig = { voiceRoomUrl: 'https://voice.example' };
 
-    assert.deepEqual(readRuntimeConfig(), expectedConfig);
+    try {
+      fs.writeFileSync(configPath, `${JSON.stringify(expectedConfig, null, 2)}\n`);
+
+      assert.deepEqual(readRuntimeConfig(), expectedConfig);
+    } finally {
+      if (originalConfig === null) {
+        fs.rmSync(configPath, { force: true });
+      } else {
+        fs.writeFileSync(configPath, originalConfig);
+      }
+    }
   });
 });

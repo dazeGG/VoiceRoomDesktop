@@ -189,6 +189,46 @@ describe('runUpdateGate updater failure flow', () => {
   });
 
 
+  it('handles duplicate updater failure signals only once', async () => {
+    const gate = loadUpdateGateWithMocks();
+    try {
+      const emittedError = new Error('updater emitted error');
+      const rejectedError = new Error('updater rejected');
+      const updater = createAutoUpdater();
+      updater.checkForUpdates = async () => {
+        updater.emit('error', emittedError);
+        throw rejectedError;
+      };
+      let siteChecks = 0;
+
+      gate.runUpdateGate({
+        appUrl: 'https://voiceroom.example',
+        autoUpdater: updater,
+        checkSiteAvailability: async () => {
+          siteChecks += 1;
+          return true;
+        }
+      });
+
+      await flush();
+      await flush();
+
+      const splash = gate.windows[0];
+      assert.equal(siteChecks, 1);
+      assert.deepEqual(
+        splash.sentStates.map((state) => [state.phase, state.canProceed]),
+        [
+          ['checking', undefined],
+          ['update-error', false],
+          ['update-error', true]
+        ]
+      );
+    } finally {
+      gate.restore();
+    }
+  });
+
+
   it('shows update error before site check when update download fails', async () => {
     const gate = loadUpdateGateWithMocks();
     try {

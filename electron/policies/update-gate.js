@@ -14,7 +14,7 @@ const { WINDOW_BACKGROUND } = require('../shell-theme');
 const CHECK_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
 let updateGateConfigured = false;
-let proceedHandler = null;
+let activeGateSession = null;
 
 function shouldRunUpdateGate(options = {}) {
   return shouldRunUpdateGateState({
@@ -68,8 +68,8 @@ function configureUpdateGateIpc() {
   });
 
   ipcMain.handle('update-gate:proceed', () => {
-    if (typeof proceedHandler !== 'function') return { ok: false };
-    proceedHandler();
+    if (typeof activeGateSession?.proceed !== 'function') return { ok: false };
+    activeGateSession.proceed();
     return { ok: true };
   });
 }
@@ -115,6 +115,9 @@ function runUpdateGate(options = {}) {
     let checkTimer = null;
     let downloadTimer = null;
     let detachHandlers = null;
+    let fallbackStarted = false;
+    const gateSession = { proceed: null };
+    activeGateSession = gateSession;
 
     function clearTimers() {
       if (checkTimer) clearTimeout(checkTimer);
@@ -127,7 +130,7 @@ function runUpdateGate(options = {}) {
       clearTimers();
       detachHandlers?.();
       detachHandlers = null;
-      if (proceedHandler === proceedAfterUpdateError) proceedHandler = null;
+      if (activeGateSession === gateSession) activeGateSession = null;
     }
 
     function finish(result) {
@@ -143,7 +146,8 @@ function runUpdateGate(options = {}) {
     }
 
     async function handleUpdateFailure(error) {
-      if (settled) return;
+      if (settled || fallbackStarted) return;
+      fallbackStarted = true;
       cleanup();
       if (error) log.error('Auto-updater unavailable:', error);
       sendState(splash, createUpdateErrorState({ canProceed: false }));
@@ -156,7 +160,8 @@ function runUpdateGate(options = {}) {
         return;
       }
 
-      proceedHandler = proceedAfterUpdateError;
+      activeGateSession = gateSession;
+      gateSession.proceed = proceedAfterUpdateError;
       sendState(splash, createUpdateErrorState());
     }
 

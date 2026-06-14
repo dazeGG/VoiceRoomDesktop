@@ -144,7 +144,9 @@ Window capture still depends on Windows.Graphics.Capture. The helper requests bo
 Packaged builds check GitHub Releases on startup before opening Voice Room.
 
 - if an update is available, the app downloads and installs it before launch
-- if the update server is unreachable, the app stays on the launch screen and does not open Voice Room
+- if the update check or download fails, the app checks whether Voice Room itself is reachable
+- if Voice Room is reachable, the launch screen shows the update error and an explicit button to enter the app without updating
+- if Voice Room is unreachable too, the app stays on the launch screen and shows a site-unavailable error
 
 Development builds started with `npm run electron` skip the update gate.
 

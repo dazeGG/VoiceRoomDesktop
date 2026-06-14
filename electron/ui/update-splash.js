@@ -5,6 +5,7 @@ const elements = {
   progress: document.querySelector('#updateProgress'),
   progressBar: document.querySelector('#updateProgressBar'),
   progressLabel: document.querySelector('#updateProgressLabel'),
+  proceed: document.querySelector('#updateProceed'),
   quit: document.querySelector('#updateQuit'),
   title: document.querySelector('#updateTitle')
 };
@@ -13,8 +14,14 @@ const phaseTitles = {
   blocked: 'Нет доступа',
   checking: 'Запуск',
   downloading: 'Обновление',
-  installing: 'Установка'
+  installing: 'Установка',
+  'site-unavailable': 'Сайт недоступен',
+  'update-error': 'Ошибка обновления'
 };
+
+elements.proceed.addEventListener('click', () => {
+  window.voiceRoomUpdateGate?.proceed?.().catch(() => {});
+});
 
 elements.quit.addEventListener('click', () => {
   window.voiceRoomUpdateGate?.quit?.().catch(() => {});
@@ -40,5 +47,6 @@ function renderState(state) {
     elements.progressLabel.textContent = `${progress}%`;
   }
 
+  elements.proceed.hidden = !state?.canProceed;
   elements.quit.hidden = !state?.blocked;
 }

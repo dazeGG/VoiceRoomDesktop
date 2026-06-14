@@ -3,13 +3,18 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const { shouldRunUpdateGateState } = require('./update-gate-policy');
+const {
+  checkSiteAvailability,
+  createSiteUnavailableState,
+  createUpdateErrorState
+} = require('./update-gate-state');
 const log = require('../logger');
 const { WINDOW_BACKGROUND } = require('../shell-theme');
 
 const CHECK_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
-
 let updateGateConfigured = false;
+let activeGateSession = null;
 
 function shouldRunUpdateGate(options = {}) {
   return shouldRunUpdateGateState({
@@ -23,9 +28,6 @@ function getAutoUpdater() {
   return require('electron-updater').autoUpdater;
 }
 
-function formatBlockedMessage() {
-  return 'Нет доступа к серверу обновлений. Проверьте подключение к интернету.';
-}
 
 function createUpdateSplashWindow() {
   const window = new BrowserWindow({
@@ -64,6 +66,12 @@ function configureUpdateGateIpc() {
     app.quit();
     return { ok: true };
   });
+
+  ipcMain.handle('update-gate:proceed', () => {
+    if (typeof activeGateSession?.proceed !== 'function') return { ok: false };
+    activeGateSession.proceed();
+    return { ok: true };
+  });
 }
 
 function attachAutoUpdaterHandlers(autoUpdater, handlers) {
@@ -94,7 +102,7 @@ function runUpdateGate(options = {}) {
     return Promise.resolve({ ok: true });
   }
 
-  const autoUpdater = getAutoUpdater();
+  const autoUpdater = options.autoUpdater || getAutoUpdater();
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowDowngrade = false;
@@ -107,6 +115,9 @@ function runUpdateGate(options = {}) {
     let checkTimer = null;
     let downloadTimer = null;
     let detachHandlers = null;
+    let fallbackStarted = false;
+    const gateSession = { proceed: null };
+    activeGateSession = gateSession;
 
     function clearTimers() {
       if (checkTimer) clearTimeout(checkTimer);
@@ -119,6 +130,7 @@ function runUpdateGate(options = {}) {
       clearTimers();
       detachHandlers?.();
       detachHandlers = null;
+      if (activeGateSession === gateSession) activeGateSession = null;
     }
 
     function finish(result) {
@@ -129,14 +141,28 @@ function runUpdateGate(options = {}) {
       resolve(result);
     }
 
-    function block() {
-      if (settled) return;
+    function proceedAfterUpdateError() {
+      finish({ ok: true, updateError: true });
+    }
+
+    async function handleUpdateFailure(error) {
+      if (settled || fallbackStarted) return;
+      fallbackStarted = true;
       cleanup();
-      sendState(splash, {
-        blocked: true,
-        message: formatBlockedMessage(),
-        phase: 'blocked'
-      });
+      if (error) log.error('Auto-updater unavailable:', error);
+      sendState(splash, createUpdateErrorState({ canProceed: false }));
+
+      const siteAvailable = await (options.checkSiteAvailability || checkSiteAvailability)(options.appUrl);
+      if (settled) return;
+
+      if (!siteAvailable) {
+        sendState(splash, createSiteUnavailableState());
+        return;
+      }
+
+      activeGateSession = gateSession;
+      gateSession.proceed = proceedAfterUpdateError;
+      sendState(splash, createUpdateErrorState());
     }
 
     detachHandlers = attachAutoUpdaterHandlers(autoUpdater, {
@@ -156,11 +182,13 @@ function runUpdateGate(options = {}) {
           phase: 'downloading',
           progress: 0
         });
-        downloadTimer = setTimeout(block, DOWNLOAD_TIMEOUT_MS);
+        downloadTimer = setTimeout(() => {
+          handleUpdateFailure(new Error('Update download timed out.'));
+        }, DOWNLOAD_TIMEOUT_MS);
         downloadTimer.unref?.();
         autoUpdater.downloadUpdate().catch((error) => {
           log.error('Update download failed:', error);
-          block();
+          handleUpdateFailure(error);
         });
       },
       'update-not-available': () => {
@@ -187,8 +215,7 @@ function runUpdateGate(options = {}) {
         }, 400);
       },
       error: (error) => {
-        log.error('Auto-updater error:', error);
-        block();
+        handleUpdateFailure(error);
       }
     });
 
@@ -201,18 +228,20 @@ function runUpdateGate(options = {}) {
         progress: null
       });
 
-      checkTimer = setTimeout(block, CHECK_TIMEOUT_MS);
+      checkTimer = setTimeout(() => {
+        handleUpdateFailure(new Error('Update check timed out.'));
+      }, CHECK_TIMEOUT_MS);
       checkTimer.unref?.();
 
       autoUpdater.checkForUpdates().catch((error) => {
         log.error('Update check failed:', error);
-        block();
+        handleUpdateFailure(error);
       });
     });
 
     splash.loadFile(path.join(__dirname, '../ui/update-splash.html')).catch((error) => {
       log.error('Failed to open update splash:', error);
-      block();
+      handleUpdateFailure(error);
     });
   });
 }

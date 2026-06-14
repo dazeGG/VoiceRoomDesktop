@@ -64,6 +64,7 @@ module.exports = {
     'electron/ui/screen-picker-preview.css',
     'electron/ui/screen-picker.js',
     'electron/policies/update-gate-policy.js',
+    'electron/policies/update-gate-state.js',
     'electron/policies/update-gate.js',
     'electron/ui/update-preload.js',
     'electron/ui/update-splash.css',

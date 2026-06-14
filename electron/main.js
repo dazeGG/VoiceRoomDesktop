@@ -24,6 +24,7 @@ const {
 } = require('./desktop-capture');
 const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture');
 const { createWindowLifecycleController } = require('./window/lifecycle');
+const { disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
 const {
@@ -143,6 +144,8 @@ const devDiagnostics = createDevDiagnosticsController({
 });
 
 devDiagnostics.configureDevChromiumLogging();
+
+disableWindowsApplicationMenu({ menu: Menu });
 
 const windowLifecycle = createWindowLifecycleController({
   Menu,

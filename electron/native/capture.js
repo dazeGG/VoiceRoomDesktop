@@ -78,7 +78,7 @@ function startNativeCaptureSession(webContents, options = {}) {
   const { port1, port2 } = new MessageChannelMain();
   let relay = null;
   try {
-    relay = utilityProcess.fork(path.join(__dirname, 'native-capture-relay.js'), [], {
+    relay = utilityProcess.fork(path.join(__dirname, 'capture-relay.js'), [], {
       serviceName: 'Voice Room Native Capture Relay',
       stdio: 'ignore'
     });

@@ -14,7 +14,7 @@ function resolveTrustedOrigin(trustedOrigin) {
 }
 
 function readRuntimeConfig() {
-  const configPath = path.join(__dirname, 'runtime-config.json');
+  const configPath = path.join(__dirname, '..', 'runtime-config.json');
   try {
     return JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch {

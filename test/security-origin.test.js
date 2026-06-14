@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { afterEach, describe, it } = require('node:test');
 const {
   getFrameKey,
@@ -13,6 +15,7 @@ const {
   isTrustedOrAppLoadingFrame,
   isTrustedUrl,
   isTransitionalWebContentsUrl,
+  readRuntimeConfig,
   resolvePermissionContextOrigin,
   setTrustedOrigin
 } = require('../electron/security/origin');
@@ -62,5 +65,12 @@ describe('security-origin', () => {
     const topFrame = { isDestroyed: () => false, processId: 9, routingId: 8 };
     assert.equal(getFrameKey(frame), '1:2');
     assert.equal(getFrameScopeKey({ ...frame, top: topFrame }), '9:8');
+  });
+
+  it('reads the generated runtime config from the electron root', () => {
+    const configPath = path.join(__dirname, '..', 'electron/runtime-config.json');
+    const expectedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+    assert.deepEqual(readRuntimeConfig(), expectedConfig);
   });
 });

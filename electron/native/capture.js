@@ -4,8 +4,8 @@ const { app, MessageChannelMain, utilityProcess } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const log = require('./logger');
-const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./native-capture-contract');
+const log = require('../logger');
+const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./capture-contract');
 
 const PORT_CHANNEL = 'native-capture:port';
 

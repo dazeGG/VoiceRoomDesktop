@@ -5,8 +5,8 @@ const { describe, it } = require('node:test');
 const {
   NATIVE_CAPTURE_PROTOCOL_VERSION,
   NATIVE_CAPTURE_PORT_MESSAGE_TYPE
-} = require('../electron/native-capture-contract');
-const { getNativeCaptureInjectScript } = require('../electron/native-capture-policy');
+} = require('../electron/native/capture-contract');
+const { getNativeCaptureInjectScript } = require('../electron/policies/native-capture');
 
 // Runs the injected main-world script against a mock window/navigator pair.
 // The script must never break getDisplayMedia: when the native path is

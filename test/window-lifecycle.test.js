@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
-const { createWindowLifecycleController } = require('../electron/window-lifecycle');
+const { createWindowLifecycleController } = require('../electron/window/lifecycle');
 
 function createFakeWindow() {
   const handlers = new Map();

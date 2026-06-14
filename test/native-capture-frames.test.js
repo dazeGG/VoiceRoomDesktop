@@ -9,7 +9,7 @@ const {
   FRAME_MAGIC,
   appendFrameChunk,
   createFrameState
-} = require('../electron/native-capture-frames');
+} = require('../electron/native/capture-frames');
 
 function makeFrame({ flags = FRAME_FLAG_FORMAT_NV12, height = 4, timestampMs = 123n, width = 4 } = {}) {
   const payloadBytes = flags & FRAME_FLAG_FORMAT_NV12

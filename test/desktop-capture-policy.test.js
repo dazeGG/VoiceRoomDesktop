@@ -9,7 +9,7 @@ const {
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,
   normalizeScreenQualityId
-} = require('../electron/desktop-capture-policy');
+} = require('../electron/policies/desktop-capture');
 
 const screenSource = { id: 'screen:1:0', name: 'Display 1' };
 const windowSource = { id: 'window:42:0', name: 'Browser' };

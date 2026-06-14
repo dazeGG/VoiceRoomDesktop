@@ -5,7 +5,7 @@ const {
   shouldHideToTrayOnClose,
   shouldQuitWhenAllWindowsClosed,
   shouldUseWindowsTray
-} = require('./window-lifecycle-policy');
+} = require('./lifecycle-policy');
 
 function createWindowLifecycleController({
   Menu,

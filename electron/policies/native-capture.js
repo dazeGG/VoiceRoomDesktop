@@ -6,7 +6,7 @@ const {
   hasChromiumAudioRequest,
   isCompatibleNativeCaptureSession,
   isNativeOnlyDisplayMediaCandidate
-} = require('./native-capture-contract');
+} = require('../native/capture-contract');
 
 // Main-world wrapper around getDisplayMedia for the native cursor-correct
 // capture path (Windows). Screen sources can use a native-first video path so

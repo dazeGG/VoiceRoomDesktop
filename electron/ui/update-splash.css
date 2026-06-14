@@ -77,6 +77,13 @@ h1 {
   font-weight: 700;
 }
 
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.update-proceed,
 .update-quit {
   justify-self: start;
   min-width: var(--touch-target);
@@ -87,6 +94,15 @@ h1 {
   background: var(--control);
   color: var(--ink);
   font-weight: 800;
+}
+
+.update-proceed {
+  background: var(--accent);
+  color: var(--paper);
+}
+
+.update-proceed:hover {
+  background: var(--control-active-hover);
 }
 
 .update-quit:hover {

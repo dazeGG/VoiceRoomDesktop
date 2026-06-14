@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('voiceRoomUpdateGate', {
     ipcRenderer.on('update-gate:state', listener);
     return () => ipcRenderer.removeListener('update-gate:state', listener);
   },
+  proceed: () => ipcRenderer.invoke('update-gate:proceed'),
   quit: () => ipcRenderer.invoke('update-gate:quit')
 });

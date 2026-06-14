@@ -210,7 +210,7 @@ function createAppBootstrap({
       log.warn('Microphone access denied in macOS privacy settings.');
     }
 
-    const gate = await runUpdateGate({ previewEnabled });
+    const gate = await runUpdateGate({ appUrl, previewEnabled });
     if (gate.ok) createWindow();
   }
 

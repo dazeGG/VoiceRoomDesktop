@@ -3,8 +3,8 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const { shouldRunUpdateGateState } = require('./update-gate-policy');
-const log = require('./logger');
-const { WINDOW_BACKGROUND } = require('./shell-theme');
+const log = require('../logger');
+const { WINDOW_BACKGROUND } = require('../shell-theme');
 
 const CHECK_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -40,7 +40,7 @@ function createUpdateSplashWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(__dirname, 'update-preload.js'),
+      preload: path.join(__dirname, '../ui/update-preload.js'),
       sandbox: true
     },
     width: 460
@@ -210,7 +210,7 @@ function runUpdateGate(options = {}) {
       });
     });
 
-    splash.loadFile(path.join(__dirname, 'update-splash.html')).catch((error) => {
+    splash.loadFile(path.join(__dirname, '../ui/update-splash.html')).catch((error) => {
       log.error('Failed to open update splash:', error);
       block();
     });

@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const log = require('./logger');
+const log = require('../logger');
 const EMPTY_AUDIO_BUFFER = Buffer.alloc(0);
 let activeSession = null;
 let nextSessionId = 1;

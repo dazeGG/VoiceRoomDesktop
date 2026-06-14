@@ -7,7 +7,7 @@ const {
   filterEnumeratedMediaDevices,
   getMediaDeviceFilterInjectScript,
   remapMediaStreamConstraints
-} = require('../electron/media-device-policy');
+} = require('../electron/policies/media-device');
 
 const builtInDevices = [
   { deviceId: 'default', kind: 'audioinput', label: 'Default - MacBook Microphone', groupId: 'g1' },

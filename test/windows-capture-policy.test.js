@@ -7,7 +7,7 @@ const {
   getWindowsCaptureFeaturePolicy,
   isWindows11OrNewerRelease,
   parseWindowsBuildNumber
-} = require('../electron/windows-capture-policy');
+} = require('../electron/policies/windows-capture');
 
 describe('windows-capture-policy', () => {
   it('parses Windows build numbers from os.release()', () => {

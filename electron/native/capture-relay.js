@@ -5,8 +5,8 @@ const { spawn } = require('node:child_process');
 const {
   appendFrameChunk,
   createFrameState
-} = require('./native-capture-frames');
-const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./native-capture-contract');
+} = require('./capture-frames');
+const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./capture-contract');
 
 const parentPort = process.parentPort;
 let activeSession = null;

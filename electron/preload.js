@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const {
   NATIVE_CAPTURE_PORT_MESSAGE_TYPE,
   NATIVE_CAPTURE_PROTOCOL_VERSION
-} = require('./native-capture-contract');
+} = require('./native/capture-contract');
 
 const DESKTOP_VERSION_ARG = '--voice-room-desktop-version=';
 

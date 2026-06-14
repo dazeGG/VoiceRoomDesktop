@@ -7,7 +7,7 @@ const {
   shouldHideToTrayOnClose,
   shouldQuitWhenAllWindowsClosed,
   shouldUseWindowsTray
-} = require('../electron/window-lifecycle-policy');
+} = require('../electron/window/lifecycle-policy');
 
 describe('window lifecycle policy', () => {
   it('enables tray lifecycle only on Windows', () => {

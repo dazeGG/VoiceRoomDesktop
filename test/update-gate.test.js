@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
-const { shouldRunUpdateGateState } = require('../electron/update-gate-policy');
+const { shouldRunUpdateGateState } = require('../electron/policies/update-gate-policy');
 
 describe('shouldRunUpdateGateState', () => {
   it('skips the gate in preview mode', () => {

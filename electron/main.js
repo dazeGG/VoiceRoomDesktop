@@ -24,6 +24,7 @@ const {
 } = require('./desktop-capture');
 const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture');
 const { createWindowLifecycleController } = require('./window/lifecycle');
+const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
 const { disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
@@ -35,6 +36,7 @@ const {
   isTrustedFrame,
   isTrustedOrAppLoadingFrame,
   isTrustedUrl,
+  getOriginFromUrl,
   readRuntimeConfig,
   setTrustedOrigin
 } = require('./security');
@@ -97,7 +99,7 @@ if (process.platform === 'win32') {
 
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
-const TRUSTED_ORIGIN = APP_URL ? new URL(APP_URL).origin : '';
+const TRUSTED_ORIGIN = getOriginFromUrl(APP_URL);
 setTrustedOrigin(TRUSTED_ORIGIN);
 const PICKER_PREVIEW_ENABLED = process.env.VOICE_ROOM_PICKER_PREVIEW === '1';
 const ALLOWED_SESSION_PERMISSIONS = new Set([
@@ -198,9 +200,13 @@ const appBootstrap = createAppBootstrap({
   isPermissionContextTrusted,
   isTrustedDisplayMediaRequest,
   isTrustedUrl,
+  installBuildLabel,
+  installMediaDeviceFilter,
+  installNativeCaptureBridge,
   log,
   loadMainApplication,
   readBuildProfile,
+  showRendererRecovery,
   recordGrantedDesktopCapture,
   configureDesktopCaptureIpc,
   configureScreenPickerIpc,

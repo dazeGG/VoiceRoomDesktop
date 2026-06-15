@@ -29,6 +29,7 @@ describe('security-origin', () => {
     setTrustedOrigin('https://voice.example');
 
     assert.equal(getOriginFromUrl('https://voice.example/app?x=1'), 'https://voice.example');
+    assert.equal(getOriginFromUrl('not a valid url'), '');
     assert.equal(isTrustedOrigin('https://voice.example'), true);
     assert.equal(isTrustedUrl('https://voice.example/app'), true);
     assert.equal(isTrustedUrl('https://other.example/app'), false);

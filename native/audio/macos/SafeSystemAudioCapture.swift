@@ -477,6 +477,10 @@ private func installSignalHandlers() {
   signal(SIGTERM) { _ in Foundation.exit(0) }
 }
 
+private func waitForTermination() {
+  RunLoop.current.run()
+}
+
 @main
 struct VoiceRoomSafeSystemAudioMain {
   static func main() async {
@@ -492,7 +496,7 @@ struct VoiceRoomSafeSystemAudioMain {
       do {
         try tap.start()
         installSignalHandlers()
-        RunLoop.current.run()
+        waitForTermination()
         tap.stop()
         return
       } catch {
@@ -514,11 +518,8 @@ struct VoiceRoomSafeSystemAudioMain {
     let capture = SafeSystemAudioCapture()
     do {
       try await capture.start()
-      await withCheckedContinuation { continuation in
-        installSignalHandlers()
-        RunLoop.current.run()
-        continuation.resume()
-      }
+      installSignalHandlers()
+      waitForTermination()
       await capture.stop()
     } catch {
       logEvent(["event": "error", "message": error.localizedDescription])

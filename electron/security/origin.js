@@ -22,6 +22,11 @@ function readRuntimeConfig() {
   }
 }
 
+/**
+ * Canonical safe origin normalizer for both startup bootstrapping and
+ * renderer/security trust checks. Invalid or missing URLs intentionally map
+ * to an empty origin so callers can fail closed without crashing at import time.
+ */
 function getOriginFromUrl(rawUrl) {
   try {
     return new URL(rawUrl).origin;

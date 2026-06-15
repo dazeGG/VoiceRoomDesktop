@@ -69,3 +69,27 @@ test('preload installs desktop markers without native capture contract modules',
   assert.equal(typeof exposed.get('voiceRoomNativeCaptureBridge')?.prepare, 'function');
   assert.equal(typeof listeners.get('native-capture:port'), 'function');
 });
+
+
+test('preload inline native-capture constants stay in sync with contract module', () => {
+  const preloadSource = fs.readFileSync(
+    path.join(__dirname, '..', 'electron', 'preload.js'),
+    'utf8'
+  );
+  const {
+    NATIVE_CAPTURE_PORT_MESSAGE_TYPE,
+    NATIVE_CAPTURE_PROTOCOL_VERSION
+  } = require('../electron/native/capture-contract');
+
+  const protocolVersionMatch = preloadSource.match(
+    /const\s+NATIVE_CAPTURE_PROTOCOL_VERSION\s*=\s*(\d+)\s*;/
+  );
+  assert.ok(protocolVersionMatch);
+  assert.equal(Number(protocolVersionMatch[1]), NATIVE_CAPTURE_PROTOCOL_VERSION);
+
+  const portMessageTypeMatch = preloadSource.match(
+    /const\s+NATIVE_CAPTURE_PORT_MESSAGE_TYPE\s*=\s*(['"])(.*?)\1\s*;/
+  );
+  assert.ok(portMessageTypeMatch);
+  assert.equal(portMessageTypeMatch[2], NATIVE_CAPTURE_PORT_MESSAGE_TYPE);
+});

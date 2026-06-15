@@ -66,3 +66,38 @@ test('main process module load tolerates an invalid startup app URL', () => {
     }
   }
 });
+
+test('main process wires window bootstrap installers into app bootstrap', () => {
+  const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
+  const originalLoad = Module._load;
+  const electronMock = createElectronMock();
+  let capturedOptions;
+
+  Module._load = function loadWithBootstrapCapture(request, parent, isMain) {
+    if (request === 'electron') return electronMock;
+    if (request === './app/bootstrap') {
+      return {
+        createAppBootstrap(options) {
+          capturedOptions = options;
+          return {
+            launchApplication: () => Promise.resolve()
+          };
+        }
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    delete require.cache[require.resolve(mainPath)];
+
+    assert.doesNotThrow(() => require(mainPath));
+    assert.equal(typeof capturedOptions.installMediaDeviceFilter, 'function');
+    assert.equal(typeof capturedOptions.installNativeCaptureBridge, 'function');
+    assert.equal(typeof capturedOptions.installBuildLabel, 'function');
+    assert.equal(typeof capturedOptions.showRendererRecovery, 'function');
+  } finally {
+    delete require.cache[require.resolve(mainPath)];
+    Module._load = originalLoad;
+  }
+});

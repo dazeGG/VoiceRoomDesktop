@@ -93,6 +93,7 @@ function collectUtilityProcessForkTargets(sourceFile) {
 describe('electron-builder config', () => {
   it('packages native capture utility process modules', () => {
     assert.ok(builderConfig.files.includes('electron/native/capture.js'));
+    assert.ok(builderConfig.files.includes('electron/native-capture-contract.js'));
     assert.ok(builderConfig.files.includes('electron/native/capture-contract.js'));
     assert.ok(builderConfig.files.includes('electron/native/capture-frames.js'));
     assert.ok(builderConfig.files.includes('electron/native/capture-relay.js'));

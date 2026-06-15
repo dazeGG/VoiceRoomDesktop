@@ -48,6 +48,7 @@ module.exports = {
     'electron/policies/media-device.js',
     'electron/main.js',
     'electron/native/audio.js',
+    'electron/native-capture-contract.js',
     'electron/native/capture-contract.js',
     'electron/native/capture.js',
     'electron/native/capture-frames.js',

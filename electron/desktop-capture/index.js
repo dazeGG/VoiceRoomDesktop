@@ -8,6 +8,7 @@ const {
   normalizeScreenFpsId,
   normalizeScreenQualityId
 } = require('../policies/desktop-capture');
+const desktopCaptureState = require('./state');
 const {
   cancelDesktopCapturePickerSession,
   clearPendingDesktopCaptureSource,
@@ -18,13 +19,12 @@ const {
   isNativeOnlyScreenCaptureEligible,
   openDesktopCapturePickerWindow,
   peekPendingDesktopCaptureSource,
-  recordGrantedDesktopCapture,
   resolveDesktopCapturePickerSession,
   serializeDesktopSource,
   setPendingDesktopCaptureSource,
   storeDesktopCaptureSourceSnapshot,
   takeGrantedDesktopCapture
-} = require('./state');
+} = desktopCaptureState;
 const {
   ensureMacMicrophoneAccess,
   getFrameScopeKey,
@@ -264,6 +264,6 @@ function configureScreenPickerIpc() {
 module.exports = {
   configureDesktopCaptureIpc,
   configureScreenPickerIpc,
-  recordGrantedDesktopCapture,
-  takePendingDesktopCaptureSource
+  recordGrantedDesktopCapture: desktopCaptureState.recordGrantedDesktopCapture,
+  takePendingDesktopCaptureSource: desktopCaptureState.takePendingDesktopCaptureSource
 };

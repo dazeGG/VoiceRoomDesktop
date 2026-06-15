@@ -57,6 +57,7 @@ module.exports = {
     'electron/window/lifecycle-policy.js',
     'electron/window/lifecycle.js',
     'electron/window/menu-policy.js',
+    'electron/window/tray-icon.js',
     'electron/native/capture-relay.js',
     'electron/shell-theme.js',
     'electron/shell-tokens.css',

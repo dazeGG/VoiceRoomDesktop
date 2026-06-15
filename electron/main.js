@@ -24,6 +24,7 @@ const {
 } = require('./desktop-capture');
 const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture');
 const { createWindowLifecycleController } = require('./window/lifecycle');
+const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
 const { disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');

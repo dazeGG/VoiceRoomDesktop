@@ -17,7 +17,15 @@ app.on('before-quit', () => {
 });
 
 function isNativeCaptureEnabled() {
-  return process.env.VOICE_ROOM_NATIVE_CAPTURE !== '0';
+  const override = String(process.env.VOICE_ROOM_NATIVE_CAPTURE || '').trim();
+  if (override === '1') return true;
+  if (override === '0') return false;
+
+  return !isDevPrereleaseVersion(app.getVersion?.());
+}
+
+function isDevPrereleaseVersion(version = '') {
+  return /-dev(?:\.|-|$)/.test(String(version || ''));
 }
 
 function getNativeCaptureCapabilities() {
@@ -28,9 +36,15 @@ function getNativeCaptureCapabilities() {
     reason: process.platform !== 'win32'
       ? 'platform-unsupported'
       : !isNativeCaptureEnabled()
-        ? 'disabled-by-env'
+        ? getNativeCaptureDisabledReason()
         : helperLookup.path ? '' : helperLookup.reason
   };
+}
+
+function getNativeCaptureDisabledReason() {
+  return String(process.env.VOICE_ROOM_NATIVE_CAPTURE || '').trim() === '0'
+    ? 'disabled-by-env'
+    : 'disabled-for-dev-build';
 }
 
 function findScreenCursorCaptureHelper() {

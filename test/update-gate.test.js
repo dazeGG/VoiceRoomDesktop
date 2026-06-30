@@ -2,7 +2,10 @@
 
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
-const { shouldRunUpdateGateState } = require('../electron/policies/update-gate-policy');
+const {
+  MAC_AUTO_UPDATE_ENABLED,
+  shouldRunUpdateGateState
+} = require('../electron/policies/update-gate-policy');
 
 describe('shouldRunUpdateGateState', () => {
   it('skips the gate in preview mode', () => {
@@ -21,10 +24,31 @@ describe('shouldRunUpdateGateState', () => {
     }), false);
   });
 
-  it('runs the gate for packaged release builds', () => {
+  it('runs the gate for packaged release builds on Windows', () => {
     assert.equal(shouldRunUpdateGateState({
       buildProfile: { channel: 'release' },
       isPackaged: true,
+      platform: 'win32',
+      previewEnabled: false
+    }), true);
+  });
+
+  it('skips the gate for macOS while auto-update is disabled', () => {
+    assert.equal(MAC_AUTO_UPDATE_ENABLED, false);
+    assert.equal(shouldRunUpdateGateState({
+      buildProfile: { channel: 'release' },
+      isPackaged: true,
+      platform: 'darwin',
+      previewEnabled: false
+    }), false);
+  });
+
+  it('runs the gate for macOS when auto-update is explicitly enabled', () => {
+    assert.equal(shouldRunUpdateGateState({
+      buildProfile: { channel: 'release' },
+      isPackaged: true,
+      macAutoUpdateEnabled: true,
+      platform: 'darwin',
       previewEnabled: false
     }), true);
   });

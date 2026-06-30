@@ -13,6 +13,9 @@ dist/
 native/bin/
 native/.cache/
 
+# Graphify
+graphify-out/
+
 # Logs
 *.log
 npm-debug.log*

@@ -17,11 +17,17 @@ let updateGateConfigured = false;
 let activeGateSession = null;
 
 function shouldRunUpdateGate(options = {}) {
-  return shouldRunUpdateGateState({
+  const shouldRun = shouldRunUpdateGateState({
     appPath: app.getAppPath(),
     isPackaged: app.isPackaged,
     previewEnabled: options.previewEnabled
   });
+
+  if (!shouldRun && process.platform === 'darwin' && app.isPackaged) {
+    log.info('Skipping macOS update gate: auto-update is disabled until Apple code signing is enabled.');
+  }
+
+  return shouldRun;
 }
 
 function getAutoUpdater() {
@@ -103,6 +109,7 @@ function runUpdateGate(options = {}) {
   }
 
   const autoUpdater = options.autoUpdater || getAutoUpdater();
+  autoUpdater.logger = log;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowDowngrade = false;

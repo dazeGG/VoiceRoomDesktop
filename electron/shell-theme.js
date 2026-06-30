@@ -50,75 +50,13 @@ function buildDesktopLayoutCss(titlebarHeight = TITLEBAR_HEIGHT) {
       height: 100% !important;
       max-height: 100% !important;
     }
-    html.is-desktop .lobby-shell,
-    html.is-desktop .app-shell {
-      height: 100% !important;
-      max-height: 100% !important;
-      min-height: 0 !important;
-    }
-    html.is-desktop .lobby-main,
-    html.is-desktop .lobby-roomview,
-    html.is-desktop .lobby-browse-room {
-      flex: 1 1 auto !important;
-      min-height: 0 !important;
-      max-height: 100% !important;
-    }
-    html.is-desktop .lobby-roomview-content,
-    html.is-desktop .lobby-browse-content {
-      flex: 1 1 auto !important;
-      min-height: 0 !important;
-      max-height: 100% !important;
-      align-items: stretch !important;
-    }
-    html.is-desktop .lobby-preview-chat {
-      position: relative !important;
-      top: auto !important;
-      right: auto !important;
-      bottom: auto !important;
-      left: auto !important;
-      height: 100% !important;
-      max-height: 100% !important;
-      min-height: 0 !important;
-    }
-    html.is-desktop .lobby-preview-chat .chat-rail-body {
-      flex: 1 1 auto !important;
-      min-height: 0 !important;
-      max-height: 100% !important;
-    }
-    html.is-desktop .room-chat-rail {
-      top: var(--voice-room-shell-topbar) !important;
-      height: var(--voice-room-app-height) !important;
-      max-height: var(--voice-room-app-height) !important;
-      bottom: auto !important;
-    }
-    html.is-desktop body[data-screen-view="true"] .app-shell {
-      height: 100% !important;
-      max-height: 100% !important;
-      min-height: 0 !important;
-    }
-    @media (max-width: 900px) {
-      html.is-desktop .room-chat-rail {
-        top: calc(var(--voice-room-shell-topbar) + 44px) !important;
-        bottom: 92px !important;
-        height: auto !important;
-        max-height: none !important;
-      }
-    }
-    html.is-desktop .auth-loader {
-      min-height: calc(var(--voice-room-app-height) - 96px) !important;
-    }
-    html.is-desktop .auth-session-error {
-      min-height: calc(var(--voice-room-app-height) - 76px) !important;
-    }
     html.is-desktop.is-shell-fullscreen {
       padding-top: 0 !important;
     }
     html.is-desktop.is-shell-fullscreen body,
     html.is-desktop.is-shell-fullscreen #root,
     html.is-desktop.is-shell-fullscreen #app,
-    html.is-desktop.is-shell-fullscreen #__next,
-    html.is-desktop.is-shell-fullscreen .lobby-shell,
-    html.is-desktop.is-shell-fullscreen .app-shell {
+    html.is-desktop.is-shell-fullscreen #__next {
       height: 100% !important;
       max-height: 100% !important;
     }

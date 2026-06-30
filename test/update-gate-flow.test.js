@@ -64,16 +64,27 @@ function loadUpdateGateWithMocks() {
     transports: { console: {}, file: {} }
   };
 
+  const updateGatePolicyPath = require.resolve('../electron/policies/update-gate-policy');
+  const updateGatePolicyMock = {
+    MAC_AUTO_UPDATE_ENABLED: false,
+    readBuildProfile: () => null,
+    shouldRunUpdateGateState: () => true
+  };
+
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === 'electron') return electronMock;
     if (request === 'electron-log') return logMock;
+    if (request === updateGatePolicyPath || request === './update-gate-policy') {
+      return updateGatePolicyMock;
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
 
   const updateGatePath = require.resolve('../electron/policies/update-gate');
   const loggerPath = require.resolve('../electron/logger');
   delete require.cache[updateGatePath];
+  delete require.cache[updateGatePolicyPath];
   delete require.cache[loggerPath];
 
   try {
@@ -83,6 +94,7 @@ function loadUpdateGateWithMocks() {
       restore: () => {
         Module._load = originalLoad;
         delete require.cache[updateGatePath];
+        delete require.cache[updateGatePolicyPath];
         delete require.cache[loggerPath];
       },
       windows

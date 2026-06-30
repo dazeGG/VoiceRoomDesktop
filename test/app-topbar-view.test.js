@@ -18,10 +18,10 @@ describe('shell theme chrome', () => {
 
     assert.match(css, /--voice-room-shell-topbar:\s*32px/);
     assert.match(css, /padding-top:\s*var\(--voice-room-shell-topbar\)/);
-    assert.match(css, /\.lobby-shell/);
-    assert.match(css, /\.lobby-preview-chat/);
-    assert.match(css, /\.room-chat-rail/);
-    assert.match(css, /top:\s*var\(--voice-room-shell-topbar\)/);
+    assert.match(css, /--voice-room-app-height/);
+    assert.doesNotMatch(css, /\.lobby-preview-chat/);
+    assert.doesNotMatch(css, /\.room-chat-rail/);
+    assert.doesNotMatch(css, /\.lobby-shell/);
     assert.match(css, /is-shell-fullscreen/);
   });
 

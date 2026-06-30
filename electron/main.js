@@ -15,7 +15,7 @@ const {
   showRendererRecovery
 } = require('./window/bootstrap');
 const log = require('./logger');
-const { WINDOW_BACKGROUND } = require('./shell-theme');
+const { WINDOW_BACKGROUND, buildDesktopLayoutCss } = require('./shell-theme');
 const {
   configureDesktopCaptureIpc,
   configureScreenPickerIpc,
@@ -119,28 +119,7 @@ const WEBRTC_CAPTURE_VMODULE = [
   '*wgc*=3'
 ].join(',');
 const WEBRTC_INTERNALS_URL = 'chrome://webrtc-internals/';
-// Make the in-page top bar itself the window-drag handle instead of laying a
-// transparent drag strip on top of it. The old body::before overlay sat at the
-// max z-index over the top 34px of the window, which swallowed every click and
-// the context menu on the top bar controls (the brand link, download pill,
-// account menu) since no-drag cannot carve a region out of an overlapping
-// element. Dragging the bare top bar and opting every interactive child out
-// with no-drag keeps the controls clickable. Mirrors apps/web topbar.css.
-const DESKTOP_DRAG_REGION_CSS = `
-  html.is-desktop .topbar {
-    -webkit-app-region: drag;
-    app-region: drag;
-  }
-  html.is-desktop .topbar a,
-  html.is-desktop .topbar button,
-  html.is-desktop .topbar input,
-  html.is-desktop .topbar select,
-  html.is-desktop .topbar .profile-menu,
-  html.is-desktop .topbar [role="menu"] {
-    -webkit-app-region: no-drag;
-    app-region: no-drag;
-  }
-`;
+const DESKTOP_LAYOUT_CSS = buildDesktopLayoutCss();
 
 const devDiagnostics = createDevDiagnosticsController({
   app,
@@ -225,7 +204,7 @@ const appBootstrap = createAppBootstrap({
   takePendingDesktopCaptureSource,
   appUrl: APP_URL,
   allowedSessionPermissions: ALLOWED_SESSION_PERMISSIONS,
-  desktopDragRegionCss: DESKTOP_DRAG_REGION_CSS,
+  desktopLayoutCss: DESKTOP_LAYOUT_CSS,
   previewEnabled: PICKER_PREVIEW_ENABLED,
   windowLifecycle
 });

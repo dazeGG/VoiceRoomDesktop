@@ -2,7 +2,11 @@
 
 const { session } = require('electron');
 const path = require('node:path');
-const { WINDOW_BACKGROUND } = require('../shell-theme');
+const { WINDOW_BACKGROUND, getMainWindowChromeOptions } = require('../shell-theme');
+const {
+  createAppTopbarView,
+  installDesktopLayoutCss
+} = require('../window/app-topbar-view');
 
 function createAppBootstrap({
   app,
@@ -29,7 +33,7 @@ function createAppBootstrap({
   windowLifecycle,
   devDiagnostics,
   previewEnabled,
-  desktopDragRegionCss,
+  desktopLayoutCss,
   allowedSessionPermissions,
   appUrl
 }) {
@@ -147,7 +151,7 @@ function createAppBootstrap({
       minWidth: 420,
       show: false,
       title: 'Voice Room',
-      titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+      ...getMainWindowChromeOptions(process.platform),
       webPreferences: {
         additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`],
         contextIsolation: true,
@@ -168,6 +172,14 @@ function createAppBootstrap({
     windowLifecycle.attachMainWindow(mainWindow);
     windowLifecycle.installTray();
 
+    const appTopbarView = createAppTopbarView({ log, platform: process.platform });
+    appTopbarView.attach(mainWindow);
+    mainWindow.once('closed', () => {
+      appTopbarView.destroy();
+    });
+
+    installDesktopLayoutCss(mainWindow.webContents, desktopLayoutCss, { log });
+
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       if (isTrustedUrl(url)) return { action: 'allow' };
       shell.openExternal(url).catch((error) => {
@@ -187,15 +199,6 @@ function createAppBootstrap({
     mainWindow.webContents.on('render-process-gone', (_event, details) => {
       showRendererRecovery(mainWindow, details, { log });
     });
-
-    if (process.platform === 'darwin') {
-      mainWindow.webContents.on('did-finish-load', () => {
-        if (String(mainWindow.webContents.getURL() || '').includes('renderer-recovery.html')) return;
-        mainWindow.webContents.insertCSS(desktopDragRegionCss).catch((error) => {
-          log.warn('Failed to inject desktop drag region CSS:', error);
-        });
-      });
-    }
 
     loadMainApplication(mainWindow, appUrl, { dialog });
   }

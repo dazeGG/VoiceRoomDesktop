@@ -14,6 +14,8 @@ const requiredStartupAssets = [
   'electron/shell-tokens.css',
   'electron/native/capture-frames.js',
   'electron/native/capture-relay.js',
+  'electron/ui/app-topbar.css',
+  'electron/ui/app-topbar.html',
   'electron/ui/renderer-recovery.css',
   'electron/ui/renderer-recovery.html',
   'electron/ui/renderer-recovery.js',

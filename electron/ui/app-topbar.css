@@ -1,0 +1,45 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  -webkit-app-region: drag;
+  app-region: drag;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+html.is-macos .app-topbar {
+  padding-left: 78px;
+}
+
+html.is-windows .app-topbar {
+  padding-right: 140px;
+}
+
+.app-topbar-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  pointer-events: none;
+  user-select: none;
+}

@@ -65,25 +65,26 @@ function buildDesktopLayoutCss(titlebarHeight = TITLEBAR_HEIGHT) {
     }
     html.is-desktop .lobby-roomview-content,
     html.is-desktop .lobby-browse-content {
+      position: relative !important;
       flex: 1 1 auto !important;
       min-height: 0 !important;
       max-height: 100% !important;
-      align-items: stretch !important;
+      overflow: hidden !important;
     }
     html.is-desktop .lobby-preview-chat {
-      position: relative !important;
-      top: auto !important;
-      right: auto !important;
-      bottom: auto !important;
+      position: absolute !important;
+      top: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
       left: auto !important;
-      height: 100% !important;
-      max-height: 100% !important;
+      width: var(--chat-rail-width, 360px) !important;
+      height: auto !important;
+      max-height: none !important;
       min-height: 0 !important;
     }
     html.is-desktop .lobby-preview-chat .chat-rail-body {
       flex: 1 1 auto !important;
       min-height: 0 !important;
-      max-height: 100% !important;
     }
     html.is-desktop .room-chat-rail {
       top: var(--voice-room-shell-topbar) !important;
@@ -102,6 +103,17 @@ function buildDesktopLayoutCss(titlebarHeight = TITLEBAR_HEIGHT) {
         bottom: 92px !important;
         height: auto !important;
         max-height: none !important;
+      }
+      html.is-desktop .lobby-roomview-content[data-preview-chat-open='true'],
+      html.is-desktop .lobby-browse-content[data-preview-chat-open='true'] {
+        padding-right: 0 !important;
+      }
+      html.is-desktop .lobby-preview-chat {
+        top: 12px !important;
+        right: 12px !important;
+        bottom: 12px !important;
+        left: 12px !important;
+        width: auto !important;
       }
     }
     html.is-desktop .auth-loader {

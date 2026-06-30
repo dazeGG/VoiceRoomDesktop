@@ -20,6 +20,8 @@ describe('shell theme chrome', () => {
     assert.match(css, /padding-top:\s*var\(--voice-room-shell-topbar\)/);
     assert.match(css, /\.lobby-shell/);
     assert.match(css, /\.lobby-preview-chat/);
+    assert.match(css, /\.lobby-roomview-content[\s\S]*position:\s*relative/);
+    assert.match(css, /html\.is-desktop \.lobby-preview-chat[\s\S]*position:\s*absolute/);
     assert.match(css, /\.room-chat-rail/);
     assert.match(css, /top:\s*var\(--voice-room-shell-topbar\)/);
     assert.match(css, /is-shell-fullscreen/);

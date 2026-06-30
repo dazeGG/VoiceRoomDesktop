@@ -17,9 +17,9 @@ describe('shell theme chrome', () => {
     const css = buildDesktopLayoutCss(32);
 
     assert.match(css, /--voice-room-shell-topbar:\s*32px/);
-    assert.match(css, /calc\(100vh - var\(--voice-room-shell-topbar\)\)/);
+    assert.match(css, /padding-top:\s*var\(--voice-room-shell-topbar\)/);
+    assert.match(css, /\.lobby-shell/);
     assert.match(css, /is-shell-fullscreen/);
-    assert.match(css, /margin-top:\s*0/);
   });
 
   it('uses hidden titlebar and overlay on Windows', () => {

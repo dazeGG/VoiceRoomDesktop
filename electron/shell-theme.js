@@ -28,14 +28,19 @@ function buildDesktopLayoutCss(titlebarHeight = TITLEBAR_HEIGHT) {
   return `
     html.is-desktop {
       --voice-room-shell-topbar: ${titlebarHeight}px;
+      --voice-room-app-height: calc(100vh - var(--voice-room-shell-topbar));
+      --voice-room-app-dvh: calc(100dvh - var(--voice-room-shell-topbar));
+      box-sizing: border-box !important;
       height: 100vh !important;
+      padding-top: var(--voice-room-shell-topbar) !important;
       overflow: hidden !important;
     }
     html.is-desktop body {
-      height: calc(100vh - var(--voice-room-shell-topbar)) !important;
-      max-height: calc(100vh - var(--voice-room-shell-topbar)) !important;
-      min-height: calc(100vh - var(--voice-room-shell-topbar)) !important;
-      margin-top: var(--voice-room-shell-topbar) !important;
+      height: 100% !important;
+      max-height: 100% !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
       overflow: hidden !important;
       box-sizing: border-box !important;
     }
@@ -44,13 +49,30 @@ function buildDesktopLayoutCss(titlebarHeight = TITLEBAR_HEIGHT) {
     html.is-desktop #__next {
       height: 100% !important;
       max-height: 100% !important;
+    }
+    html.is-desktop .lobby-shell,
+    html.is-desktop .app-shell {
+      height: 100% !important;
+      max-height: 100% !important;
       min-height: 0 !important;
     }
-    html.is-desktop.is-shell-fullscreen body {
-      height: 100vh !important;
-      max-height: 100vh !important;
-      min-height: 100vh !important;
-      margin-top: 0 !important;
+    html.is-desktop .auth-loader {
+      min-height: calc(var(--voice-room-app-height) - 96px) !important;
+    }
+    html.is-desktop .auth-session-error {
+      min-height: calc(var(--voice-room-app-height) - 76px) !important;
+    }
+    html.is-desktop.is-shell-fullscreen {
+      padding-top: 0 !important;
+    }
+    html.is-desktop.is-shell-fullscreen body,
+    html.is-desktop.is-shell-fullscreen #root,
+    html.is-desktop.is-shell-fullscreen #app,
+    html.is-desktop.is-shell-fullscreen #__next,
+    html.is-desktop.is-shell-fullscreen .lobby-shell,
+    html.is-desktop.is-shell-fullscreen .app-shell {
+      height: 100% !important;
+      max-height: 100% !important;
     }
   `;
 }

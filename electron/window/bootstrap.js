@@ -70,11 +70,16 @@ function installBuildLabel(webContents, { app, readBuildProfile, log } = {}) {
   const script = `(function(){
     var id='voice-room-build-label';
     var existing=document.getElementById(id);
-    if(existing){existing.textContent=${label};return;}
+    if(existing){
+      existing.textContent=${label};
+      existing.style.left='auto';
+      existing.style.right='8px';
+      return;
+    }
     var el=document.createElement('div');
     el.id=id;
     el.textContent=${label};
-    el.style.cssText='position:fixed;left:8px;bottom:6px;z-index:2147483647;'+
+    el.style.cssText='position:fixed;right:8px;bottom:6px;z-index:2147483647;'+
       'font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;'+
       'color:currentColor;opacity:0.35;pointer-events:none;user-select:none;white-space:nowrap;';
     (document.body||document.documentElement).appendChild(el);

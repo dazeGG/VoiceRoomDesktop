@@ -3,11 +3,16 @@
 const elements = {
   audioToggle: document.querySelector('#screenAudioToggle'),
   closeButton: document.querySelector('#screenSourceClose'),
-  fpsOptions: document.querySelector('#screenFpsOptions'),
+  gearButton: document.querySelector('#screenSettingsGear'),
+  modeGames: document.querySelector('#screenModeGames'),
+  modeText: document.querySelector('#screenModeText'),
   options: document.querySelector('#screenSourceOptions'),
-  qualityOptions: document.querySelector('#screenQualityOptions'),
+  resToggle: document.querySelector('#screenResToggle'),
   screensTab: document.querySelector('#screenSourceScreensTab'),
+  settingsPopover: document.querySelector('#screenSettingsPopover'),
   startButton: document.querySelector('#screenSourceStart'),
+  summaryDetail: document.querySelector('#screenSummaryDetail'),
+  summaryName: document.querySelector('#screenSummaryName'),
   tablist: document.querySelector('.screen-source-tabs'),
   tabpanel: document.querySelector('#screenSourceTabpanel'),
   windowsTab: document.querySelector('#screenSourceWindowsTab')
@@ -29,8 +34,8 @@ const fallbackState = {
 };
 
 const state = {
-  fpsId: '30',
-  qualityId: 'balanced',
+  mode: 'games',       // 'games' (30fps) | 'text' (15fps)
+  qualityId: 'balanced', // 'balanced' (SD/720p) | 'high' (HD/1080p)
   selectedSourceId: '',
   sourceType: 'screen',
   sources: []
@@ -62,8 +67,8 @@ async function init() {
 
   const pickerState = await getPickerState();
   state.sources = pickerState.sources || [];
-  state.qualityId = pickerState.defaultQualityId || 'balanced';
-  state.fpsId = pickerState.defaultFpsId || '30';
+  state.qualityId = pickerState.defaultQualityId === 'high' ? 'high' : 'balanced';
+  state.mode = pickerState.defaultFpsId === '15' ? 'text' : 'games';
   elements.audioToggle.checked = pickerState.defaultStreamAudioEnabled !== false;
 
   const hasScreen = state.sources.some((source) => source.type === 'screen');
@@ -74,30 +79,47 @@ async function init() {
   elements.windowsTab.addEventListener('click', () => setSourceType('window'));
   elements.closeButton.addEventListener('click', cancelPicker);
   elements.startButton.addEventListener('click', submitSelection);
-  elements.qualityOptions.addEventListener('click', (event) => {
-    const qualityId = event.target?.dataset?.qualityId;
-    if (!qualityId) return;
-    state.qualityId = qualityId;
-    refreshSegments();
+  elements.gearButton.addEventListener('click', togglePopover);
+  elements.modeGames.addEventListener('click', () => setMode('games'));
+  elements.modeText.addEventListener('click', () => setMode('text'));
+  elements.audioToggle.addEventListener('change', updateSummary);
+
+  elements.resToggle.addEventListener('click', (event) => {
+    const preset = event.target?.dataset?.qualityPreset;
+    if (!preset) return;
+    state.qualityId = preset === 'hd' ? 'high' : 'balanced';
+    refreshResToggle();
+    updateSummary();
   });
-  elements.fpsOptions.addEventListener('click', (event) => {
-    const fpsId = event.target?.dataset?.fpsId;
-    if (!fpsId) return;
-    state.fpsId = fpsId;
-    refreshSegments();
-  });
+
   elements.options.addEventListener('keydown', handleSourceGridKeydown);
   elements.tablist.addEventListener('keydown', handleTablistKeydown);
+
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') cancelPicker();
+    if (event.key === 'Escape') {
+      if (!elements.settingsPopover.hidden) {
+        closePopover();
+      } else {
+        cancelPicker();
+      }
+    }
     if (event.key === 'Enter' && state.selectedSourceId) submitSelection();
   });
+
+  document.addEventListener('pointerdown', (event) => {
+    if (elements.settingsPopover.hidden) return;
+    const wrap = elements.settingsPopover.closest('.screen-source-gear-wrap');
+    if (!wrap?.contains(event.target)) closePopover();
+  });
+
   window.addEventListener('resize', updateGridColumnCount);
 
   refreshTabs();
-  refreshSegments();
+  refreshResToggle();
+  refreshModePresets();
   renderSources();
   updateGridColumnCount();
+  updateSummary();
 }
 
 async function getPickerState() {
@@ -111,6 +133,31 @@ function setSourceType(type) {
   state.selectedSourceId = state.sources.find((source) => source.type === type)?.id || '';
   refreshTabs();
   renderSources();
+  updateSummary();
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  refreshModePresets();
+  updateSummary();
+}
+
+function togglePopover() {
+  if (elements.settingsPopover.hidden) {
+    openPopover();
+  } else {
+    closePopover();
+  }
+}
+
+function openPopover() {
+  elements.settingsPopover.hidden = false;
+  elements.gearButton.setAttribute('aria-pressed', 'true');
+}
+
+function closePopover() {
+  elements.settingsPopover.hidden = true;
+  elements.gearButton.setAttribute('aria-pressed', 'false');
 }
 
 function refreshTabs() {
@@ -120,6 +167,38 @@ function refreshTabs() {
   elements.tabpanel.setAttribute('aria-labelledby', isScreen ? 'screenSourceScreensTab' : 'screenSourceWindowsTab');
   elements.screensTab.disabled = !state.sources.some((source) => source.type === 'screen');
   elements.windowsTab.disabled = !state.sources.some((source) => source.type === 'window');
+}
+
+function refreshResToggle() {
+  const isHd = state.qualityId === 'high';
+  for (const button of elements.resToggle.querySelectorAll('button')) {
+    const isHdBtn = button.dataset.qualityPreset === 'hd';
+    button.setAttribute('aria-pressed', String(isHd === isHdBtn));
+  }
+}
+
+function refreshModePresets() {
+  elements.modeGames.setAttribute('aria-pressed', String(state.mode === 'games'));
+  elements.modeText.setAttribute('aria-pressed', String(state.mode === 'text'));
+
+  const gamesDot = elements.modeGames.querySelector('.screen-settings-dot');
+  const textRadio = elements.modeText.querySelector('.screen-settings-radio');
+
+  if (state.mode === 'games') {
+    if (!gamesDot) {
+      const dot = document.createElement('span');
+      dot.className = 'screen-settings-dot';
+      elements.modeGames.querySelector('.screen-settings-radio').append(dot);
+    }
+    textRadio.replaceChildren();
+  } else {
+    if (gamesDot) gamesDot.remove();
+    if (!textRadio.querySelector('.screen-settings-dot')) {
+      const dot = document.createElement('span');
+      dot.className = 'screen-settings-dot';
+      textRadio.append(dot);
+    }
+  }
 }
 
 function handleTablistKeydown(event) {
@@ -132,15 +211,6 @@ function handleTablistKeydown(event) {
   event.preventDefault();
   setSourceType(nextType);
   nextTab.focus();
-}
-
-function refreshSegments() {
-  for (const button of elements.qualityOptions.querySelectorAll('button')) {
-    button.setAttribute('aria-pressed', String(button.dataset.qualityId === state.qualityId));
-  }
-  for (const button of elements.fpsOptions.querySelectorAll('button')) {
-    button.setAttribute('aria-pressed', String(button.dataset.fpsId === state.fpsId));
-  }
 }
 
 function renderSources() {
@@ -186,6 +256,7 @@ function selectSource(sourceId, { focus = false } = {}) {
 
   state.selectedSourceId = sourceId;
   updateSourceSelection();
+  updateSummary();
 
   if (focus) {
     sourceButtons.get(sourceId)?.focus();
@@ -200,6 +271,17 @@ function updateSourceSelection() {
   }
 
   elements.startButton.disabled = !state.selectedSourceId;
+}
+
+function updateSummary() {
+  const source = state.sources.find((s) => s.id === state.selectedSourceId);
+  const qualityLabel = state.qualityId === 'high' ? '1080p' : '720p';
+  const fpsLabel = state.mode === 'text' ? '5 к/с' : '30 к/с';
+  const audioLabel = elements.audioToggle.checked ? ' · звук' : '';
+  const resLabel = state.qualityId === 'high' ? 'HD' : 'SD';
+
+  elements.summaryName.textContent = source?.name ?? 'Не выбрано';
+  elements.summaryDetail.textContent = `${resLabel} · ${qualityLabel} · ${fpsLabel}${audioLabel}`;
 }
 
 function createSourceButton(source) {
@@ -226,7 +308,10 @@ function syncSourceButton(button, source) {
 
   preview.className = `screen-source-preview ${getFallbackPreviewClass(source)}`;
   const thumbnailKey = source.thumbnail || '';
-  if (preview.dataset.thumbnailKey === thumbnailKey) return;
+  if (preview.dataset.thumbnailKey === thumbnailKey) {
+    syncSourceLabel(button, source);
+    return;
+  }
 
   preview.dataset.thumbnailKey = thumbnailKey;
   preview.replaceChildren();
@@ -240,6 +325,10 @@ function syncSourceButton(button, source) {
     preview.append(...createFallbackPreviewNodes(source));
   }
 
+  syncSourceLabel(button, source);
+}
+
+function syncSourceLabel(button, source) {
   let label = button.querySelector('.screen-source-label');
   if (!label) {
     label = document.createElement('span');
@@ -336,8 +425,9 @@ function createPreviewSpan(className = '') {
 }
 
 function submitSelection() {
+  const fpsId = state.mode === 'text' ? '5' : '30';
   const selection = {
-    fpsId: state.fpsId,
+    fpsId,
     qualityId: state.qualityId,
     sourceId: state.selectedSourceId,
     streamAudioEnabled: elements.audioToggle.checked

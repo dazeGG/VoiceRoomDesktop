@@ -12,10 +12,7 @@
     <main class="screen-picker-shell">
       <section class="screen-source-panel" aria-labelledby="pickerTitle">
         <header class="screen-source-heading">
-          <div>
-            <p class="eyebrow">Стрим</p>
-            <h1 id="pickerTitle">Выберите, что показать</h1>
-          </div>
+          <h1 id="pickerTitle">Выберите, что показать</h1>
           <button class="screen-source-close" id="screenSourceClose" type="button" aria-label="Закрыть">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M18 6 6 18"></path>
@@ -25,36 +22,102 @@
         </header>
 
         <nav class="screen-source-tabs" aria-label="Тип источника" role="tablist">
-          <button class="screen-source-tab" id="screenSourceScreensTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="true">Экраны</button>
-          <button class="screen-source-tab" id="screenSourceWindowsTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="false">Окна</button>
+          <button class="screen-source-tab" id="screenSourceScreensTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            Экраны
+          </button>
+          <button class="screen-source-tab" id="screenSourceWindowsTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="false">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line>
+            </svg>
+            Окна
+          </button>
         </nav>
 
         <div id="screenSourceTabpanel" role="tabpanel" aria-labelledby="screenSourceScreensTab">
           <div class="screen-source-options" id="screenSourceOptions" role="radiogroup" aria-label="Источники"></div>
         </div>
 
-        <footer class="screen-source-controls">
-          <div class="screen-profile-group" role="group" aria-labelledby="screenQualityGroupTitle">
-            <span class="screen-profile-group-title" id="screenQualityGroupTitle">Качество</span>
-            <div class="screen-profile-segments" id="screenQualityOptions">
-              <button type="button" data-quality-id="low">540p</button>
-              <button type="button" data-quality-id="balanced" aria-pressed="true">720p</button>
-              <button type="button" data-quality-id="high">1080p</button>
+        <footer class="screen-source-footer">
+          <!-- Selection summary -->
+          <div class="screen-source-summary">
+            <span class="screen-source-summary-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line>
+              </svg>
+            </span>
+            <div class="screen-source-summary-text">
+              <div class="screen-source-summary-name" id="screenSummaryName">Не выбрано</div>
+              <div class="screen-source-summary-detail" id="screenSummaryDetail">SD · 720p · 30 к/с · звук</div>
             </div>
           </div>
-          <div class="screen-profile-group" role="group" aria-labelledby="screenFpsGroupTitle">
-            <span class="screen-profile-group-title" id="screenFpsGroupTitle">FPS</span>
-            <div class="screen-profile-segments screen-profile-segments-compact" id="screenFpsOptions">
-              <button type="button" data-fps-id="15">15</button>
-              <button type="button" data-fps-id="30" aria-pressed="true">30</button>
+
+          <div class="screen-source-footer-actions">
+            <!-- SD / HD toggle -->
+            <div class="screen-source-res-toggle" id="screenResToggle" role="group" aria-label="Качество">
+              <button type="button" data-quality-preset="sd" aria-pressed="true">SD</button>
+              <button type="button" data-quality-preset="hd" aria-pressed="false">HD</button>
             </div>
+
+            <!-- Gear + popover -->
+            <div class="screen-source-gear-wrap">
+              <button class="screen-source-gear" id="screenSettingsGear" type="button" title="Настройки стрима" aria-pressed="false" aria-controls="screenSettingsPopover">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"></path>
+                </svg>
+              </button>
+
+              <div class="screen-settings-popover" id="screenSettingsPopover" hidden role="dialog" aria-label="Настройки стрима">
+                <div class="screen-settings-label">Режим стрима</div>
+                <div class="screen-settings-presets">
+                  <button class="screen-settings-preset" id="screenModeGames" type="button" data-mode="games" aria-pressed="true">
+                    <span class="screen-settings-icon">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                      </svg>
+                    </span>
+                    <span class="screen-settings-info">
+                      <span class="screen-settings-title">Плавное видео</span>
+                      <span class="screen-settings-desc">30 к/с · для игр и видео</span>
+                    </span>
+                    <span class="screen-settings-radio" aria-hidden="true">
+                      <span class="screen-settings-dot"></span>
+                    </span>
+                  </button>
+                  <button class="screen-settings-preset" id="screenModeText" type="button" data-mode="text" aria-pressed="false">
+                    <span class="screen-settings-icon">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line>
+                      </svg>
+                    </span>
+                    <span class="screen-settings-info">
+                      <span class="screen-settings-title">Чёткая картинка</span>
+                      <span class="screen-settings-desc">5 к/с · для текста и кода</span>
+                    </span>
+                    <span class="screen-settings-radio" aria-hidden="true"></span>
+                  </button>
+                </div>
+
+                <div class="screen-settings-sep"></div>
+
+                <label class="screen-audio-toggle">
+                  <input id="screenAudioToggle" type="checkbox" checked>
+                  <span class="screen-audio-label">Звук стрима</span>
+                  <span class="screen-audio-switch" aria-hidden="true"></span>
+                </label>
+              </div>
+            </div>
+
+            <button class="screen-source-launch" id="screenSourceStart" type="button" disabled>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M8 5v14l11-7z"></path>
+              </svg>
+              Запустить
+            </button>
           </div>
-          <label class="screen-audio-toggle">
-            <input id="screenAudioToggle" type="checkbox" checked>
-            <span class="screen-audio-switch" aria-hidden="true"></span>
-            <span>Звук стрима</span>
-          </label>
-          <button class="screen-profile-start" id="screenSourceStart" type="button">Запустить</button>
         </footer>
       </section>
     </main>

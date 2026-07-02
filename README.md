@@ -89,7 +89,7 @@ const selection = await window.voiceRoomDesktopCapture.openPicker({
 
 // selection.profileId contains the chosen quality/FPS profile.
 // selection.maxHeight contains the native Windows capture height cap:
-// low = 720, balanced = 1080, high = 1440.
+// low = 540, balanced = 720, high = 1080.
 // The selected source is already staged for the next getDisplayMedia call.
 // openPicker always uses safe-system audio with allowEchoFallback: false.
 // Use selectSource directly when you need Chromium loopback fallback.

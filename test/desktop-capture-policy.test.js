@@ -103,14 +103,19 @@ describe('normalizeDesktopAudioCapture', () => {
 describe('picker profile normalization', () => {
   it('falls back to default quality and fps', () => {
     assert.equal(normalizeScreenQualityId('ultra'), 'balanced');
-    assert.equal(normalizeScreenFpsId('60'), '30');
+    assert.equal(normalizeScreenFpsId('24'), '30');
+  });
+
+  it('accepts low-fps and 60fps profiles', () => {
+    assert.equal(normalizeScreenFpsId('5'), '5');
+    assert.equal(normalizeScreenFpsId('60'), '60');
   });
 
   it('maps quality profiles to max capture heights', () => {
-    assert.equal(getScreenQualityMaxHeight('low'), 720);
-    assert.equal(getScreenQualityMaxHeight('balanced'), 1080);
-    assert.equal(getScreenQualityMaxHeight('high'), 1440);
-    assert.equal(getScreenQualityMaxHeight('native'), 1080);
+    assert.equal(getScreenQualityMaxHeight('low'), 540);
+    assert.equal(getScreenQualityMaxHeight('balanced'), 720);
+    assert.equal(getScreenQualityMaxHeight('high'), 1080);
+    assert.equal(getScreenQualityMaxHeight('native'), 720);
   });
 
   it('normalizes picker selection', () => {

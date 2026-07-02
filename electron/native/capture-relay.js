@@ -26,7 +26,11 @@ function log(level, message, detail = undefined) {
 function postToRenderer(session, message) {
   if (!session || session.stopped || !session.port) return false;
   try {
-    session.port.postMessage(message);
+    // Frame payloads are large (NV12 1080p30 is ~35MB/s); transfer ownership
+    // of the ArrayBuffer instead of structured-cloning it on every frame, or
+    // this copy competes with the game/encoder for CPU on weaker machines.
+    // `message.data` is not read again after this call, so transfer is safe.
+    session.port.postMessage(message, message.data ? [message.data] : []);
     return true;
   } catch (error) {
     log('warn', 'Native capture relay port post failed.', { message: String(error?.message || error) });

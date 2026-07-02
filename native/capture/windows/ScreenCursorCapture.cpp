@@ -505,6 +505,26 @@ class FrameWriter {
     videoContext_->VideoProcessorSetStreamDestRect(videoProcessor_.get(), 0, TRUE, &outputRect);
     videoContext_->VideoProcessorSetOutputTargetRect(videoProcessor_.get(), TRUE, &outputRect);
 
+    // Without an explicit color space the driver is free to pick its own
+    // default (commonly BT.601) for the RGB->NV12 conversion, while the
+    // renderer always tags the resulting VideoFrame as BT.709 limited range
+    // (see native-capture.js). Force both ends to agree so colors don't shift.
+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE inputColorSpace = {};
+    inputColorSpace.Usage = 0;              // 0 = playback
+    inputColorSpace.RGB_Range = 0;          // bgraTexture_ is full-range 0-255 RGB
+    inputColorSpace.YCbCr_Matrix = 1;       // 1 = BT.709 (no effect on RGB input)
+    inputColorSpace.YCbCr_xvYCC = 0;
+    inputColorSpace.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255;
+    videoContext_->VideoProcessorSetStreamColorSpace(videoProcessor_.get(), 0, &inputColorSpace);
+
+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE outputColorSpace = {};
+    outputColorSpace.Usage = 0;
+    outputColorSpace.RGB_Range = 1;         // studio range output
+    outputColorSpace.YCbCr_Matrix = 1;      // BT.709, matches the JS-side tag
+    outputColorSpace.YCbCr_xvYCC = 0;
+    outputColorSpace.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+    videoContext_->VideoProcessorSetOutputColorSpace(videoProcessor_.get(), &outputColorSpace);
+
     videoInputWidth_ = inputWidth;
     videoInputHeight_ = inputHeight;
     videoOutputWidth_ = outputWidth;

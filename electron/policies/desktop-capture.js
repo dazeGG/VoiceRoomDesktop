@@ -7,13 +7,13 @@ const DESKTOP_AUDIO_MODES = new Set([
   'application'
 ]);
 const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high']);
-const SCREEN_FPS_IDS = new Set(['15', '30']);
+const SCREEN_FPS_IDS = new Set(['5', '15', '30', '60']);
 const DEFAULT_SCREEN_QUALITY_ID = 'balanced';
 const DEFAULT_SCREEN_FPS_ID = '30';
 const SCREEN_QUALITY_MAX_HEIGHTS = new Map([
-  ['low', 720],
-  ['balanced', 1080],
-  ['high', 1440]
+  ['low', 540],
+  ['balanced', 720],
+  ['high', 1080]
 ]);
 
 function modeToCapabilityKey(mode) {
@@ -78,7 +78,7 @@ function normalizeScreenQualityId(qualityId) {
 }
 
 function getScreenQualityMaxHeight(qualityId) {
-  return SCREEN_QUALITY_MAX_HEIGHTS.get(normalizeScreenQualityId(qualityId)) || 1080;
+  return SCREEN_QUALITY_MAX_HEIGHTS.get(normalizeScreenQualityId(qualityId)) || 720;
 }
 
 function normalizeScreenFpsId(fpsId) {

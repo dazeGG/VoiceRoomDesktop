@@ -34,7 +34,7 @@ const fallbackState = {
 };
 
 const state = {
-  mode: 'games',       // 'games' (30fps) | 'text' (15fps)
+  mode: 'games',       // 'games' (30fps) | 'text' (5fps)
   qualityId: 'balanced', // 'balanced' (SD/720p) | 'high' (HD/1080p)
   selectedSourceId: '',
   sourceType: 'screen',
@@ -68,7 +68,7 @@ async function init() {
   const pickerState = await getPickerState();
   state.sources = pickerState.sources || [];
   state.qualityId = pickerState.defaultQualityId === 'high' ? 'high' : 'balanced';
-  state.mode = pickerState.defaultFpsId === '15' ? 'text' : 'games';
+  state.mode = pickerState.defaultFpsId === '5' ? 'text' : 'games';
   elements.audioToggle.checked = pickerState.defaultStreamAudioEnabled !== false;
 
   const hasScreen = state.sources.some((source) => source.type === 'screen');

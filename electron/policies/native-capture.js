@@ -55,11 +55,16 @@ function getNativeCaptureInjectScript() {
     const createNativeVideoTrack = (port, sessionId) => {
       const generator = new MediaStreamTrackGenerator({ kind: 'video' });
       try {
-        if ('contentHint' in generator) generator.contentHint = 'detail';
+        // 'motion' tells the encoder to protect framerate over resolution when
+        // bandwidth runs out — the right tradeoff for games/video. 'detail'
+        // (the WebRTC default for screen tracks) does the opposite and turns
+        // fast-moving content to mush before it drops a single frame.
+        if ('contentHint' in generator) generator.contentHint = 'motion';
       } catch {}
       const writer = generator.writable.getWriter();
       let closed = false;
       let sawFrame = false;
+      let epochOffsetUs = null;
 
       const normalizeFrameData = (data) => {
         if (data instanceof ArrayBuffer) return data;
@@ -98,11 +103,25 @@ function getNativeCaptureInjectScript() {
           const data = normalizeFrameData(message.data);
           if (!data) return;
           const format = message.format === 'NV12' ? 'NV12' : 'BGRX';
+          // Prefer the helper's own capture timestamp over "now": the pipe/
+          // utility-process/MessagePort hop between capture and here adds
+          // scheduling jitter that would otherwise leak into encoder pacing.
+          // Anchor the native clock to performance.now() once per track so
+          // downstream consumers still see a plausible epoch, then advance it
+          // using only native deltas (GetTickCount64 is monotonic, so this
+          // never goes backwards or wraps in practice).
+          const captureTimestampMs = typeof message.timestampMs === 'number' ? message.timestampMs : null;
+          if (captureTimestampMs !== null && epochOffsetUs === null) {
+            epochOffsetUs = (performance.now() * 1000) - (captureTimestampMs * 1000);
+          }
+          const timestamp = captureTimestampMs !== null
+            ? Math.round((captureTimestampMs * 1000) + epochOffsetUs)
+            : Math.round(performance.now() * 1000);
           const init = {
             codedHeight: message.height,
             codedWidth: message.width,
             format,
-            timestamp: Math.round(performance.now() * 1000),
+            timestamp,
             transfer: [data]
           };
           if (format === 'NV12') {

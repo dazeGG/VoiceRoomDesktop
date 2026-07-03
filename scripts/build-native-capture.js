@@ -54,7 +54,8 @@ function buildWindows(options = {}) {
     'gdi32.lib',
     'ole32.lib',
     'user32.lib',
-    'windowsapp.lib'
+    'windowsapp.lib',
+    'avrt.lib'
   ]);
 }
 

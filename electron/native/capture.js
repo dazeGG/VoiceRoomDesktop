@@ -223,8 +223,35 @@ function cleanupSession(session) {
   }
 }
 
+function reconfigureNativeCaptureSession({ fps, maxHeight } = {}) {
+  const session = activeSession;
+  if (!session || session.stopped) {
+    return { ok: false, reason: 'no-active-session' };
+  }
+
+  const payload = { type: 'reconfigure' };
+  if (Number.isInteger(fps) && fps > 0 && fps <= 60) payload.fps = fps;
+  if (Number.isInteger(maxHeight) && maxHeight > 0 && maxHeight <= 16384) payload.maxHeight = maxHeight;
+  if (!payload.fps && !payload.maxHeight) {
+    return { ok: false, reason: 'bad-profile' };
+  }
+
+  try {
+    session.relay.postMessage(payload);
+  } catch {
+    return { ok: false, reason: 'relay-unavailable' };
+  }
+
+  return {
+    fps: payload.fps,
+    maxHeight: payload.maxHeight,
+    ok: true
+  };
+}
+
 module.exports = {
   getNativeCaptureCapabilities,
+  reconfigureNativeCaptureSession,
   startNativeCaptureSession,
   stopNativeCaptureSession
 };

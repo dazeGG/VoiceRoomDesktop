@@ -53,6 +53,7 @@ module.exports = {
     'electron/native/capture.js',
     'electron/native/capture-frames.js',
     'electron/policies/native-capture.js',
+    'electron/policies/native-capture-restart.js',
     'electron/policies/windows-capture.js',
     'electron/window/app-topbar-view.js',
     'electron/window/bootstrap.js',

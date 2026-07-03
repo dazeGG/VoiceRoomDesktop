@@ -24,7 +24,9 @@
 //            conversion is unavailable, frames fall back to top-down BGRX with
 //            stride == width * 4.
 //   stderr — one JSON event per line: format / log / warning / error / closed / exit.
-//   args   — --source screen:<index> | window:<hwnd>  [--fps 15|30|60]
+//   stdin  — one JSON command per line (ignored when absent):
+//            {"cmd":"reconfigure","fps":<1..60>,"maxHeight":<2..16384>}
+//   args   — --source screen:<index> | window:<hwnd>  [--fps 5|15|30|60]
 //            [--max-height 720|1080|1440]
 //
 // Exit codes: 0 clean stop, 2 capture unsupported on this Windows build,
@@ -55,10 +57,13 @@
 #include <cstdio>
 #include <cstring>
 #include <csignal>
+#include <iostream>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <avrt.h>
 
 namespace wgc = winrt::Windows::Graphics::Capture;
 namespace wgd = winrt::Windows::Graphics::DirectX;
@@ -66,6 +71,16 @@ namespace wgd3d = winrt::Windows::Graphics::DirectX::Direct3D11;
 
 static std::atomic<bool> g_running{true};
 static HANDLE g_stopEvent = nullptr;
+
+class CaptureSession;
+
+// Guards the active-session pointer against the detached stdin thread. Clearing
+// the pointer under this lock guarantees no ApplyReconfigure is in-flight (and
+// none can start) before wmain tears the session down, so the stdin thread can
+// never touch a destroyed CaptureSession.
+static CaptureSession* g_activeSession = nullptr;
+static std::mutex g_activeSessionMutex;
+
 static constexpr uint32_t kFrameFlagCursorDrawn = 1u;
 static constexpr uint32_t kFrameFlagFormatNv12 = 1u << 1;
 
@@ -88,6 +103,30 @@ static void LogFormat(uint32_t width, uint32_t height, uint32_t fps) {
                "{\"event\":\"format\",\"width\":%u,\"height\":%u,\"fps\":%u,\"pixelFormat\":\"nv12\"}\n",
                width, height, fps);
   std::fflush(stderr);
+}
+
+static void RegisterMmcssCaptureThread() {
+  static thread_local bool registered = false;
+  if (registered) return;
+  DWORD taskIndex = 0;
+  if (AvSetMmThreadCharacteristicsW(L"Capture", &taskIndex)) {
+    registered = true;
+    return;
+  }
+  LogEvent("log", "AvSetMmThreadCharacteristicsW failed.");
+}
+
+static bool ParseJsonUintField(const std::string& line, const char* key, uint32_t* out) {
+  const std::string needle = std::string("\"") + key + "\":";
+  const size_t pos = line.find(needle);
+  if (pos == std::string::npos) return false;
+  size_t index = pos + needle.size();
+  while (index < line.size() && (line[index] == ' ' || line[index] == '\t')) index++;
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(line.c_str() + index, &end, 10);
+  if (end == line.c_str() + index) return false;
+  *out = static_cast<uint32_t>(parsed);
+  return true;
 }
 
 struct FrameSize {
@@ -749,13 +788,15 @@ class CaptureSession {
  public:
   bool Start(const CaptureTarget& target, uint32_t fps, uint32_t maxHeight) {
     target_ = target;
-    fps_ = fps == 0 ? 30 : fps;
-    maxHeight_ = maxHeight;
-    minFrameIntervalQpc_ = 0;
+    fps_.store(fps == 0 ? 30 : fps);
+    maxHeight_.store(maxHeight);
+    minFrameIntervalQpc_.store(0);
+    lastSourceWidth_.store(0);
+    lastSourceHeight_.store(0);
 
     LARGE_INTEGER frequency = {};
     if (QueryPerformanceFrequency(&frequency)) {
-      minFrameIntervalQpc_ = frequency.QuadPart / fps_;
+      minFrameIntervalQpc_.store(frequency.QuadPart / fps_.load());
     }
 
     // Screens use DXGI Desktop Duplication, windows use WGC. Duplication is the
@@ -768,6 +809,26 @@ class CaptureSession {
   }
 
   bool IsUnsupported() const { return unsupported_; }
+
+  void ApplyReconfigure(uint32_t fps, uint32_t maxHeight) {
+    if (fps >= 1 && fps <= 60) {
+      fps_.store(fps);
+      LARGE_INTEGER frequency = {};
+      if (QueryPerformanceFrequency(&frequency)) {
+        minFrameIntervalQpc_.store(frequency.QuadPart / fps);
+      }
+    }
+    if (maxHeight >= 1 && maxHeight <= 16384) {
+      maxHeight_.store(maxHeight);
+    }
+
+    const uint32_t sourceWidth = lastSourceWidth_.load();
+    const uint32_t sourceHeight = lastSourceHeight_.load();
+    if (sourceWidth > 0 && sourceHeight > 0) {
+      const FrameSize outputSize = ComputeOutputSize(sourceWidth, sourceHeight, maxHeight_.load());
+      LogFormat(outputSize.width, outputSize.height, fps_.load());
+    }
+  }
 
   void Stop() {
     // Desktop Duplication path: signal already set via g_running; join the loop.
@@ -838,8 +899,10 @@ class CaptureSession {
 
     DXGI_OUTDUPL_DESC desc = {};
     duplication_->GetDesc(&desc);
-    const FrameSize outputSize = ComputeOutputSize(desc.ModeDesc.Width, desc.ModeDesc.Height, maxHeight_);
-    LogFormat(outputSize.width, outputSize.height, fps_);
+    lastSourceWidth_.store(desc.ModeDesc.Width);
+    lastSourceHeight_.store(desc.ModeDesc.Height);
+    const FrameSize outputSize = ComputeOutputSize(desc.ModeDesc.Width, desc.ModeDesc.Height, maxHeight_.load());
+    LogFormat(outputSize.width, outputSize.height, fps_.load());
 
     duplicationThread_ = std::thread([this]() { DuplicationLoop(); });
     return true;
@@ -894,11 +957,13 @@ class CaptureSession {
           OnFrameArrived(pool);
         });
 
+    lastSourceWidth_.store(static_cast<uint32_t>(contentSize_.Width));
+    lastSourceHeight_.store(static_cast<uint32_t>(contentSize_.Height));
     const FrameSize outputSize = ComputeOutputSize(
         static_cast<uint32_t>(contentSize_.Width),
         static_cast<uint32_t>(contentSize_.Height),
-        maxHeight_);
-    LogFormat(outputSize.width, outputSize.height, fps_);
+        maxHeight_.load());
+    LogFormat(outputSize.width, outputSize.height, fps_.load());
     session_.StartCapture();
     return true;
   }
@@ -936,6 +1001,7 @@ class CaptureSession {
   }
 
   void DuplicationLoop() {
+    RegisterMmcssCaptureThread();
     // Cursor coordinates are translated against the monitor origin, matching the
     // screen branch of the old WGC OnFrameArrived path.
     const POINT origin = {target_.monitorRect.left, target_.monitorRect.top};
@@ -954,11 +1020,12 @@ class CaptureSession {
         break;
       }
 
+      const int64_t frameIntervalQpc = minFrameIntervalQpc_.load();
       bool emit = true;
-      if (minFrameIntervalQpc_ > 0) {
+      if (frameIntervalQpc > 0) {
         LARGE_INTEGER now = {};
         QueryPerformanceCounter(&now);
-        if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < minFrameIntervalQpc_) {
+        if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < frameIntervalQpc) {
           emit = false;
         } else {
           lastFrameQpc_ = now.QuadPart;
@@ -971,7 +1038,9 @@ class CaptureSession {
         if (texture) {
           D3D11_TEXTURE2D_DESC desc = {};
           texture->GetDesc(&desc);
-          pipeAlive = writer_.WriteFrame(texture.get(), desc.Width, desc.Height, origin, maxHeight_);
+          lastSourceWidth_.store(desc.Width);
+          lastSourceHeight_.store(desc.Height);
+          pipeAlive = writer_.WriteFrame(texture.get(), desc.Width, desc.Height, origin, maxHeight_.load());
         }
       }
 
@@ -1012,16 +1081,18 @@ class CaptureSession {
   }
 
   void OnFrameArrived(wgc::Direct3D11CaptureFramePool const& pool) {
+    RegisterMmcssCaptureThread();
     std::lock_guard<std::mutex> guard(frameMutex_);
     if (!g_running) return;
 
     auto frame = pool.TryGetNextFrame();
     if (!frame) return;
 
-    if (minFrameIntervalQpc_ > 0) {
+    const int64_t frameIntervalQpc = minFrameIntervalQpc_.load();
+    if (frameIntervalQpc > 0) {
       LARGE_INTEGER now = {};
       QueryPerformanceCounter(&now);
-      if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < minFrameIntervalQpc_) {
+      if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < frameIntervalQpc) {
         return;
       }
       lastFrameQpc_ = now.QuadPart;
@@ -1032,11 +1103,13 @@ class CaptureSession {
     if (frameSize.Width != contentSize_.Width || frameSize.Height != contentSize_.Height) {
       contentSize_ = frameSize;
       pool.Recreate(device_, wgd::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, contentSize_);
+      lastSourceWidth_.store(static_cast<uint32_t>(contentSize_.Width));
+      lastSourceHeight_.store(static_cast<uint32_t>(contentSize_.Height));
       const FrameSize outputSize = ComputeOutputSize(
           static_cast<uint32_t>(contentSize_.Width),
           static_cast<uint32_t>(contentSize_.Height),
-          maxHeight_);
-      LogFormat(outputSize.width, outputSize.height, fps_);
+          maxHeight_.load());
+      LogFormat(outputSize.width, outputSize.height, fps_.load());
       return;
     }
 
@@ -1060,7 +1133,9 @@ class CaptureSession {
 
     const uint32_t width = std::min<uint32_t>(desc.Width, static_cast<uint32_t>(contentSize_.Width));
     const uint32_t height = std::min<uint32_t>(desc.Height, static_cast<uint32_t>(contentSize_.Height));
-    const bool ok = originKnown ? writer_.WriteFrame(texture.get(), width, height, contentOrigin, maxHeight_) : true;
+    lastSourceWidth_.store(width);
+    lastSourceHeight_.store(height);
+    const bool ok = originKnown ? writer_.WriteFrame(texture.get(), width, height, contentOrigin, maxHeight_.load()) : true;
 
     if (!ok) {
       // stdout pipe is gone — the parent process exited.
@@ -1070,9 +1145,11 @@ class CaptureSession {
   }
 
   CaptureTarget target_;
-  uint32_t fps_ = 30;
-  uint32_t maxHeight_ = 1080;
-  int64_t minFrameIntervalQpc_ = 0;
+  std::atomic<uint32_t> fps_{30};
+  std::atomic<uint32_t> maxHeight_{1080};
+  std::atomic<uint32_t> lastSourceWidth_{0};
+  std::atomic<uint32_t> lastSourceHeight_{0};
+  std::atomic<int64_t> minFrameIntervalQpc_{0};
   int64_t lastFrameQpc_ = 0;
   bool unsupported_ = false;
 
@@ -1093,6 +1170,24 @@ class CaptureSession {
   std::mutex frameMutex_;
   FrameWriter writer_;
 };
+
+static void StdinCommandLoop() {
+  std::string line;
+  while (g_running && std::getline(std::cin, line)) {
+    if (line.find("reconfigure") == std::string::npos) continue;
+    uint32_t fps = 0;
+    uint32_t maxHeight = 0;
+    const bool hasFps = ParseJsonUintField(line, "fps", &fps);
+    const bool hasHeight = ParseJsonUintField(line, "maxHeight", &maxHeight);
+    if (!hasFps && !hasHeight) continue;
+    // Hold the lock across the call so wmain cannot clear the pointer and
+    // destroy the session while ApplyReconfigure is running on it.
+    std::lock_guard<std::mutex> guard(g_activeSessionMutex);
+    CaptureSession* session = g_activeSession;
+    if (!session) continue;
+    session->ApplyReconfigure(hasFps ? fps : 0, hasHeight ? maxHeight : 0);
+  }
+}
 
 static std::wstring ReadStringArg(int argc, wchar_t** argv, const wchar_t* name) {
   for (int index = 1; index + 1 < argc; ++index) {
@@ -1116,6 +1211,7 @@ int wmain(int argc, wchar_t** argv) {
   // Physical pixels everywhere: WGC sizes, GetCursorInfo coordinates and
   // monitor rects must agree, otherwise the cursor lands at scaled positions.
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
   _setmode(_fileno(stdout), _O_BINARY);
   winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
@@ -1164,8 +1260,17 @@ int wmain(int argc, wchar_t** argv) {
     if (!started) {
       exitCode = session.IsUnsupported() ? 2 : 1;
     } else {
+      {
+        std::lock_guard<std::mutex> guard(g_activeSessionMutex);
+        g_activeSession = &session;
+      }
+      std::thread(StdinCommandLoop).detach();
       while (g_running) {
         WaitForSingleObject(g_stopEvent, 250);
+      }
+      {
+        std::lock_guard<std::mutex> guard(g_activeSessionMutex);
+        g_activeSession = nullptr;
       }
       session.Stop();
     }

@@ -95,6 +95,18 @@ const selection = await window.voiceRoomDesktopCapture.openPicker({
 // Use selectSource directly when you need Chromium loopback fallback.
 ```
 
+During an active native capture session, the hosted web app can live-switch capture
+quality without restarting the stream:
+
+```js
+const result = await window.voiceRoomDesktopCapture.applyProfile({
+  qualityId: 'low',
+  fpsId: '15'
+});
+// result.ok === false with reason 'no-active-session' on macOS or browser paths;
+// callers should fall back to videoTrack.applyConstraints(...) in that case.
+```
+
 `safe-system` is the Discord-like intent: capture system audio while excluding Voice Room playback. The Electron shell builds native helpers for this path:
 
 - macOS: ScreenCaptureKit audio with `excludesCurrentProcessAudio`.

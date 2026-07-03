@@ -4,6 +4,7 @@ const { BrowserWindow, ipcMain } = require('electron');
 const {
   createScreenProfileId,
   getScreenQualityMaxHeight,
+  normalizeApplyProfileRequest,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,
   normalizeScreenQualityId
@@ -33,7 +34,11 @@ const {
   openMacMicrophoneSettings,
   openMacScreenCaptureSettings
 } = require('../security');
-const { startNativeCaptureSession, stopNativeCaptureSession } = require('../native/capture');
+const {
+  reconfigureNativeCaptureSession,
+  startNativeCaptureSession,
+  stopNativeCaptureSession
+} = require('../native/capture');
 const { startSafeSystemAudioCapture, stopSafeSystemAudioCapture } = require('../native/audio');
 const log = require('../logger');
 
@@ -191,6 +196,32 @@ function configureDesktopCaptureIpc() {
     }
 
     return stopNativeCaptureSession(String(sessionId || ''));
+  });
+
+  ipcMain.handle('desktop-capture:apply-profile', async (event, options = {}) => {
+    if (!isTrustedFrame(event.senderFrame)) {
+      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+    }
+
+    const { fps, fpsId, maxHeight, qualityId } = normalizeApplyProfileRequest(options);
+    const result = reconfigureNativeCaptureSession({ fps, maxHeight });
+
+    if (!result.ok) {
+      return {
+        fpsId,
+        maxHeight,
+        ok: false,
+        qualityId,
+        reason: result.reason || 'reconfigure-failed'
+      };
+    }
+
+    return {
+      fpsId,
+      maxHeight,
+      ok: true,
+      qualityId
+    };
   });
 
   ipcMain.handle('desktop-audio:start-safe-system', (event, options = {}) => {

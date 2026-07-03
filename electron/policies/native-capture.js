@@ -53,18 +53,28 @@ function getNativeCaptureInjectScript() {
     });
 
     const createNativeVideoTrack = (port, sessionId) => {
+      // Deliberately no contentHint here: the hosted app owns it. It applies
+      // 'motion' (games) or 'detail' (text mode) per user-selected stream mode
+      // and only when the track arrives without a hint — hardcoding one would
+      // lock every desktop stream into a single encoder degradation profile.
       const generator = new MediaStreamTrackGenerator({ kind: 'video' });
-      try {
-        // 'motion' tells the encoder to protect framerate over resolution when
-        // bandwidth runs out — the right tradeoff for games/video. 'detail'
-        // (the WebRTC default for screen tracks) does the opposite and turns
-        // fast-moving content to mush before it drops a single frame.
-        if ('contentHint' in generator) generator.contentHint = 'motion';
-      } catch {}
       const writer = generator.writable.getWriter();
       let closed = false;
       let sawFrame = false;
       let epochOffsetUs = null;
+      let lastRelayStats = null;
+      const counters = {
+        framesDroppedBackpressure: 0,
+        framesDroppedCreate: 0,
+        framesReceived: 0,
+        framesWritten: 0
+      };
+
+      window.__voiceRoomNativeCaptureStats = () => ({
+        ...counters,
+        relay: lastRelayStats,
+        sessionId
+      });
 
       const normalizeFrameData = (data) => {
         if (data instanceof ArrayBuffer) return data;
@@ -77,6 +87,7 @@ function getNativeCaptureInjectScript() {
         if (closed) return;
         closed = true;
         clearInterval(watchdog);
+        try { delete window.__voiceRoomNativeCaptureStats; } catch {}
         try { port.postMessage({ type: 'stop' }); } catch {}
         try { port.close(); } catch {}
         writer.close().catch(() => {});
@@ -90,13 +101,21 @@ function getNativeCaptureInjectScript() {
           stop();
           return;
         }
+        if (message.type === 'stats') {
+          lastRelayStats = message;
+          return;
+        }
         if (message.type !== 'frame' || !message.data) return;
+        counters.framesReceived += 1;
         if (generator.readyState === 'ended') {
           stop();
           return;
         }
         // The encoder is behind: drop the frame instead of queueing memory.
-        if (writer.desiredSize !== null && writer.desiredSize <= 0) return;
+        if (writer.desiredSize !== null && writer.desiredSize <= 0) {
+          counters.framesDroppedBackpressure += 1;
+          return;
+        }
 
         let frame = null;
         try {
@@ -138,9 +157,11 @@ function getNativeCaptureInjectScript() {
           }
           frame = new VideoFrame(data, init);
         } catch {
+          counters.framesDroppedCreate += 1;
           return;
         }
         sawFrame = true;
+        counters.framesWritten += 1;
         writer.write(frame).catch(() => {
           try { frame.close(); } catch {}
           stop();

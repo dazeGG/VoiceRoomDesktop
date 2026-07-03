@@ -94,9 +94,24 @@ function normalizeDesktopCapturePickerSelection(selection) {
   };
 }
 
+// Resolves a live-reconfigure request (quality/FPS) into the concrete capture
+// parameters the native helper expects. Shared by the apply-profile IPC handler
+// and its test so both exercise the same normalization.
+function normalizeApplyProfileRequest(options = {}) {
+  const qualityId = normalizeScreenQualityId(options.qualityId);
+  const fpsId = normalizeScreenFpsId(options.fpsId);
+  return {
+    fps: Number(fpsId),
+    fpsId,
+    maxHeight: getScreenQualityMaxHeight(qualityId),
+    qualityId
+  };
+}
+
 module.exports = {
   createScreenProfileId,
   getScreenQualityMaxHeight,
+  normalizeApplyProfileRequest,
   normalizeDesktopAudioCapture,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,

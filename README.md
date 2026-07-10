@@ -89,7 +89,7 @@ const selection = await window.voiceRoomDesktopCapture.openPicker({
 
 // selection.profileId contains the chosen quality/FPS profile.
 // selection.maxHeight contains the native Windows capture height cap:
-// low = 540, balanced = 720, high = 1080.
+// low = 540 (legacy), balanced = 720, high = 1080, source = no shell downscale.
 // The selected source is already staged for the next getDisplayMedia call.
 // openPicker always uses safe-system audio with allowEchoFallback: false.
 // Use selectSource directly when you need Chromium loopback fallback.
@@ -100,8 +100,8 @@ quality without restarting the stream:
 
 ```js
 const result = await window.voiceRoomDesktopCapture.applyProfile({
-  qualityId: 'low',
-  fpsId: '15'
+  qualityId: 'source',
+  fpsId: '5'
 });
 // result.ok === false with reason 'no-active-session' on macOS or browser paths;
 // callers should fall back to videoTrack.applyConstraints(...) in that case.

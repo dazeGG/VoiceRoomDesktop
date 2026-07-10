@@ -6,14 +6,15 @@ const DESKTOP_AUDIO_MODES = new Set([
   'safe-system',
   'application'
 ]);
-const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high']);
+const SCREEN_QUALITY_IDS = new Set(['low', 'balanced', 'high', 'source']);
 const SCREEN_FPS_IDS = new Set(['5', '15', '30', '60']);
 const DEFAULT_SCREEN_QUALITY_ID = 'balanced';
 const DEFAULT_SCREEN_FPS_ID = '30';
 const SCREEN_QUALITY_MAX_HEIGHTS = new Map([
   ['low', 540],
   ['balanced', 720],
-  ['high', 1080]
+  ['high', 1080],
+  ['source', 16384]
 ]);
 
 function modeToCapabilityKey(mode) {

@@ -21,6 +21,13 @@ describe('desktop capture apply-profile normalization', () => {
     );
   });
 
+  it('maps source quality to the no-downscale helper cap', () => {
+    assert.deepEqual(
+      normalizeApplyProfileRequest({ fpsId: '5', qualityId: 'source' }),
+      { fps: 5, fpsId: '5', maxHeight: 16384, qualityId: 'source' }
+    );
+  });
+
   it('falls back invalid values to defaults', () => {
     assert.deepEqual(
       normalizeApplyProfileRequest({ fpsId: '99', qualityId: 'native' }),

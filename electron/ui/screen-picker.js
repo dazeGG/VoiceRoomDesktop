@@ -139,6 +139,7 @@ function setSourceType(type) {
 function setMode(mode) {
   state.mode = mode;
   refreshModePresets();
+  refreshResToggle();
   updateSummary();
 }
 
@@ -170,6 +171,10 @@ function refreshTabs() {
 }
 
 function refreshResToggle() {
+  const isTextMode = state.mode === 'text';
+  elements.resToggle.hidden = isTextMode;
+  elements.resToggle.setAttribute('aria-hidden', String(isTextMode));
+
   const isHd = state.qualityId === 'high';
   for (const button of elements.resToggle.querySelectorAll('button')) {
     const isHdBtn = button.dataset.qualityPreset === 'hd';
@@ -275,12 +280,17 @@ function updateSourceSelection() {
 
 function updateSummary() {
   const source = state.sources.find((s) => s.id === state.selectedSourceId);
-  const qualityLabel = state.qualityId === 'high' ? '1080p' : '720p';
   const fpsLabel = state.mode === 'text' ? '5 к/с' : '30 к/с';
   const audioLabel = elements.audioToggle.checked ? ' · звук' : '';
-  const resLabel = state.qualityId === 'high' ? 'HD' : 'SD';
 
   elements.summaryName.textContent = source?.name ?? 'Не выбрано';
+  if (state.mode === 'text') {
+    elements.summaryDetail.textContent = `Источник · ${fpsLabel}${audioLabel}`;
+    return;
+  }
+
+  const qualityLabel = state.qualityId === 'high' ? '1080p' : '720p';
+  const resLabel = state.qualityId === 'high' ? 'HD' : 'SD';
   elements.summaryDetail.textContent = `${resLabel} · ${qualityLabel} · ${fpsLabel}${audioLabel}`;
 }
 
@@ -426,9 +436,10 @@ function createPreviewSpan(className = '') {
 
 function submitSelection() {
   const fpsId = state.mode === 'text' ? '5' : '30';
+  const qualityId = state.mode === 'text' ? 'source' : state.qualityId;
   const selection = {
     fpsId,
-    qualityId: state.qualityId,
+    qualityId,
     sourceId: state.selectedSourceId,
     streamAudioEnabled: elements.audioToggle.checked
   };

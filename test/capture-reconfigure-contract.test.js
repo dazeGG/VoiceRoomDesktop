@@ -15,6 +15,13 @@ describe('normalizeReconfigureCommand', () => {
     );
   });
 
+  it('accepts the source-profile maxHeight ceiling', () => {
+    assert.deepEqual(
+      normalizeReconfigureCommand({ fps: 5, maxHeight: 16384, type: 'reconfigure' }),
+      { fps: 5, maxHeight: 16384 }
+    );
+  });
+
   it('accepts partial updates', () => {
     assert.deepEqual(
       normalizeReconfigureCommand({ fps: 5, type: 'reconfigure' }),

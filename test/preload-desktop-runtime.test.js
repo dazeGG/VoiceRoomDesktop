@@ -11,7 +11,26 @@ test('preload installs desktop markers without native capture contract modules',
   const source = fs.readFileSync(preloadPath, 'utf8');
   const exposed = new Map();
   const listeners = new Map();
+  const invoked = [];
   const classList = new Set();
+  const ipcRenderer = {
+    invoke: (channel, ...args) => {
+      invoked.push([channel, ...args]);
+      return Promise.resolve({ ok: true });
+    },
+    on(channel, listener) {
+      listeners.set(channel, listener);
+    },
+    removeListener() {}
+  };
+  const electronMock = {
+    contextBridge: {
+      exposeInMainWorld(name, value) {
+        exposed.set(name, value);
+      }
+    },
+    ipcRenderer
+  };
   const documentElement = {
     classList: {
       add: (name) => classList.add(name)
@@ -29,20 +48,7 @@ test('preload installs desktop markers without native capture contract modules',
     },
     require(request) {
       if (request === 'electron') {
-        return {
-          contextBridge: {
-            exposeInMainWorld(name, value) {
-              exposed.set(name, value);
-            }
-          },
-          ipcRenderer: {
-            invoke: () => Promise.resolve(),
-            on(channel, listener) {
-              listeners.set(channel, listener);
-            },
-            removeListener() {}
-          }
-        };
+        return electronMock;
       }
       if (request.includes('capture-contract')) {
         throw new Error(`module not found: ${request}`);
@@ -68,6 +74,20 @@ test('preload installs desktop markers without native capture contract modules',
   assert.equal(exposed.get('voiceRoomDesktop'), runtime);
   assert.equal(typeof exposed.get('voiceRoomNativeCaptureBridge')?.prepare, 'function');
   assert.equal(typeof listeners.get('native-capture:port'), 'function');
+
+  const notifications = exposed.get('voiceRoomDesktopNotifications');
+  assert.deepEqual(Object.keys(notifications), ['show']);
+  assert.equal(typeof notifications.show, 'function');
+  notifications.show({ body: 'Body', title: 'Title' });
+  assert.deepEqual(invoked.at(-1), [
+    'desktop-notifications:show',
+    { body: 'Body', title: 'Title' }
+  ]);
+
+  for (const [name, value] of exposed) {
+    assert.notEqual(value?.invoke, ipcRenderer.invoke, `${name} must not expose raw ipcRenderer`);
+    assert.equal(value?.send, undefined, `${name} must not expose ipcRenderer.send`);
+  }
 });
 
 

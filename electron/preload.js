@@ -49,6 +49,10 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopNotifications', {
   show: (payload) => ipcRenderer.invoke('desktop-notifications:show', payload)
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopIdle', {
+  getSystemIdleTime: () => ipcRenderer.invoke('desktop-idle:get-system-idle-time')
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
   ensureMediaAccess: () => ipcRenderer.invoke('desktop-audio:ensure-media-access'),
   getCapabilities: () => ipcRenderer.invoke('desktop-audio:get-capabilities'),

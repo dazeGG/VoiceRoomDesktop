@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell, Notification, powerMonitor } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -29,6 +29,7 @@ const { disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
 const { configureDesktopNotificationsIpc } = require('./notifications');
+const { configureDesktopIdleIpc } = require('./idle');
 const {
   ensureMacMicrophoneAccess,
   grantMacMediaPermission,
@@ -229,6 +230,11 @@ if (!gotLock) {
 
   async function launchApplication() {
     configureWindowIpc();
+    configureDesktopIdleIpc({
+      ipcMain,
+      powerMonitor,
+      isTrustedFrame
+    });
     configureDesktopNotificationsIpc({
       ipcMain,
       Notification,

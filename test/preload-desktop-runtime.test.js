@@ -84,6 +84,12 @@ test('preload installs desktop markers without native capture contract modules',
     { body: 'Body', title: 'Title' }
   ]);
 
+  const idle = exposed.get('voiceRoomDesktopIdle');
+  assert.deepEqual(Object.keys(idle), ['getSystemIdleTime']);
+  assert.equal(typeof idle.getSystemIdleTime, 'function');
+  idle.getSystemIdleTime();
+  assert.deepEqual(invoked.at(-1), ['desktop-idle:get-system-idle-time']);
+
   for (const [name, value] of exposed) {
     assert.notEqual(value?.invoke, ipcRenderer.invoke, `${name} must not expose raw ipcRenderer`);
     assert.equal(value?.send, undefined, `${name} must not expose ipcRenderer.send`);

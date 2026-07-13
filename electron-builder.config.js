@@ -47,6 +47,7 @@ module.exports = {
     'electron/logger.js',
     'electron/policies/media-device.js',
     'electron/main.js',
+    'electron/idle.js',
     'electron/native/audio.js',
     'electron/notifications.js',
     'electron/native-capture-contract.js',

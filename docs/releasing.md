@@ -2,6 +2,10 @@
 
 Releases are built by GitHub Actions from git tags. Do not upload desktop artifacts manually.
 
+> **Важное правило:** когда делаешь релиз надо ждать билд в actions и потом со сбилженными файлами сделать гитхаб релиз.
+>
+> Дождись успешного завершения сборок (Validate + Build macOS + Build Windows). Только после этого создавай (или давай workflow создать) GitHub Release, используя реальные артефакты из ранa.
+
 ## Versioning
 
 Use semver in `package.json` and tag releases as `vX.Y.Z`.
@@ -38,15 +42,18 @@ If they do not match, CI fails before building installers.
    git push origin v1.0.2
    ```
 
-4. GitHub Actions builds:
+4. GitHub Actions will trigger the Release workflow on the tag push. It runs:
+   - Validate release version
+   - Build macOS (produces DMG/ZIP + blockmaps + latest-mac.yml)
+   - Build Windows (produces EXE + blockmaps + latest.yml)
 
-   - macOS `.dmg` on a macOS runner.
-   - Windows `.exe` on a Windows runner with MSVC.
-   - Native audio helpers on their matching platforms.
+   **Wait for all build jobs to complete successfully.** Artifacts are uploaded as `VoiceRoom-macOS-X.Y.Z` and `VoiceRoom-Windows-X.Y.Z`.
 
-5. The workflow creates a GitHub Release and uploads the artifacts.
+5. Only after builds succeed, the `Publish GitHub Release` job runs: it downloads the built artifacts and creates the GitHub Release (using softprops/action-gh-release) with those files attached.
 
-6. Add release notes in the same format as previous stable releases:
+   If the publish job did not execute or you need to retry attachment (e.g. after transient issues with large files), re-run **only** the "Publish GitHub Release" job from the successful run. It will reuse the already-produced build artifacts from the run. Do not pre-create the release or attach files before builds are ready.
+
+6. After the release is published by CI, edit the release notes on GitHub in the same format as previous stable releases:
 
    ```markdown
    ## Changes

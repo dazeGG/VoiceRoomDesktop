@@ -98,6 +98,11 @@ if (process.platform === 'win32') {
   }
 }
 
+// Rooms auto-join without a page gesture. Electron defaults to the permissive
+// autoplay policy, but pin it explicitly so a future Electron/Chromium default
+// change never resurfaces the web client's "Разрешить звук" fallback button.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = getOriginFromUrl(APP_URL);

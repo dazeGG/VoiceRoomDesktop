@@ -8,7 +8,7 @@ const {
   sanitizeNotificationPayload
 } = require('../electron/notifications');
 
-function createHarness({ supported = true, trusted = true } = {}) {
+function createHarness({ emitShow = true, failMessage = '', supported = true, trusted = true } = {}) {
   const handlers = new Map();
   const notifications = [];
   const restoreCalls = [];
@@ -27,6 +27,11 @@ function createHarness({ supported = true, trusted = true } = {}) {
     }
     show() {
       this.shown = true;
+      if (failMessage) {
+        this.handlers.get('failed')?.({}, failMessage);
+        return;
+      }
+      if (emitShow) this.handlers.get('show')?.();
     }
     click() {
       this.handlers.get('click')?.();
@@ -90,17 +95,17 @@ describe('desktop notifications bridge', () => {
     assert.equal(notifications.length, 0);
   });
 
-  it('returns unsupported without throwing when native notifications are unavailable', () => {
+  it('returns unsupported without throwing when native notifications are unavailable', async () => {
     const { handler, notifications } = createHarness({ supported: false });
 
-    assert.deepEqual(handler(createEvent(), { title: 'Hi' }), { ok: false, reason: 'unsupported' });
+    assert.deepEqual(await handler(createEvent(), { title: 'Hi' }), { ok: false, reason: 'unsupported' });
     assert.equal(notifications.length, 0);
   });
 
-  it('creates supported notifications with sanitized title/body only', () => {
+  it('creates supported notifications with sanitized title/body only', async () => {
     const { handler, notifications } = createHarness();
 
-    assert.deepEqual(handler(createEvent(), {
+    assert.deepEqual(await handler(createEvent(), {
       body: `Body${'b'.repeat(600)}`,
       icon: 'file:///unsafe.png',
       route: '/room/1',
@@ -114,10 +119,21 @@ describe('desktop notifications bridge', () => {
     assert.equal(notifications[0].options.body.length, 512);
   });
 
-  it('restores the main window on notification click', () => {
+  it('reports native notification failures instead of a false success', async () => {
+    const { handler, notifications } = createHarness({ failMessage: 'Notifications are not allowed' });
+
+    assert.deepEqual(await handler(createEvent(), { title: 'Hi' }), {
+      ok: false,
+      reason: 'failed',
+      error: 'Notifications are not allowed'
+    });
+    assert.equal(notifications.length, 1);
+  });
+
+  it('restores the main window on notification click', async () => {
     const { handler, notifications, restoreCalls } = createHarness();
 
-    handler(createEvent(), { body: 'Body', title: 'Title' });
+    await handler(createEvent(), { body: 'Body', title: 'Title' });
     notifications[0].click();
 
     assert.deepEqual(restoreCalls, ['restore']);

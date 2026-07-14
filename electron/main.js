@@ -114,6 +114,9 @@ const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = getOriginFromUrl(APP_URL);
 setTrustedOrigin(TRUSTED_ORIGIN);
+if (process.platform === 'win32') {
+  app.setAppUserModelId('ru.dazinho.voiceroom');
+}
 const PICKER_PREVIEW_ENABLED = process.env.VOICE_ROOM_PICKER_PREVIEW === '1';
 const ALLOWED_SESSION_PERMISSIONS = new Set([
   'clipboard-sanitized-write',

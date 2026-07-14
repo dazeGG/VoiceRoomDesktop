@@ -154,6 +154,7 @@ function createAppBootstrap({
       ...getMainWindowChromeOptions(process.platform),
       webPreferences: {
         additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`],
+        backgroundThrottling: false,
         contextIsolation: true,
         nodeIntegration: false,
         preload: path.join(__dirname, '../preload.js'),

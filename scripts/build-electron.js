@@ -49,6 +49,12 @@ fs.writeFileSync(
 run(process.execPath, [path.join(rootDir, 'scripts', 'create-electron-config.js')]);
 run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), ...targets]);
 run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-capture.js'), ...targets]);
+const hotkeyTargets = [...targets];
+if (
+  process.platform === 'darwin'
+  && (targets.length === 0 || targets.includes('--mac') || targets.includes('mac'))
+) hotkeyTargets.push('--require-universal');
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-hotkeys.js'), ...hotkeyTargets]);
 
 const env = {
   ...process.env,

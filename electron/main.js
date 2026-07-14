@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell, Notification, powerMonitor } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, shell, Notification, powerMonitor } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -30,6 +30,8 @@ const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
 const { configureDesktopNotificationsIpc } = require('./notifications');
 const { configureDesktopIdleIpc } = require('./idle');
+const { createDesktopHotkeyController } = require('./hotkeys');
+const { createNativeHotkeyBackend } = require('./native/hotkeys');
 const {
   ensureMacMicrophoneAccess,
   grantMacMediaPermission,
@@ -51,6 +53,10 @@ const WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES = [
   'ForceSoftwareForRtcLowResolutions',
   'WebRtcScreenshareSwEncoding'
 ];
+
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
+}
 
 // Windows cursor-on-stream status quo: BOTH stock Chromium backends show a
 // cursor while apps hide it. WGC lets Windows bake the real cursor into the
@@ -153,6 +159,13 @@ const windowLifecycle = createWindowLifecycleController({
   resolveTrayIconPath: resolveWindowsTrayIconPath
 });
 
+const desktopHotkeys = createDesktopHotkeyController({
+  globalShortcut,
+  isTrustedFrame,
+  log,
+  nativeHotkeys: createNativeHotkeyBackend({ app, log })
+});
+
 function configureWindowIpc() {
   ipcMain.handle('window:set-fullscreen', (event, fullscreen) => {
     if (!isTrustedFrame(event.senderFrame)) {
@@ -228,6 +241,10 @@ if (!gotLock) {
     windowLifecycle.requestQuit();
   });
 
+  app.on('will-quit', () => {
+    desktopHotkeys.dispose();
+  });
+
   async function launchApplication() {
     configureWindowIpc();
     configureDesktopIdleIpc({
@@ -241,6 +258,8 @@ if (!gotLock) {
       isTrustedFrame,
       restoreMainWindow: () => windowLifecycle.restoreMainWindow()
     });
+    desktopHotkeys.install(ipcMain);
+    desktopHotkeys.installPowerMonitor(powerMonitor);
     await appBootstrap.launchApplication();
   }
 

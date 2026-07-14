@@ -21,6 +21,32 @@ It also marks the document before `DOMContentLoaded`:
 
 Use the CSS hook when the web app needs to hide browser-only UI, such as the desktop download card, without a first-paint flash.
 
+## Global voice hotkeys
+
+The hosted web app can register microphone mute, output mute, and push-to-talk through `window.voiceRoomDesktopHotkeys`. The shell starts its native keyboard listener only while the renderer reports an active voice connection, then unregisters everything on leave, completed document navigation, renderer failure, or app quit. Bindings use DOM physical `KeyboardEvent.code` values, so switching keyboard layouts does not change the assigned key.
+
+```js
+const result = await window.voiceRoomDesktopHotkeys.configure({
+  active: true,
+  configurationId: 1, // increment for every replacement configuration
+  bindings: {
+    'mic-mute': { code: 'KeyM', ctrlKey: false, metaKey: true, altKey: false, shiftKey: true },
+    'output-mute': null,
+    'push-to-talk': { code: 'Space', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false }
+  }
+});
+
+const removeListener = window.voiceRoomDesktopHotkeys.onAction(({ action, phase }) => {
+  // phase is "pressed" or "released"; push-to-talk uses both.
+});
+```
+
+The macOS helper uses a passive Core Graphics event tap and the Windows helper uses a non-blocking low-level keyboard hook. Both observe real key-up events without consuming input, so push-to-talk closes even while another application is focused. On first use, macOS may ask for **System Settings → Privacy & Security → Input Monitoring** permission; reconnect to voice after granting it. Rebinding temporarily suspends action delivery, and duplicate chords are rejected deterministically.
+
+The helper is tied to the Electron process through its stdin pipe. Screen lock and system sleep release push-to-talk and stop the listener; registration is restored only after every lock/suspend reason has cleared. This prevents an orphan listener or a lost key-up from leaving the microphone open.
+
+If the native helper is missing or exits, the shell releases push-to-talk immediately and falls back to Electron global shortcuts for the two toggle actions. That fallback requires a modifier for letters, digits, punctuation, and navigation keys; function keys and Print Screen may be used without modifiers. The renderer receives a status update so it stops suppressing its focused-window fallback.
+
 ## Supported platforms
 
 | Platform | Status | Notes |

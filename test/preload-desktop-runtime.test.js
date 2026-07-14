@@ -90,6 +90,25 @@ test('preload installs desktop markers without native capture contract modules',
   idle.getSystemIdleTime();
   assert.deepEqual(invoked.at(-1), ['desktop-idle:get-system-idle-time']);
 
+  const hotkeys = exposed.get('voiceRoomDesktopHotkeys');
+  assert.deepEqual(Object.keys(hotkeys), ['configure', 'onAction', 'onStatus', 'setSuspended']);
+  hotkeys.configure({ active: true, bindings: {} });
+  assert.deepEqual(invoked.at(-1), ['desktop-hotkeys:configure', { active: true, bindings: {} }]);
+  let hotkeyAction = null;
+  hotkeys.onAction((payload) => {
+    hotkeyAction = payload;
+  });
+  listeners.get('desktop-hotkeys:action')({}, { action: 'mic-mute', phase: 'pressed' });
+  assert.deepEqual(hotkeyAction, { action: 'mic-mute', phase: 'pressed' });
+  let hotkeyStatus = null;
+  hotkeys.onStatus((payload) => {
+    hotkeyStatus = payload;
+  });
+  listeners.get('desktop-hotkeys:status')({}, { active: true, registered: ['mic-mute'] });
+  assert.deepEqual(hotkeyStatus, { active: true, registered: ['mic-mute'] });
+  hotkeys.setSuspended(true);
+  assert.deepEqual(invoked.at(-1), ['desktop-hotkeys:set-suspended', true]);
+
   for (const [name, value] of exposed) {
     assert.notEqual(value?.invoke, ipcRenderer.invoke, `${name} must not expose raw ipcRenderer`);
     assert.equal(value?.send, undefined, `${name} must not expose ipcRenderer.send`);

@@ -358,7 +358,8 @@ test('platform helpers preserve release events, layout-independent keys, and for
   assert.match(build, /VoiceRoomHotkeys\.swift/);
   assert.match(build, /VoiceRoomHotkeys\.cpp/);
   assert.match(build, /requireUniversal/);
-  assert.match(build, /-verify_arch/);
+  assert.match(build, /\[output, '-verify_arch', 'arm64'\]/);
+  assert.match(build, /\[output, '-verify_arch', 'x86_64'\]/);
   assert.match(build, /minimumMacOSTarget = '12\.0'/);
   assert.match(build, /'-target', hostTarget/);
 });

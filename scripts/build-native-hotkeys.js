@@ -19,8 +19,10 @@ function run(command, args, options = {}) {
   });
 
   if (result.status !== 0) {
+    if (options.quiet && (!options.optional || options.reportFailure)) {
+      process.stderr.write(result.stderr || result.stdout || '');
+    }
     if (options.optional) return false;
-    if (options.quiet) process.stderr.write(result.stderr || result.stdout || '');
     process.exit(result.status || 1);
   }
   return true;
@@ -106,14 +108,27 @@ function buildMacOS(options = {}) {
       '-target', item.target,
       '-o', item.output,
       source
-    ], { env, optional: true, quiet: true });
+    ], { env, optional: true, quiet: true, reportFailure: options.requireUniversal });
     if (ok) builtArchOutputs.push(item.output);
   }
 
   if (
     builtArchOutputs.length === archOutputs.length
-    && run('lipo', ['-create', ...builtArchOutputs, '-output', output], { optional: true, quiet: true })
-    && run('lipo', ['-verify_arch', 'arm64', 'x86_64', output], { optional: true, quiet: true })
+    && run('lipo', ['-create', ...builtArchOutputs, '-output', output], {
+      optional: true,
+      quiet: true,
+      reportFailure: options.requireUniversal
+    })
+    && run('lipo', [output, '-verify_arch', 'arm64'], {
+      optional: true,
+      quiet: true,
+      reportFailure: options.requireUniversal
+    })
+    && run('lipo', [output, '-verify_arch', 'x86_64'], {
+      optional: true,
+      quiet: true,
+      reportFailure: options.requireUniversal
+    })
   ) {
     for (const archOutput of builtArchOutputs) fs.rmSync(archOutput, { force: true });
     fs.chmodSync(output, 0o755);

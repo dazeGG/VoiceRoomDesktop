@@ -101,3 +101,88 @@ test('main process wires window bootstrap installers into app bootstrap', () => 
     Module._load = originalLoad;
   }
 });
+
+test('main process installs IPC services once when macOS recreates its window', async () => {
+  const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
+  const originalLoad = Module._load;
+  const electronMock = createElectronMock();
+  const appListeners = new Map();
+  const handledChannels = new Set();
+  let handleCalls = 0;
+  let launchCalls = 0;
+
+  electronMock.app.on = (eventName, listener) => {
+    const listeners = appListeners.get(eventName) || [];
+    listeners.push(listener);
+    appListeners.set(eventName, listeners);
+  };
+  electronMock.app.whenReady = () => Promise.resolve();
+  electronMock.globalShortcut = {
+    register: () => true,
+    setSuspended() {},
+    unregister() {}
+  };
+  electronMock.Notification = class Notification {
+    static isSupported() { return true; }
+  };
+  electronMock.powerMonitor = {
+    on() {},
+    removeListener() {},
+    getSystemIdleTime: () => 0
+  };
+  electronMock.ipcMain = {
+    handle(channel) {
+      handleCalls += 1;
+      if (handledChannels.has(channel)) throw new Error(`Duplicate IPC handler: ${channel}`);
+      handledChannels.add(channel);
+    },
+    removeHandler() {}
+  };
+
+  Module._load = function loadWithReadyApp(request, parent, isMain) {
+    if (request === 'electron') return electronMock;
+    if (request === './app/bootstrap') {
+      return {
+        createAppBootstrap() {
+          return {
+            launchApplication() {
+              launchCalls += 1;
+              return Promise.resolve();
+            }
+          };
+        }
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    delete require.cache[require.resolve(mainPath)];
+    require(mainPath);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(launchCalls, 1);
+    assert.equal(handleCalls, 7);
+    assert.deepEqual([...handledChannels].sort(), [
+      'desktop-hotkeys:configure',
+      'desktop-hotkeys:set-suspended',
+      'desktop-idle:get-system-idle-time',
+      'desktop-notifications:show',
+      'window:is-fullscreen',
+      'window:reload-main',
+      'window:set-fullscreen'
+    ]);
+
+    const activate = appListeners.get('activate')?.[0];
+    assert.equal(typeof activate, 'function');
+    activate();
+    activate();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(launchCalls, 3);
+    assert.equal(handleCalls, 7);
+  } finally {
+    delete require.cache[require.resolve(mainPath)];
+    Module._load = originalLoad;
+  }
+});

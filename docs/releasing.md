@@ -19,6 +19,18 @@ git tag: v1.0.2
 
 If they do not match, CI fails before building installers.
 
+## Pre-release CI
+
+Before creating a stable tag, the exact release commit must have a successful
+`Desktop CI` run. The workflow runs checks and tests, builds the complete macOS
+and Windows release artifact sets, starts the native hotkey helper on each host,
+and uploads the artifacts for inspection. It runs for pull requests to `main`
+or `develop`, pushes to `develop`, and manual dispatches.
+
+Do not create the release tag while either platform build is missing or failed.
+The tag-triggered `Release` workflow uses the same platform build commands and
+publishes only after both builds succeed.
+
 ## Create a release
 
 1. Update the app version:
@@ -98,6 +110,10 @@ Settings -> Secrets and variables -> Actions -> Variables -> VOICE_ROOM_URL
 
 ## Signing
 
-Windows portable `.exe` files are signed through SignPath after the unsigned CI build completes. See [code-signing.md](code-signing.md).
+Windows artifacts are currently published unsigned. The planned SignPath flow is
+documented in [code-signing.md](code-signing.md), but it is not wired into the
+release workflow yet.
 
-macOS artifacts are currently unsigned. Future production releases may add Apple Developer ID signing and notarization.
+macOS artifacts are currently unsigned. Electron 42+ requires code signing for
+macOS notifications, so unsigned builds must remain on the Electron 41 line.
+Do not upgrade Electron until Apple Developer ID signing is configured in CI.

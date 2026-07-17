@@ -249,24 +249,34 @@ if (!gotLock) {
   });
 
   async function launchApplication() {
-    configureWindowIpc();
-    configureDesktopIdleIpc({
-      ipcMain,
-      powerMonitor,
-      isTrustedFrame
-    });
-    configureDesktopNotificationsIpc({
-      ipcMain,
-      Notification,
-      isTrustedFrame,
-      restoreMainWindow: () => windowLifecycle.restoreMainWindow()
-    });
-    desktopHotkeys.install(ipcMain);
-    desktopHotkeys.installPowerMonitor(powerMonitor);
     await appBootstrap.launchApplication();
   }
 
   app.whenReady().then(() => {
+    // Process-wide IPC handlers and power-monitor listeners must be installed
+    // once. On macOS, closing the last window keeps the app alive and a later
+    // dock activation only needs to recreate the BrowserWindow.
+    try {
+      configureWindowIpc();
+      configureDesktopIdleIpc({
+        ipcMain,
+        powerMonitor,
+        isTrustedFrame
+      });
+      configureDesktopNotificationsIpc({
+        ipcMain,
+        Notification,
+        isTrustedFrame,
+        restoreMainWindow: () => windowLifecycle.restoreMainWindow()
+      });
+      desktopHotkeys.install(ipcMain);
+      desktopHotkeys.installPowerMonitor(powerMonitor);
+    } catch (error) {
+      log.error('Application service setup failed:', error);
+      app.quit();
+      return;
+    }
+
     launchApplication().catch((error) => {
       log.error('Application launch failed:', error);
       app.quit();

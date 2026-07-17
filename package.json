@@ -1,6 +1,6 @@
 {
   "name": "voice-room-desktop",
-  "version": "1.1.14",
+  "version": "1.2.0",
   "private": true,
   "description": "Electron desktop shell for Voice Room.",
   "main": "electron/main.js",
@@ -23,7 +23,7 @@
     "smoke:win-tray": "node scripts/windows-tray-smoke.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "license": "MIT",
   "repository": {
@@ -35,7 +35,7 @@
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "electron": "^42.3.3",
+    "electron": "41.10.2",
     "electron-builder": "^26.15.0"
   }
 }

@@ -6,6 +6,7 @@ const path = require('node:path');
 const { describe, it } = require('node:test');
 
 const builderConfig = require('../electron-builder.config');
+const packageJson = require('../package.json');
 const rootDir = path.join(__dirname, '..');
 const requiredStartupAssets = [
   'electron/build-profile.json',
@@ -93,6 +94,18 @@ function collectUtilityProcessForkTargets(sourceFile) {
 }
 
 describe('electron-builder config', () => {
+  it('does not pair unsigned macOS artifacts with Electron 42 notifications', () => {
+    const electronVersion = packageJson.devDependencies.electron.replace(/^[^0-9]*/, '');
+    const electronMajor = Number.parseInt(electronVersion.split('.')[0], 10);
+    const hasMacSigningIdentity = typeof builderConfig.mac.identity === 'string'
+      && builderConfig.mac.identity.trim().length > 0;
+
+    assert.ok(
+      hasMacSigningIdentity || electronMajor < 42,
+      'Electron 42+ macOS notifications require code signing; configure a signing identity before upgrading.'
+    );
+  });
+
   it('packages native capture utility process modules', () => {
     assert.ok(builderConfig.files.includes('electron/native/capture.js'));
     assert.ok(builderConfig.files.includes('electron/native-capture-contract.js'));

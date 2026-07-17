@@ -7,6 +7,7 @@ const path = require('node:path');
 const rootDir = path.join(__dirname, '..');
 const nativeDir = path.join(rootDir, 'native', 'hotkeys');
 const binDir = path.join(rootDir, 'native', 'bin');
+const HELPER_SMOKE_TIMEOUT_MS = 5000;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -27,6 +28,41 @@ function run(command, args, options = {}) {
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
+}
+
+function smokeHelper(output) {
+  const result = spawnSync(output, [], {
+    cwd: rootDir,
+    encoding: 'utf8',
+    env: process.env,
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: HELPER_SMOKE_TIMEOUT_MS,
+    windowsHide: true
+  });
+
+  if (result.error || result.status !== 0) {
+    process.stderr.write(result.stderr || result.stdout || String(result.error || 'Hotkey helper smoke failed.'));
+    process.exit(result.status || 1);
+  }
+
+  const lines = String(result.stdout || '').split(/\r?\n/).filter((line) => line.trim());
+  let message;
+  try {
+    message = lines.length === 1 ? JSON.parse(lines[0]) : null;
+  } catch {
+    message = null;
+  }
+  if (
+    message?.event !== 'ready'
+    || !Array.isArray(message.registered)
+    || message.registered.length !== 0
+    || !Array.isArray(message.failed)
+    || message.failed.length !== 0
+  ) {
+    console.error('Hotkey helper smoke returned an invalid ready payload.');
+    process.exit(1);
+  }
 }
 
 function buildMacOS(options = {}) {
@@ -81,6 +117,7 @@ function buildMacOS(options = {}) {
   ) {
     for (const archOutput of builtArchOutputs) fs.rmSync(archOutput, { force: true });
     fs.chmodSync(output, 0o755);
+    smokeHelper(output);
     return;
   }
 
@@ -94,6 +131,7 @@ function buildMacOS(options = {}) {
   const hostTarget = `${process.arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos${minimumMacOSTarget}`;
   run('xcrun', ['swiftc', ...commonArgs, '-target', hostTarget, '-o', output, source], { env });
   fs.chmodSync(output, 0o755);
+  smokeHelper(output);
 }
 
 function buildWindows(options = {}) {
@@ -111,6 +149,7 @@ function buildWindows(options = {}) {
     return;
   }
 
+  const output = path.join(outputDir, 'VoiceRoomHotkeys.exe');
   run('cl.exe', [
     '/nologo',
     '/EHsc',
@@ -122,12 +161,13 @@ function buildWindows(options = {}) {
     '/utf-8',
     '/DUNICODE',
     '/D_UNICODE',
-    `/Fe:${path.join(outputDir, 'VoiceRoomHotkeys.exe')}`,
+    `/Fe:${output}`,
     source,
     '/link',
     '/SUBSYSTEM:CONSOLE',
     'User32.lib'
   ]);
+  smokeHelper(output);
 }
 
 const requireUniversal = process.argv.includes('--require-universal');

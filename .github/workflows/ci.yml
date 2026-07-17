@@ -44,7 +44,7 @@ jobs:
   build-mac:
     name: Build macOS release artifacts
     needs: validate
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 45
     env:
       VOICE_ROOM_URL: ${{ vars.VOICE_ROOM_URL || 'https://voiceroom.ru' }}

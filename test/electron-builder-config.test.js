@@ -106,6 +106,20 @@ describe('electron-builder config', () => {
     );
   });
 
+  it('uses the Intel macOS runner required for the universal hotkey helper', () => {
+    for (const workflowPath of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/release.yml'
+    ]) {
+      const workflow = fs.readFileSync(path.join(rootDir, workflowPath), 'utf8');
+      assert.match(
+        workflow,
+        /runs-on: macos-15-intel/,
+        `${workflowPath} must build macOS artifacts on the Intel runner.`
+      );
+    }
+  });
+
   it('packages native capture utility process modules', () => {
     assert.ok(builderConfig.files.includes('electron/native/capture.js'));
     assert.ok(builderConfig.files.includes('electron/native-capture-contract.js'));

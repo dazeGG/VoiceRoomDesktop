@@ -45,6 +45,31 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopCapture', {
   )
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopNotifications', {
+  show: (payload) => ipcRenderer.invoke('desktop-notifications:show', payload)
+});
+
+contextBridge.exposeInMainWorld('voiceRoomDesktopIdle', {
+  getSystemIdleTime: () => ipcRenderer.invoke('desktop-idle:get-system-idle-time')
+});
+
+contextBridge.exposeInMainWorld('voiceRoomDesktopHotkeys', {
+  configure: (payload) => ipcRenderer.invoke('desktop-hotkeys:configure', payload),
+  onAction: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-hotkeys:action', listener);
+    return () => ipcRenderer.removeListener('desktop-hotkeys:action', listener);
+  },
+  onStatus: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-hotkeys:status', listener);
+    return () => ipcRenderer.removeListener('desktop-hotkeys:status', listener);
+  },
+  setSuspended: (suspended) => ipcRenderer.invoke('desktop-hotkeys:set-suspended', Boolean(suspended))
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
   ensureMediaAccess: () => ipcRenderer.invoke('desktop-audio:ensure-media-access'),
   getCapabilities: () => ipcRenderer.invoke('desktop-audio:get-capabilities'),

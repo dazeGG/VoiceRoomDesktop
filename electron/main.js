@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, shell, Notification, powerMonitor } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -28,6 +28,10 @@ const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
 const { disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
+const { configureDesktopNotificationsIpc } = require('./notifications');
+const { configureDesktopIdleIpc } = require('./idle');
+const { createDesktopHotkeyController } = require('./hotkeys');
+const { createNativeHotkeyBackend } = require('./native/hotkeys');
 const {
   ensureMacMicrophoneAccess,
   grantMacMediaPermission,
@@ -49,6 +53,10 @@ const WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES = [
   'ForceSoftwareForRtcLowResolutions',
   'WebRtcScreenshareSwEncoding'
 ];
+
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
+}
 
 // Windows cursor-on-stream status quo: BOTH stock Chromium backends show a
 // cursor while apps hide it. WGC lets Windows bake the real cursor into the
@@ -97,10 +105,18 @@ if (process.platform === 'win32') {
   }
 }
 
+// Rooms auto-join without a page gesture. Electron defaults to the permissive
+// autoplay policy, but pin it explicitly so a future Electron/Chromium default
+// change never resurfaces the web client's "Разрешить звук" fallback button.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = getOriginFromUrl(APP_URL);
 setTrustedOrigin(TRUSTED_ORIGIN);
+if (process.platform === 'win32') {
+  app.setAppUserModelId('ru.dazinho.voiceroom');
+}
 const PICKER_PREVIEW_ENABLED = process.env.VOICE_ROOM_PICKER_PREVIEW === '1';
 const ALLOWED_SESSION_PERMISSIONS = new Set([
   'clipboard-sanitized-write',
@@ -144,6 +160,13 @@ const windowLifecycle = createWindowLifecycleController({
   app,
   platform: process.platform,
   resolveTrayIconPath: resolveWindowsTrayIconPath
+});
+
+const desktopHotkeys = createDesktopHotkeyController({
+  globalShortcut,
+  isTrustedFrame,
+  log,
+  nativeHotkeys: createNativeHotkeyBackend({ app, log })
 });
 
 function configureWindowIpc() {
@@ -221,12 +244,39 @@ if (!gotLock) {
     windowLifecycle.requestQuit();
   });
 
+  app.on('will-quit', () => {
+    desktopHotkeys.dispose();
+  });
+
   async function launchApplication() {
-    configureWindowIpc();
     await appBootstrap.launchApplication();
   }
 
   app.whenReady().then(() => {
+    // Process-wide IPC handlers and power-monitor listeners must be installed
+    // once. On macOS, closing the last window keeps the app alive and a later
+    // dock activation only needs to recreate the BrowserWindow.
+    try {
+      configureWindowIpc();
+      configureDesktopIdleIpc({
+        ipcMain,
+        powerMonitor,
+        isTrustedFrame
+      });
+      configureDesktopNotificationsIpc({
+        ipcMain,
+        Notification,
+        isTrustedFrame,
+        restoreMainWindow: () => windowLifecycle.restoreMainWindow()
+      });
+      desktopHotkeys.install(ipcMain);
+      desktopHotkeys.installPowerMonitor(powerMonitor);
+    } catch (error) {
+      log.error('Application service setup failed:', error);
+      app.quit();
+      return;
+    }
+
     launchApplication().catch((error) => {
       log.error('Application launch failed:', error);
       app.quit();

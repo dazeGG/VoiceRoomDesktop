@@ -2,6 +2,18 @@
 
 Free code signing for Windows release artifacts is provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
+## Current status
+
+The GitHub Actions release workflow currently publishes unsigned macOS and
+Windows artifacts. The SignPath steps below are the target flow and are not yet
+enabled. Do not describe published Windows artifacts as signed until those steps
+and their required credentials are present in the workflow.
+
+Unsigned macOS builds are pinned to Electron 41 because Electron 42+ requires a
+code-signed application for native notifications. Upgrading Electron requires
+Apple Developer ID signing to be configured first. Electron 41 reaches end of
+support on 2026-08-25, so signing and the Electron upgrade must land before then.
+
 ## Team roles
 
 | Role | Responsibility | Members |
@@ -10,7 +22,7 @@ Free code signing for Windows release artifacts is provided by [SignPath.io](htt
 | Reviewers | Review pull requests before merge to `main` | [@dazeGG](https://github.com/dazeGG) |
 | Approvers | Approve SignPath signing requests for release builds | [@dazeGG](https://github.com/dazeGG) |
 
-## Release signing flow
+## Target Windows signing flow
 
 1. A maintainer merges reviewed changes into `main`.
 2. GitHub Actions builds an unsigned Windows portable `.exe` from a release tag.

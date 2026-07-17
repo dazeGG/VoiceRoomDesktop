@@ -11,7 +11,26 @@ test('preload installs desktop markers without native capture contract modules',
   const source = fs.readFileSync(preloadPath, 'utf8');
   const exposed = new Map();
   const listeners = new Map();
+  const invoked = [];
   const classList = new Set();
+  const ipcRenderer = {
+    invoke: (channel, ...args) => {
+      invoked.push([channel, ...args]);
+      return Promise.resolve({ ok: true });
+    },
+    on(channel, listener) {
+      listeners.set(channel, listener);
+    },
+    removeListener() {}
+  };
+  const electronMock = {
+    contextBridge: {
+      exposeInMainWorld(name, value) {
+        exposed.set(name, value);
+      }
+    },
+    ipcRenderer
+  };
   const documentElement = {
     classList: {
       add: (name) => classList.add(name)
@@ -29,20 +48,7 @@ test('preload installs desktop markers without native capture contract modules',
     },
     require(request) {
       if (request === 'electron') {
-        return {
-          contextBridge: {
-            exposeInMainWorld(name, value) {
-              exposed.set(name, value);
-            }
-          },
-          ipcRenderer: {
-            invoke: () => Promise.resolve(),
-            on(channel, listener) {
-              listeners.set(channel, listener);
-            },
-            removeListener() {}
-          }
-        };
+        return electronMock;
       }
       if (request.includes('capture-contract')) {
         throw new Error(`module not found: ${request}`);
@@ -68,6 +74,45 @@ test('preload installs desktop markers without native capture contract modules',
   assert.equal(exposed.get('voiceRoomDesktop'), runtime);
   assert.equal(typeof exposed.get('voiceRoomNativeCaptureBridge')?.prepare, 'function');
   assert.equal(typeof listeners.get('native-capture:port'), 'function');
+
+  const notifications = exposed.get('voiceRoomDesktopNotifications');
+  assert.deepEqual(Object.keys(notifications), ['show']);
+  assert.equal(typeof notifications.show, 'function');
+  notifications.show({ body: 'Body', title: 'Title' });
+  assert.deepEqual(invoked.at(-1), [
+    'desktop-notifications:show',
+    { body: 'Body', title: 'Title' }
+  ]);
+
+  const idle = exposed.get('voiceRoomDesktopIdle');
+  assert.deepEqual(Object.keys(idle), ['getSystemIdleTime']);
+  assert.equal(typeof idle.getSystemIdleTime, 'function');
+  idle.getSystemIdleTime();
+  assert.deepEqual(invoked.at(-1), ['desktop-idle:get-system-idle-time']);
+
+  const hotkeys = exposed.get('voiceRoomDesktopHotkeys');
+  assert.deepEqual(Object.keys(hotkeys), ['configure', 'onAction', 'onStatus', 'setSuspended']);
+  hotkeys.configure({ active: true, bindings: {} });
+  assert.deepEqual(invoked.at(-1), ['desktop-hotkeys:configure', { active: true, bindings: {} }]);
+  let hotkeyAction = null;
+  hotkeys.onAction((payload) => {
+    hotkeyAction = payload;
+  });
+  listeners.get('desktop-hotkeys:action')({}, { action: 'mic-mute', phase: 'pressed' });
+  assert.deepEqual(hotkeyAction, { action: 'mic-mute', phase: 'pressed' });
+  let hotkeyStatus = null;
+  hotkeys.onStatus((payload) => {
+    hotkeyStatus = payload;
+  });
+  listeners.get('desktop-hotkeys:status')({}, { active: true, registered: ['mic-mute'] });
+  assert.deepEqual(hotkeyStatus, { active: true, registered: ['mic-mute'] });
+  hotkeys.setSuspended(true);
+  assert.deepEqual(invoked.at(-1), ['desktop-hotkeys:set-suspended', true]);
+
+  for (const [name, value] of exposed) {
+    assert.notEqual(value?.invoke, ipcRenderer.invoke, `${name} must not expose raw ipcRenderer`);
+    assert.equal(value?.send, undefined, `${name} must not expose ipcRenderer.send`);
+  }
 });
 
 

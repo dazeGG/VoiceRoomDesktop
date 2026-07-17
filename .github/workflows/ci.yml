@@ -1,0 +1,116 @@
+name: Desktop CI
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Check and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check syntax
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+  build-mac:
+    name: Build macOS release artifacts
+    needs: validate
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      VOICE_ROOM_URL: ${{ vars.VOICE_ROOM_URL || 'https://voiceroom.ru' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS app
+        run: npm run build:mac
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceRoom-macOS-${{ github.sha }}
+          path: |
+            dist/**/*.dmg
+            dist/**/*.zip
+            dist/**/*.blockmap
+            dist/**/*.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows release artifacts
+    needs: validate
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      VOICE_ROOM_URL: ${{ vars.VOICE_ROOM_URL || 'https://voiceroom.ru' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows app
+        run: npm run build:win
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceRoom-Windows-${{ github.sha }}
+          path: |
+            dist/**/*.exe
+            dist/**/*.blockmap
+            dist/**/*.yml
+          if-no-files-found: error
+          retention-days: 7

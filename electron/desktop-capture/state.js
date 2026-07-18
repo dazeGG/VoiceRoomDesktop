@@ -134,6 +134,10 @@ async function getDesktopCaptureSources() {
 
       throw error;
     });
+  if (process.platform === 'darwin' && sources.length === 0) {
+    openMacScreenCaptureSettings();
+    throw createMacScreenCaptureAccessError();
+  }
   return sources.filter((source) => !isOwnDesktopCaptureSource(source));
 }
 

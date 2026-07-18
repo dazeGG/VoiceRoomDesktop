@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const { test } = require('node:test');
 
-test('Electron MessagePortMain carries cloned ArrayBuffer frame payloads', { timeout: 15000 }, async () => {
+test('Electron MessagePortMain carries cloned ArrayBuffer frame payloads', { timeout: 20000 }, async () => {
   const electronPath = require('electron');
   const fixturePath = path.join(__dirname, 'fixtures', 'message-port-arraybuffer-electron.js');
   const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' };
@@ -27,7 +27,7 @@ test('Electron MessagePortMain carries cloned ArrayBuffer frame payloads', { tim
     const timeout = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error('Electron MessagePortMain fixture timed out.'));
-    }, 10000);
+    }, 15000);
     let stderr = '';
     let stdout = '';
     child.stderr.setEncoding('utf8');

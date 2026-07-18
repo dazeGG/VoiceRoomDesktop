@@ -1,34 +1,72 @@
 'use strict';
 
-const { app, MessageChannelMain } = require('electron');
+const { app, BrowserWindow, MessageChannelMain } = require('electron');
 
-const fail = (error) => {
-  process.stderr.write(`${String(error?.stack || error)}\n`);
-  app.exit(1);
+let completed = false;
+let port = null;
+let testWindow = null;
+
+const finish = (code, message) => {
+  if (completed) return;
+  completed = true;
+  clearTimeout(timeout);
+  try { port?.close(); } catch {}
+  try { testWindow?.destroy(); } catch {}
+  (code === 0 ? process.stdout : process.stderr).write(`${message}\n`);
+  app.exit(code);
 };
 
-const timeout = setTimeout(() => fail(new Error('MessagePortMain frame clone timed out.')), 5000);
+const fail = (error) => finish(1, String(error?.stack || error));
+const timeout = setTimeout(() => fail(new Error('MessagePortMain frame clone timed out.')), 10000);
 
-app.whenReady().then(() => {
-  const { port1, port2 } = new MessageChannelMain();
-  port2.on('message', (event) => {
-    try {
-      const data = event.data?.data;
-      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : null;
-      if (event.data?.type !== 'frame' || !bytes || bytes.length !== 4 || bytes[3] !== 4) {
-        throw new Error('MessagePortMain changed the cloned frame payload.');
-      }
-      clearTimeout(timeout);
-      port1.close();
-      port2.close();
-      process.stdout.write('message-port-arraybuffer-clone-ok\n');
-      app.exit(0);
-    } catch (error) {
-      fail(error);
+app.whenReady().then(async () => {
+  // Exercise the production-shaped boundary: MessagePortMain in the Electron
+  // process to a DOM MessagePort in a renderer. A hidden window also keeps the
+  // Chromium message loop active on Linux CI instead of relying on a
+  // windowless main-process-only channel.
+  testWindow = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      contextIsolation: false,
+      nodeIntegration: true,
+      sandbox: false
     }
   });
-  port2.start();
+  const rendererScript = `
+    const { ipcRenderer } = require('electron');
+    ipcRenderer.on('message-port', (event) => {
+      const [receivedPort] = event.ports || [];
+      if (!receivedPort) return;
+      receivedPort.onmessage = (messageEvent) => {
+        try {
+          const data = messageEvent.data?.data;
+          const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+          if (messageEvent.data?.type !== 'frame' || !bytes || bytes.length !== 4 || bytes[3] !== 4) {
+            throw new Error('MessagePortMain changed the cloned frame payload.');
+          }
+          receivedPort.postMessage({ ok: true });
+        } catch (error) {
+          receivedPort.postMessage({ message: String(error?.stack || error), ok: false });
+        }
+      };
+      receivedPort.start();
+    });
+  `;
+  const page = `<!doctype html><meta charset="utf-8"><script>${rendererScript}<\/script>`;
+  await testWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
 
+  const channel = new MessageChannelMain();
+  port = channel.port1;
+  port.on('message', (event) => {
+    if (event.data?.ok) {
+      finish(0, 'message-port-arraybuffer-clone-ok');
+    } else {
+      fail(new Error(event.data?.message || 'Renderer rejected the cloned frame payload.'));
+    }
+  });
+  port.start();
+
+  testWindow.webContents.postMessage('message-port', null, [channel.port2]);
   const data = Uint8Array.from([1, 2, 3, 4]).buffer;
-  port1.postMessage({ data, type: 'frame' });
+  port.postMessage({ data, type: 'frame' });
 }).catch(fail);

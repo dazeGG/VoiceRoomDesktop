@@ -209,7 +209,7 @@ function configureDesktopCaptureIpc() {
     }
 
     const { fps, fpsId, maxHeight, maxWidth, qualityId } = normalizeApplyProfileRequest(options);
-    const result = reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth });
+    const result = await reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth });
 
     if (!result.ok) {
       return {

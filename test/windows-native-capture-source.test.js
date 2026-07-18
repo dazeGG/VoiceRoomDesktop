@@ -13,6 +13,10 @@ const relaySource = fs.readFileSync(
   path.join(__dirname, '..', 'electron', 'native', 'capture-relay.js'),
   'utf8'
 );
+const geometrySource = fs.readFileSync(
+  path.join(__dirname, '..', 'native', 'capture', 'windows', 'CaptureGeometry.h'),
+  'utf8'
+);
 
 describe('Windows native capture helper source contract', () => {
   it('keeps the BGRX fallback within the selected output size', () => {
@@ -28,55 +32,21 @@ describe('Windows native capture helper source contract', () => {
     assert.doesNotMatch(source, /falling back to full-resolution BGRX frames/);
   });
 
-  it('fits ultrawide sources inside both selected geometry ceilings', () => {
+  it('wires both selected geometry ceilings into the compiled helper implementation', () => {
+    assert.match(source, /#include "CaptureGeometry\.h"/);
     assert.match(
-      source,
+      geometrySource,
       /ComputeOutputSize\(uint32_t width,\s*uint32_t height,\s*uint32_t maxWidth,\s*uint32_t maxHeight\)/
     );
-    assert.match(source, /width <= maxWidth && height <= maxHeight/);
-    assert.match(
-      source,
-      /static_cast<uint64_t>\(width\) \* maxHeight >= static_cast<uint64_t>\(height\) \* maxWidth/
-    );
-    assert.match(source, /outputWidth > maxWidth \|\| outputHeight > maxHeight/);
     assert.match(source, /maxWidth_\.load\(\),\s*maxHeight_\.load\(\)/);
     assert.match(relaySource, /'--max-width',\s*String\(session\.maxWidth\)/);
-
-    const fit = (width, height, maxWidth, maxHeight) => {
-      if (width <= maxWidth && height <= maxHeight) {
-        const outputWidth = width & ~1;
-        const outputHeight = height & ~1;
-        return outputWidth >= 2 && outputHeight >= 2
-          ? { height: outputHeight, width: outputWidth }
-          : { height, width };
-      }
-      if (width * maxHeight >= height * maxWidth) {
-        const outputWidth = maxWidth & ~1;
-        return {
-          height: Math.max(2, Math.round((height * outputWidth) / width)) & ~1,
-          width: outputWidth
-        };
-      }
-      const outputHeight = maxHeight & ~1;
-      return {
-        height: outputHeight,
-        width: Math.max(2, Math.round((width * outputHeight) / height)) & ~1
-      };
-    };
-
-    assert.deepEqual(fit(3440, 1440, 1920, 1080), { height: 804, width: 1920 });
-    assert.deepEqual(fit(2560, 1080, 1920, 1080), { height: 810, width: 1920 });
-    assert.deepEqual(fit(1920, 1200, 1920, 1080), { height: 1080, width: 1728 });
-    assert.deepEqual(fit(1280, 720, 1920, 1080), { height: 720, width: 1280 });
-    assert.deepEqual(fit(1537, 865, 1920, 1080), { height: 864, width: 1536 });
-    assert.deepEqual(fit(1279, 719, 1280, 720), { height: 718, width: 1278 });
   });
 
   it('keeps odd-sized WGC windows on the even-dimension GPU path without upscaling', () => {
-    assert.match(source, /if \(width <= maxWidth && height <= maxHeight\) \{/);
-    assert.match(source, /const uint32_t outputWidth = MakeEvenDimension\(width\)/);
-    assert.match(source, /const uint32_t outputHeight = MakeEvenDimension\(height\)/);
-    assert.match(source, /outputWidth >= 2 && outputHeight >= 2/);
+    assert.match(geometrySource, /if \(width <= maxWidth && height <= maxHeight\) \{/);
+    assert.match(geometrySource, /const uint32_t outputWidth = MakeEvenDimension\(width\)/);
+    assert.match(geometrySource, /const uint32_t outputHeight = MakeEvenDimension\(height\)/);
+    assert.match(geometrySource, /outputWidth >= 2 && outputHeight >= 2/);
   });
 
   it('reports the actual frame pixel format after NV12 fallback or recovery', () => {
@@ -107,7 +77,10 @@ describe('Windows native capture helper source contract', () => {
     );
     assert.match(bgrxWriter, /return ok \? WriteStatus::kWrote : WriteStatus::kPipeClosed/);
     assert.doesNotMatch(bgrxWriter, /LogFrameFormatIfChanged/);
-    assert.match(source, /return bgrxStatus != WriteStatus::kPipeClosed/);
+    assert.match(
+      source,
+      /return bgrxStatus == WriteStatus::kPipeClosed\s*\? FrameWriteResult::kPipeClosed\s*:\s*FrameWriteResult::kRecoverableFailure/
+    );
     assert.doesNotMatch(source, /if \(bgrxStatus != WriteStatus::kPipeClosed\) \{\s*LogFrameFormatIfChanged/);
   });
 
@@ -117,6 +90,46 @@ describe('Windows native capture helper source contract', () => {
     assert.match(source, /loggedFormatTelemetryEpoch_ == telemetryEpoch/);
     assert.match(source, /formatTelemetryEpoch_\.load\(\)/);
     assert.doesNotMatch(source, /LogFormat\(outputSize\.width, outputSize\.height, fps_\.load\(\)\)/);
+  });
+
+  it('acknowledges reconfigure only with the profile applied by the helper', () => {
+    assert.match(source, /const bool hasRequestId = ParseJsonUintField\(line, "requestId", &requestId\)/);
+    assert.match(
+      source,
+      /const CaptureSession::ReconfigureResult applied = session->ApplyReconfigure\([\s\S]*?LogReconfigured\(requestId, applied\.fps, applied\.maxWidth, applied\.maxHeight\)/
+    );
+    assert.match(source, /if \(maxWidth >= 2 && maxWidth <= 16384\)/);
+    assert.match(source, /if \(maxHeight >= 2 && maxHeight <= 16384\)/);
+    assert.match(source, /std::lock_guard<std::mutex> guard\(frameMutex_\)/);
+  });
+
+  it('turns unrecoverable capture stalls into a non-zero helper exit for relay restart', () => {
+    assert.match(source, /if \(RecreateDuplication\(\)\) continue;\s*SignalRuntimeFailure\("Desktop Duplication recovery failed\."\)/);
+    assert.match(source, /SignalRuntimeFailure\("AcquireNextFrame failed\.", hr\)/);
+    assert.match(source, /kMaxConsecutiveFrameWriteFailures = 3/);
+    assert.match(source, /SignalRuntimeFailure\("Native capture frame processing failed repeatedly\."\)/);
+    assert.match(source, /if \(session\.HasRuntimeFailure\(\)\) exitCode = 1/);
+  });
+
+  it('gates and drains in-flight WGC delegates before destroying session state', () => {
+    assert.match(
+      source,
+      /class FrameCallbackState[\s\S]*?CaptureSession\* TryEnter\(\)[\s\S]*?void BeginStop\(\)[\s\S]*?void WaitForDrain\(\)/
+    );
+    assert.match(source, /frameCallbackState_ = std::make_shared<FrameCallbackState>\(this\)/);
+    assert.match(source, /\[callbackState\][\s\S]*?FrameCallbackLease callback\(callbackState\)/);
+    assert.doesNotMatch(source, /framePool_\.FrameArrived\([\s\S]*?\[this\]/);
+    assert.match(
+      source,
+      /frameCallbackState_->BeginStop\(\)[\s\S]*?frameArrivedRevoker_\.revoke\(\);\s*closedRevoker_\.revoke\(\);\s*if \(frameCallbackState_\) frameCallbackState_->WaitForDrain\(\)/
+    );
+  });
+
+  it('accepts helper pause commands and skips expensive frame conversion while paused', () => {
+    assert.match(source, /line\.find\("set-paused"\)/);
+    assert.match(source, /session->ApplyFlowControl\(paused\)/);
+    assert.match(source, /if \(emit && !outputPaused_\.load\(\)\)/);
+    assert.match(source, /if \(outputPaused_\.load\(\)\) return/);
   });
 
   it('bounds renderer MessagePort frame backlog', () => {

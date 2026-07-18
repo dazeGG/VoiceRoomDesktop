@@ -39,6 +39,7 @@ describe('normalizeReconfigureCommand', () => {
 
   it('rejects invalid payloads', () => {
     assert.equal(normalizeReconfigureCommand({ fps: 0, type: 'reconfigure' }), null);
+    assert.equal(normalizeReconfigureCommand({ maxHeight: 1, maxWidth: 1, type: 'reconfigure' }), null);
     assert.equal(normalizeReconfigureCommand({ maxHeight: 0, type: 'reconfigure' }), null);
     assert.equal(normalizeReconfigureCommand({ maxWidth: 0, type: 'reconfigure' }), null);
     assert.equal(normalizeReconfigureCommand({ type: 'stop' }), null);

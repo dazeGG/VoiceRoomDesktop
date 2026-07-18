@@ -142,7 +142,14 @@ describe('getNativeCaptureInjectScript', () => {
     let originalCalls = 0;
     let committedSourceId = '';
     let statsAfterFormat = null;
+    let frameDispatchedResolve;
+    let resolveReady;
+    let resolveWrite;
+    let writerDesiredSize = 0;
     const portMessages = [];
+    const frameDispatched = new Promise((resolve) => { frameDispatchedResolve = resolve; });
+    const writerReady = new Promise((resolve) => { resolveReady = resolve; });
+    const writeAccepted = new Promise((resolve) => { resolveWrite = resolve; });
     const navigator = {
       mediaDevices: {
         getDisplayMedia: async () => {
@@ -176,6 +183,7 @@ describe('getNativeCaptureInjectScript', () => {
               width: 2
             }
           });
+          frameDispatchedResolve();
         });
       }
     };
@@ -208,13 +216,42 @@ describe('getNativeCaptureInjectScript', () => {
       }
     };
 
-    runInjectScript({ window, navigator });
+    runInjectScript({
+      createWriter: () => ({
+        close: async () => {},
+        get desiredSize() { return writerDesiredSize; },
+        ready: writerReady,
+        write: () => writeAccepted
+      }),
+      window,
+      navigator
+    });
 
-    const result = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    const resultPromise = navigator.mediaDevices.getDisplayMedia({ video: true });
+    await frameDispatched;
+    assert.deepEqual(portMessages, []);
+
+    writerDesiredSize = 1;
+    resolveReady();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(portMessages, [{ type: 'frame-ack' }]);
+
+    port.onmessage?.({
+      data: {
+        data: new ArrayBuffer(16),
+        format: 'BGRX',
+        height: 2,
+        type: 'frame',
+        width: 2
+      }
+    });
+    assert.deepEqual(portMessages, [{ type: 'frame-ack' }]);
+    resolveWrite();
+    const result = await resultPromise;
     assert.equal(originalCalls, 0);
     assert.equal(committedSourceId, 'screen:1:0');
     assert.equal(result.getVideoTracks().length, 1);
-    assert.deepEqual(portMessages, [{ type: 'frame-ack' }]);
+    assert.deepEqual(portMessages, [{ type: 'frame-ack' }, { type: 'frame-ack' }]);
     assert.equal(statsAfterFormat?.pixelFormat, 'NV12');
     assert.equal(window.__voiceRoomNativeCaptureStats().pixelFormat, 'BGRX');
   });

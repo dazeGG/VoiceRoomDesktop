@@ -8,8 +8,10 @@ const log = require('../logger');
 const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./capture-contract');
 
 const PORT_CHANNEL = 'native-capture:port';
+const RECONFIGURE_TIMEOUT_MS = 2500;
 
 let activeSession = null;
+let nextReconfigureRequestId = 1;
 let nextSessionId = 1;
 
 app.on('before-quit', () => {
@@ -70,10 +72,10 @@ function startNativeCaptureSession(webContents, options = {}) {
 
   const helperPath = findScreenCursorCaptureHelper().path;
   const fps = Number.isInteger(options.fps) && options.fps > 0 && options.fps <= 60 ? options.fps : 30;
-  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
+  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight >= 2 && options.maxHeight <= 16384
     ? options.maxHeight
     : 1080;
-  const maxWidth = Number.isInteger(options.maxWidth) && options.maxWidth > 0 && options.maxWidth <= 16384
+  const maxWidth = Number.isInteger(options.maxWidth) && options.maxWidth >= 2 && options.maxWidth <= 16384
     ? options.maxWidth
     : 1920;
   const qualityId = String(options.qualityId || 'balanced');
@@ -97,6 +99,7 @@ function startNativeCaptureSession(webContents, options = {}) {
   const session = {
     forceKillTimer: null,
     id: sessionId,
+    pendingReconfigures: new Map(),
     relay,
     stopped: false,
     webContents,
@@ -129,6 +132,8 @@ function startNativeCaptureSession(webContents, options = {}) {
         });
       }
       cleanupSession(session);
+    } else if (message?.type === 'reconfigured') {
+      finishReconfigureRequest(session, message);
     }
   });
 
@@ -203,6 +208,7 @@ function stopNativeCaptureSession(sessionId = '') {
 
   activeSession = null;
   session.stopped = true;
+  failReconfigureRequests(session, 'session-stopped');
 
   if (session.webContentsDestroyedListener && !session.webContents.isDestroyed()) {
     session.webContents.removeListener('destroyed', session.webContentsDestroyedListener);
@@ -227,6 +233,7 @@ function stopNativeCaptureSession(sessionId = '') {
 function cleanupSession(session) {
   if (activeSession === session) activeSession = null;
   session.stopped = true;
+  failReconfigureRequests(session, 'session-ended');
   if (session.forceKillTimer) {
     clearTimeout(session.forceKillTimer);
     session.forceKillTimer = null;
@@ -236,7 +243,34 @@ function cleanupSession(session) {
   }
 }
 
-function reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth } = {}) {
+function finishReconfigureRequest(session, message) {
+  const requestId = Number(message?.requestId);
+  const pending = Number.isInteger(requestId) ? session.pendingReconfigures.get(requestId) : null;
+  if (!pending) return false;
+
+  clearTimeout(pending.timer);
+  session.pendingReconfigures.delete(requestId);
+  pending.resolve(message.ok
+    ? {
+        fps: Number(message.fps) || pending.payload.fps,
+        maxHeight: Number(message.maxHeight) || pending.payload.maxHeight,
+        maxWidth: Number(message.maxWidth) || pending.payload.maxWidth,
+        ok: true
+      }
+    : { ok: false, reason: message.reason || 'reconfigure-failed' });
+  return true;
+}
+
+function failReconfigureRequests(session, reason) {
+  if (!session?.pendingReconfigures) return;
+  for (const pending of session.pendingReconfigures.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({ ok: false, reason });
+  }
+  session.pendingReconfigures.clear();
+}
+
+async function reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth } = {}) {
   const session = activeSession;
   if (!session || session.stopped) {
     return { ok: false, reason: 'no-active-session' };
@@ -244,24 +278,31 @@ function reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth } = {}) {
 
   const payload = { type: 'reconfigure' };
   if (Number.isInteger(fps) && fps > 0 && fps <= 60) payload.fps = fps;
-  if (Number.isInteger(maxHeight) && maxHeight > 0 && maxHeight <= 16384) payload.maxHeight = maxHeight;
-  if (Number.isInteger(maxWidth) && maxWidth > 0 && maxWidth <= 16384) payload.maxWidth = maxWidth;
+  if (Number.isInteger(maxHeight) && maxHeight >= 2 && maxHeight <= 16384) payload.maxHeight = maxHeight;
+  if (Number.isInteger(maxWidth) && maxWidth >= 2 && maxWidth <= 16384) payload.maxWidth = maxWidth;
   if (!payload.fps && !payload.maxHeight && !payload.maxWidth) {
     return { ok: false, reason: 'bad-profile' };
   }
 
-  try {
-    session.relay.postMessage(payload);
-  } catch {
-    return { ok: false, reason: 'relay-unavailable' };
-  }
+  const requestId = nextReconfigureRequestId++;
+  payload.requestId = requestId;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (!session.pendingReconfigures.has(requestId)) return;
+      session.pendingReconfigures.delete(requestId);
+      resolve({ ok: false, reason: 'reconfigure-timeout' });
+    }, RECONFIGURE_TIMEOUT_MS);
+    timer.unref?.();
+    session.pendingReconfigures.set(requestId, { payload, resolve, timer });
 
-  return {
-    fps: payload.fps,
-    maxHeight: payload.maxHeight,
-    maxWidth: payload.maxWidth,
-    ok: true
-  };
+    try {
+      session.relay.postMessage(payload);
+    } catch {
+      clearTimeout(timer);
+      session.pendingReconfigures.delete(requestId);
+      resolve({ ok: false, reason: 'relay-unavailable' });
+    }
+  });
 }
 
 module.exports = {

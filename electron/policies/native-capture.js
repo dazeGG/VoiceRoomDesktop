@@ -118,26 +118,38 @@ function getNativeCaptureInjectScript() {
           return;
         }
         if (message.type !== 'frame' || !message.data) return;
-        // Release the relay's MessagePort slot as soon as this event reaches
-        // the renderer. The writer.desiredSize check below independently
-        // protects the encoder queue; this ack prevents raw frames from piling
-        // up cross-process while the renderer event loop is busy.
-        try { port.postMessage({ type: 'frame-ack' }); } catch {}
+        let frameAcked = false;
+        const ackFrame = () => {
+          if (frameAcked) return;
+          frameAcked = true;
+          try { port.postMessage({ type: 'frame-ack' }); } catch {}
+        };
         counters.framesReceived += 1;
         if (generator.readyState === 'ended') {
+          ackFrame();
           stop();
           return;
         }
-        // The encoder is behind: drop the frame instead of queueing memory.
+        // The generator is behind: drop this frame, but hold the relay slot
+        // until its writable queue is ready again. That pause propagates across
+        // the MessagePort and helper stdin so raw GPU readback/IPC work does not
+        // continue at full speed while the renderer cannot accept frames.
         if (writer.desiredSize !== null && writer.desiredSize <= 0) {
           counters.framesDroppedBackpressure += 1;
+          writer.ready.then(ackFrame).catch(() => {
+            ackFrame();
+            stop();
+          });
           return;
         }
 
         let frame = null;
         try {
           const data = normalizeFrameData(message.data);
-          if (!data) return;
+          if (!data) {
+            ackFrame();
+            return;
+          }
           const format = normalizePixelFormat(message.format) || 'BGRX';
           pixelFormat = format;
           // Prefer the helper's own capture timestamp over "now": the pipe/
@@ -176,18 +188,23 @@ function getNativeCaptureInjectScript() {
           frame = new VideoFrame(data, init);
         } catch {
           counters.framesDroppedCreate += 1;
+          ackFrame();
           return;
         }
         try {
           writer.write(frame).then(() => {
-            if (closed) return;
-            counters.framesWritten += 1;
-            sawFrame = true;
+            if (!closed) {
+              counters.framesWritten += 1;
+              sawFrame = true;
+            }
+            ackFrame();
           }).catch(() => {
+            ackFrame();
             try { frame.close(); } catch {}
             stop();
           });
         } catch {
+          ackFrame();
           try { frame.close(); } catch {}
           stop();
         }

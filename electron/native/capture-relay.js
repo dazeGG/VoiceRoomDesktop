@@ -14,6 +14,7 @@ const {
 const { createRestartPolicy } = require('../policies/native-capture-restart');
 
 const MAX_RENDERER_FRAMES_IN_FLIGHT = 2;
+const RECONFIGURE_ACK_TIMEOUT_MS = 2000;
 const STATS_INTERVAL_MS = 2000;
 const parentPort = process.parentPort;
 let activeSession = null;
@@ -35,9 +36,11 @@ function postToRenderer(session, message) {
   const isFrame = message.type === 'frame';
   if (isFrame && session.framesInFlight >= MAX_RENDERER_FRAMES_IN_FLIGHT) {
     // Keep the cross-process MessagePort queue bounded. The renderer acks as
-    // soon as it starts handling a frame; until then, retaining more raw frame
-    // buffers only adds latency and memory pressure without helping the encoder.
+    // soon as the generator accepts a frame (or becomes writable after a drop);
+    // until then, retaining more raw frame buffers only adds latency and memory
+    // pressure without helping the encoder.
     session.framesDroppedBackpressure += 1;
+    setHelperPaused(session, true);
     return true;
   }
 
@@ -48,13 +51,48 @@ function postToRenderer(session, message) {
     // until the bridge has a supported shared/encoded transport.
     if (isFrame) session.framesInFlight += 1;
     session.port.postMessage(message);
-    if (isFrame) session.framesPosted += 1;
+    if (isFrame) {
+      session.framesPosted += 1;
+      if (session.framesInFlight >= MAX_RENDERER_FRAMES_IN_FLIGHT) {
+        setHelperPaused(session, true);
+      }
+    }
     return true;
   } catch (error) {
     if (isFrame && session.framesInFlight > 0) session.framesInFlight -= 1;
     log('warn', 'Native capture relay port post failed.', { message: String(error?.message || error) });
     stopSession(session, { closePort: true });
     return false;
+  }
+}
+
+function writeChildCommand(session, payload) {
+  const child = session?.child;
+  if (!child?.stdin?.writable) return false;
+
+  try {
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setHelperPaused(session, paused) {
+  if (!session || session.stopped || session.helperPaused === paused) return true;
+  if (!writeChildCommand(session, { cmd: 'set-paused', paused })) return false;
+  session.helperPaused = paused;
+  return true;
+}
+
+function handleRendererMessage(session, event) {
+  if (event.data?.type === 'frame-ack') {
+    if (session.framesInFlight > 0) session.framesInFlight -= 1;
+    if (session.framesInFlight < MAX_RENDERER_FRAMES_IN_FLIGHT) {
+      setHelperPaused(session, false);
+    }
+  } else if (event.data?.type === 'stop') {
+    stopSession(session, { closePort: true });
   }
 }
 
@@ -76,25 +114,114 @@ function spawnHelper(session) {
 
 function writeReconfigureToChild(session, command) {
   const payload = buildReconfigureStdinPayload(session, command);
-  if (payload.fps) session.fps = payload.fps;
-  if (payload.maxHeight) session.maxHeight = payload.maxHeight;
-  if (payload.maxWidth) session.maxWidth = payload.maxWidth;
+  const requestId = Number.isInteger(command.requestId) && command.requestId > 0
+    ? command.requestId
+    : null;
+  if (requestId !== null) payload.requestId = requestId;
+  if (!writeChildCommand(session, payload)) return false;
 
-  const child = session.child;
-  if (!child?.stdin?.writable) return false;
-
-  try {
-    child.stdin.write(`${JSON.stringify(payload)}\n`);
-    return true;
-  } catch {
-    return false;
+  if (requestId !== null) {
+    const timer = setTimeout(() => {
+      const pending = session.pendingReconfigures.get(requestId);
+      if (!pending) return;
+      session.pendingReconfigures.delete(requestId);
+      postParent({ ok: false, reason: 'helper-ack-timeout', requestId, type: 'reconfigured' });
+    }, RECONFIGURE_ACK_TIMEOUT_MS);
+    timer.unref?.();
+    session.pendingReconfigures.set(requestId, { payload, timer });
   }
+  return true;
 }
 
 function handleReconfigure(session, message) {
   const command = normalizeReconfigureCommand(message);
   if (!command || !session?.child) return false;
+  if (Number.isInteger(message.requestId) && message.requestId > 0) {
+    command.requestId = message.requestId;
+  }
   return writeReconfigureToChild(session, command);
+}
+
+function finishPendingReconfigure(session, event) {
+  const requestId = Number(event.requestId);
+  if (!Number.isInteger(requestId) || requestId <= 0) return null;
+  const pending = session.pendingReconfigures.get(requestId);
+  if (!pending) return null;
+
+  clearTimeout(pending.timer);
+  session.pendingReconfigures.delete(requestId);
+  const applied = {
+    fps: Number(event.fps) || pending.payload.fps,
+    maxHeight: Number(event.maxHeight) || pending.payload.maxHeight,
+    maxWidth: Number(event.maxWidth) || pending.payload.maxWidth
+  };
+  session.fps = applied.fps;
+  session.maxHeight = applied.maxHeight;
+  session.maxWidth = applied.maxWidth;
+  const result = { ...applied, ok: true, requestId, type: 'reconfigured' };
+  postParent(result);
+  return result;
+}
+
+function failPendingReconfigures(session, reason) {
+  if (!session?.pendingReconfigures) return [];
+  const results = [];
+  for (const [requestId, pending] of session.pendingReconfigures.entries()) {
+    clearTimeout(pending.timer);
+    const result = { ok: false, reason, requestId, type: 'reconfigured' };
+    results.push(result);
+    postParent(result);
+  }
+  session.pendingReconfigures.clear();
+  return results;
+}
+
+function parseHelperStderrChunk(state, chunk, options = {}) {
+  state.buffer = `${state.buffer || ''}${chunk == null ? '' : String(chunk)}`;
+  const lines = state.buffer.split(/\r?\n/);
+  if (options.flush) {
+    state.buffer = '';
+  } else {
+    state.buffer = lines.pop() || '';
+  }
+
+  const events = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line));
+    } catch {
+      events.push({ event: 'log', message: line });
+    }
+  }
+  return events;
+}
+
+function handleHelperEvent(session, event) {
+  if (event.event === 'format') {
+    postToRenderer(session, {
+      fps: Number(event.fps) || session.fps,
+      height: Number(event.height) || 0,
+      pixelFormat: event.pixelFormat || '',
+      type: 'format',
+      width: Number(event.width) || 0
+    });
+  } else if (event.event === 'reconfigured') {
+    return finishPendingReconfigure(session, event);
+  } else if (event.event === 'error') {
+    log('warn', 'Native capture helper error.', event.message || '');
+  } else if (event.event === 'warning') {
+    log('warn', 'Native capture helper warning.', event.message || '');
+  } else if (event.event !== 'exit') {
+    log('info', 'Native capture helper.', event.message || event.event);
+  }
+  return null;
+}
+
+function handleChildStdinError(session, child) {
+  if (!session || session.stopped || session.child !== child) return false;
+  failPendingReconfigures(session, 'helper-stdin-error');
+  return true;
 }
 
 function startStatsTimer(session) {
@@ -106,6 +233,7 @@ function startStatsTimer(session) {
       framesDroppedBackpressure: session.framesDroppedBackpressure,
       framesInFlight: session.framesInFlight,
       framesPosted: session.framesPosted,
+      helperPaused: session.helperPaused,
       restarts: session.restarts,
       type: 'stats'
     });
@@ -121,15 +249,17 @@ function stopStatsTimer(session) {
 
 function attachChild(session, child) {
   session.child = child;
+  session.helperPaused = false;
+  const stderrState = { buffer: '' };
 
   // A reconfigure write racing the child's death surfaces EPIPE as an async
   // 'error' event on the stdin stream (not a throw writeReconfigureToChild can
   // catch). Without this listener that event would crash the utility process
   // and take the whole capture relay down. The exit handler owns recovery.
-  child.stdin.on('error', () => {});
+  child.stdin.on('error', () => handleChildStdinError(session, child));
 
   child.stdout.on('data', (chunk) => {
-    if (activeSession !== session || session.stopped) return;
+    if (activeSession !== session || session.stopped || session.child !== child) return;
     const result = appendFrameChunk(session.frameState, chunk);
     session.framesParsed += result.frames.length;
     for (const frame of result.frames) {
@@ -143,43 +273,27 @@ function attachChild(session, child) {
   });
 
   child.stderr.on('data', (chunk) => {
-    if (activeSession !== session || session.stopped) return;
-    for (const line of String(chunk).split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      let event = null;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        event = { event: 'log', message: line };
-      }
-      if (event.event === 'format') {
-        postToRenderer(session, {
-          fps: Number(event.fps) || session.fps,
-          height: Number(event.height) || 0,
-          pixelFormat: event.pixelFormat || '',
-          type: 'format',
-          width: Number(event.width) || 0
-        });
-      } else if (event.event === 'error') {
-        log('warn', 'Native capture helper error.', event.message || '');
-      } else if (event.event === 'warning') {
-        log('warn', 'Native capture helper warning.', event.message || '');
-      } else if (event.event !== 'exit') {
-        log('info', 'Native capture helper.', event.message || event.event);
-      }
+    if (activeSession !== session || session.stopped || session.child !== child) return;
+    for (const event of parseHelperStderrChunk(stderrState, chunk)) {
+      handleHelperEvent(session, event);
     }
   });
 
   child.on('error', (error) => {
-    if (activeSession !== session) return;
+    if (activeSession !== session || session.child !== child) return;
+    failPendingReconfigures(session, 'helper-process-error');
     log('error', 'Native capture helper process error.', { message: String(error?.message || error) });
     postToRenderer(session, { reason: 'spawn-error', type: 'end' });
     finishSession(session, 'spawn-error');
   });
 
   child.on('exit', (code, signal) => {
-    if (activeSession !== session) return;
+    if (activeSession !== session || session.child !== child) return;
     if (session.forceKillTimer) clearTimeout(session.forceKillTimer);
+    for (const event of parseHelperStderrChunk(stderrState, null, { flush: true })) {
+      handleHelperEvent(session, event);
+    }
+    failPendingReconfigures(session, 'helper-exited');
 
     if (!session.stopped && session.restartPolicy.shouldRestart(code)) {
       session.frameState = createFrameState();
@@ -198,6 +312,9 @@ function attachChild(session, child) {
           signal
         });
         attachChild(session, nextChild);
+        if (session.framesInFlight >= MAX_RENDERER_FRAMES_IN_FLIGHT) {
+          setHelperPaused(session, true);
+        }
         return;
       }
     }
@@ -222,10 +339,10 @@ function startSession(options, port) {
   }
 
   const fps = Number.isInteger(options.fps) && options.fps > 0 && options.fps <= 60 ? options.fps : 30;
-  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
+  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight >= 2 && options.maxHeight <= 16384
     ? options.maxHeight
     : 1080;
-  const maxWidth = Number.isInteger(options.maxWidth) && options.maxWidth > 0 && options.maxWidth <= 16384
+  const maxWidth = Number.isInteger(options.maxWidth) && options.maxWidth >= 2 && options.maxWidth <= 16384
     ? options.maxWidth
     : 1920;
   const session = {
@@ -237,10 +354,12 @@ function startSession(options, port) {
     framesInFlight: 0,
     framesParsed: 0,
     framesPosted: 0,
+    helperPaused: false,
     helperPath: options.helperPath,
     maxHeight,
     maxWidth,
     port,
+    pendingReconfigures: new Map(),
     restartPolicy: createRestartPolicy(),
     restarts: 0,
     sourceId: options.sourceId,
@@ -249,13 +368,7 @@ function startSession(options, port) {
   };
   activeSession = session;
 
-  port.on?.('message', (event) => {
-    if (event.data?.type === 'frame-ack') {
-      if (session.framesInFlight > 0) session.framesInFlight -= 1;
-    } else if (event.data?.type === 'stop') {
-      stopSession(session, { closePort: true });
-    }
-  });
+  port.on?.('message', (event) => handleRendererMessage(session, event));
   port.on?.('close', () => stopSession(session, { closePort: false }));
   port.start?.();
 
@@ -277,6 +390,7 @@ function stopSession(session, options = {}) {
   if (!session || session.stopped) return false;
   session.stopped = true;
   stopStatsTimer(session);
+  failPendingReconfigures(session, 'session-stopped');
 
   if (options.closePort) {
     try {
@@ -303,26 +417,38 @@ function finishSession(session, reason, code = 0, signal = null) {
   if (!session || activeSession !== session) return;
   if (session.forceKillTimer) clearTimeout(session.forceKillTimer);
   stopStatsTimer(session);
+  failPendingReconfigures(session, reason || 'session-finished');
   activeSession = null;
   postParent({ code, reason, signal, type: 'exited' });
   setImmediate(() => process.exit(0));
 }
 
 if (!parentPort) {
-  process.exit(1);
+  if (require.main === module) process.exit(1);
+} else {
+  parentPort.on('message', (event) => {
+    const message = event.data || event;
+    if (message?.type === 'start') {
+      startSession(message, event.ports?.[0]);
+    } else if (message?.type === 'stop') {
+      stopSession(activeSession, { closePort: true });
+    } else if (message?.type === 'reconfigure') {
+      handleReconfigure(activeSession, message);
+    }
+  });
+  parentPort.start?.();
+
+  process.on('disconnect', () => stopSession(activeSession, { closePort: true }));
+  process.on('exit', () => stopSession(activeSession, { closePort: true }));
 }
 
-parentPort.on('message', (event) => {
-  const message = event.data || event;
-  if (message?.type === 'start') {
-    startSession(message, event.ports?.[0]);
-  } else if (message?.type === 'stop') {
-    stopSession(activeSession, { closePort: true });
-  } else if (message?.type === 'reconfigure') {
-    handleReconfigure(activeSession, message);
-  }
-});
-parentPort.start?.();
-
-process.on('disconnect', () => stopSession(activeSession, { closePort: true }));
-process.on('exit', () => stopSession(activeSession, { closePort: true }));
+module.exports = {
+  failPendingReconfigures,
+  finishPendingReconfigure,
+  handleChildStdinError,
+  handleHelperEvent,
+  handleReconfigure,
+  handleRendererMessage,
+  parseHelperStderrChunk,
+  postToRenderer
+};

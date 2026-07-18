@@ -25,15 +25,21 @@
 //            stride == width * 4.
 //   stderr — one JSON event per line: format / log / warning / error / closed / exit.
 //   stdin  — one JSON command per line (ignored when absent):
-//            {"cmd":"reconfigure","fps":<1..60>,"maxWidth":<2..16384>,"maxHeight":<2..16384>}
+//            {"cmd":"reconfigure","requestId":<u32>,"fps":<1..60>,
+//             "maxWidth":<2..16384>,"maxHeight":<2..16384>}
+//            {"cmd":"set-paused","paused":true|false}
 //   args   — --source screen:<index> | window:<hwnd>  [--fps 5|15|30|60]
 //            [--max-width 1280|1920] [--max-height 720|1080]
 //
 // Exit codes: 0 clean stop, 2 capture unsupported on this Windows build,
 // 1 any other failure (details on stderr).
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
+
+#include "CaptureGeometry.h"
 
 #include <d3d11.h>
 #include <dwmapi.h>
@@ -53,14 +59,18 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <csignal>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <avrt.h>
@@ -73,6 +83,66 @@ static std::atomic<bool> g_running{true};
 static HANDLE g_stopEvent = nullptr;
 
 class CaptureSession;
+
+// WinRT event revocation does not cancel a delegate that has already been
+// dispatched. Keep a ref-counted gate in every delegate so late entry never
+// dereferences the stack-owned CaptureSession, and Stop can drain delegates that
+// acquired the session before shutdown began.
+class FrameCallbackState {
+ public:
+  explicit FrameCallbackState(CaptureSession* session) : session_(session) {}
+
+  CaptureSession* TryEnter() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (stopping_ || !session_) return nullptr;
+    activeCallbacks_ += 1;
+    return session_;
+  }
+
+  void Leave() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (activeCallbacks_ > 0) activeCallbacks_ -= 1;
+    if (stopping_ && activeCallbacks_ == 0) drained_.notify_all();
+  }
+
+  void BeginStop() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    stopping_ = true;
+    session_ = nullptr;
+  }
+
+  void WaitForDrain() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    drained_.wait(lock, [this]() { return activeCallbacks_ == 0; });
+  }
+
+ private:
+  std::condition_variable drained_;
+  std::mutex mutex_;
+  CaptureSession* session_ = nullptr;
+  uint32_t activeCallbacks_ = 0;
+  bool stopping_ = false;
+};
+
+class FrameCallbackLease {
+ public:
+  explicit FrameCallbackLease(std::shared_ptr<FrameCallbackState> state)
+      : state_(std::move(state)), session_(state_ ? state_->TryEnter() : nullptr) {}
+
+  ~FrameCallbackLease() {
+    if (session_) state_->Leave();
+  }
+
+  explicit operator bool() const { return session_ != nullptr; }
+  CaptureSession* session() const { return session_; }
+
+  FrameCallbackLease(const FrameCallbackLease&) = delete;
+  FrameCallbackLease& operator=(const FrameCallbackLease&) = delete;
+
+ private:
+  std::shared_ptr<FrameCallbackState> state_;
+  CaptureSession* session_ = nullptr;
+};
 
 // Guards the active-session pointer against the detached stdin thread. Clearing
 // the pointer under this lock guarantees no ApplyReconfigure is in-flight (and
@@ -108,6 +178,16 @@ static void LogFormat(uint32_t width,
   std::fflush(stderr);
 }
 
+static void LogReconfigured(uint32_t requestId,
+                            uint32_t fps,
+                            uint32_t maxWidth,
+                            uint32_t maxHeight) {
+  std::fprintf(stderr,
+               "{\"event\":\"reconfigured\",\"requestId\":%u,\"fps\":%u,\"maxWidth\":%u,\"maxHeight\":%u}\n",
+               requestId, fps, maxWidth, maxHeight);
+  std::fflush(stderr);
+}
+
 static void RegisterMmcssCaptureThread() {
   static thread_local bool registered = false;
   if (registered) return;
@@ -132,53 +212,25 @@ static bool ParseJsonUintField(const std::string& line, const char* key, uint32_
   return true;
 }
 
-struct FrameSize {
-  uint32_t width = 0;
-  uint32_t height = 0;
-};
-
-static uint32_t MakeEvenDimension(uint32_t value) {
-  if (value < 2) return 0;
-  return value & ~1u;
+static bool ParseJsonBoolField(const std::string& line, const char* key, bool* out) {
+  const std::string needle = std::string("\"") + key + "\":";
+  const size_t pos = line.find(needle);
+  if (pos == std::string::npos) return false;
+  size_t index = pos + needle.size();
+  while (index < line.size() && (line[index] == ' ' || line[index] == '\t')) index++;
+  if (line.compare(index, 4, "true") == 0) {
+    *out = true;
+    return true;
+  }
+  if (line.compare(index, 5, "false") == 0) {
+    *out = false;
+    return true;
+  }
+  return false;
 }
 
-static FrameSize ComputeOutputSize(uint32_t width,
-                                   uint32_t height,
-                                   uint32_t maxWidth,
-                                   uint32_t maxHeight) {
-  if (width == 0 || height == 0 || maxWidth < 2 || maxHeight < 2) {
-    return {width, height};
-  }
-
-  if (width <= maxWidth && height <= maxHeight) {
-    // The D3D11 NV12 video-processor path requires even dimensions. WGC window
-    // captures commonly report an odd client size, so keep them on the GPU by
-    // trimming at most one pixel per axis instead of falling back to a full
-    // CPU readback/BGRX transport. This never upscales or exceeds the profile.
-    const uint32_t outputWidth = MakeEvenDimension(width);
-    const uint32_t outputHeight = MakeEvenDimension(height);
-    if (outputWidth >= 2 && outputHeight >= 2) return {outputWidth, outputHeight};
-    return {width, height};
-  }
-
-  uint32_t outputWidth = 0;
-  uint32_t outputHeight = 0;
-  if (static_cast<uint64_t>(width) * maxHeight >= static_cast<uint64_t>(height) * maxWidth) {
-    outputWidth = MakeEvenDimension(std::min(width, maxWidth));
-    const uint64_t roundedHeight =
-        (static_cast<uint64_t>(height) * outputWidth + width / 2) / width;
-    outputHeight = MakeEvenDimension(static_cast<uint32_t>(std::max<uint64_t>(2, roundedHeight)));
-  } else {
-    outputHeight = MakeEvenDimension(std::min(height, maxHeight));
-    const uint64_t roundedWidth =
-        (static_cast<uint64_t>(width) * outputHeight + height / 2) / height;
-    outputWidth = MakeEvenDimension(static_cast<uint32_t>(std::max<uint64_t>(2, roundedWidth)));
-  }
-  if (outputWidth == 0 || outputHeight == 0 || outputWidth > maxWidth || outputHeight > maxHeight) {
-    return {width, height};
-  }
-  return {outputWidth, outputHeight};
-}
+using voiceroom::capture::ComputeOutputSize;
+using voiceroom::capture::FrameSize;
 
 static void Fail(const char* message, HRESULT hr = S_OK) {
   char buffer[320];
@@ -287,6 +339,13 @@ static bool GetWindowContentOrigin(HWND hwnd, POINT* origin) {
   return true;
 }
 
+enum class FrameWriteResult {
+  kWrote,
+  kSkipped,
+  kRecoverableFailure,
+  kPipeClosed
+};
+
 class FrameWriter {
  public:
   void Initialize(ID3D11Device* device, ID3D11DeviceContext* context) {
@@ -303,18 +362,22 @@ class FrameWriter {
   }
 
   // Composites the cursor on a GPU BGRA texture, converts that texture to NV12
-  // with the D3D11 video processor, and streams the mapped NV12 payload. Returns
-  // false when stdout is gone (parent exited) so the capture loop can stop.
-  bool WriteFrame(ID3D11Texture2D* source,
-                  uint32_t width,
-                  uint32_t height,
-                  const POINT& contentOrigin,
-                  uint32_t maxWidth,
-                  uint32_t maxHeight,
-                  uint32_t fps,
-                  uint32_t telemetryEpoch) {
-    if (!source || !d3dDevice_ || !d3dContext_ || width == 0 || height == 0) return true;
-    if (!EnsureBgraResources(width, height)) return true;
+  // with the D3D11 video processor, and streams the mapped NV12 payload. The
+  // result distinguishes a closed stdout pipe from recoverable GPU failures so
+  // repeated device/resource failures can restart the helper instead of leaving
+  // a permanently frozen live track.
+  FrameWriteResult WriteFrame(ID3D11Texture2D* source,
+                              uint32_t width,
+                              uint32_t height,
+                              const POINT& contentOrigin,
+                              uint32_t maxWidth,
+                              uint32_t maxHeight,
+                              uint32_t fps,
+                              uint32_t telemetryEpoch) {
+    if (!source || !d3dDevice_ || !d3dContext_ || width == 0 || height == 0) {
+      return FrameWriteResult::kSkipped;
+    }
+    if (!EnsureBgraResources(width, height)) return FrameWriteResult::kRecoverableFailure;
     const FrameSize outputSize = ComputeOutputSize(width, height, maxWidth, maxHeight);
 
     D3D11_BOX sourceBox = {};
@@ -340,9 +403,9 @@ class FrameWriter {
       if (status == WriteStatus::kWrote) {
         LogFrameFormatIfChanged(
             outputSize.width, outputSize.height, fps, telemetryEpoch, true);
-        return true;
+        return FrameWriteResult::kWrote;
       }
-      if (status == WriteStatus::kPipeClosed) return false;
+      if (status == WriteStatus::kPipeClosed) return FrameWriteResult::kPipeClosed;
       DisableVideoProcessorForSize(width, height, outputSize.width, outputSize.height);
       if (!gpuFallbackLogged_) {
         LogEvent("warning", "GPU NV12 conversion failed; falling back to BGRX at the configured output size.");
@@ -355,8 +418,11 @@ class FrameWriter {
     if (bgrxStatus == WriteStatus::kWrote) {
       LogFrameFormatIfChanged(
           outputSize.width, outputSize.height, fps, telemetryEpoch, false);
+      return FrameWriteResult::kWrote;
     }
-    return bgrxStatus != WriteStatus::kPipeClosed;
+    return bgrxStatus == WriteStatus::kPipeClosed
+        ? FrameWriteResult::kPipeClosed
+        : FrameWriteResult::kRecoverableFailure;
   }
 
   ~FrameWriter() { Reset(); }
@@ -957,11 +1023,19 @@ class FrameWriter {
 
 class CaptureSession {
  public:
+  struct ReconfigureResult {
+    uint32_t fps = 30;
+    uint32_t maxWidth = 1920;
+    uint32_t maxHeight = 1080;
+  };
+
+  ~CaptureSession() { Stop(); }
+
   bool Start(const CaptureTarget& target, uint32_t fps, uint32_t maxWidth, uint32_t maxHeight) {
     target_ = target;
-    fps_.store(fps == 0 ? 30 : fps);
-    maxWidth_.store(maxWidth);
-    maxHeight_.store(maxHeight);
+    fps_.store(fps >= 1 && fps <= 60 ? fps : 30);
+    maxWidth_.store(maxWidth >= 2 && maxWidth <= 16384 ? maxWidth : 1920);
+    maxHeight_.store(maxHeight >= 2 && maxHeight <= 16384 ? maxHeight : 1080);
     minFrameIntervalQpc_.store(0);
     formatTelemetryEpoch_.store(0);
 
@@ -981,7 +1055,13 @@ class CaptureSession {
 
   bool IsUnsupported() const { return unsupported_; }
 
-  void ApplyReconfigure(uint32_t fps, uint32_t maxWidth, uint32_t maxHeight) {
+  bool HasRuntimeFailure() const { return runtimeFailed_.load(); }
+
+  ReconfigureResult ApplyReconfigure(uint32_t fps, uint32_t maxWidth, uint32_t maxHeight) {
+    // Serialize profile updates with frame production. When this method returns
+    // (and the helper emits its ACK), every older-profile frame has finished
+    // writing and the next emitted frame observes one coherent profile.
+    std::lock_guard<std::mutex> guard(frameMutex_);
     if (fps >= 1 && fps <= 60) {
       fps_.store(fps);
       LARGE_INTEGER frequency = {};
@@ -989,10 +1069,10 @@ class CaptureSession {
         minFrameIntervalQpc_.store(frequency.QuadPart / fps);
       }
     }
-    if (maxWidth >= 1 && maxWidth <= 16384) {
+    if (maxWidth >= 2 && maxWidth <= 16384) {
       maxWidth_.store(maxWidth);
     }
-    if (maxHeight >= 1 && maxHeight <= 16384) {
+    if (maxHeight >= 2 && maxHeight <= 16384) {
       maxHeight_.store(maxHeight);
     }
     // Do not guess the active pixel format here: the GPU path may currently be
@@ -1000,9 +1080,19 @@ class CaptureSession {
     // the actual format from the next frame, even if geometry and FPS did not
     // change.
     formatTelemetryEpoch_.fetch_add(1);
+    return {fps_.load(), maxWidth_.load(), maxHeight_.load()};
+  }
+
+  void ApplyFlowControl(bool paused) {
+    outputPaused_.store(paused);
   }
 
   void Stop() {
+    if (stopped_.exchange(true)) return;
+    g_running = false;
+    if (g_stopEvent) SetEvent(g_stopEvent);
+    if (frameCallbackState_) frameCallbackState_->BeginStop();
+
     // Desktop Duplication path: signal already set via g_running; join the loop.
     if (duplicationThread_.joinable()) duplicationThread_.join();
     duplication_ = nullptr;
@@ -1010,6 +1100,10 @@ class CaptureSession {
     // WGC path.
     frameArrivedRevoker_.revoke();
     closedRevoker_.revoke();
+    if (frameCallbackState_) frameCallbackState_->WaitForDrain();
+    // Also serialize with profile updates and frame processing before closing
+    // the session-owned WGC/D3D state.
+    std::lock_guard<std::mutex> guard(frameMutex_);
     if (session_) session_.Close();
     if (framePool_) framePool_.Close();
     session_ = nullptr;
@@ -1018,6 +1112,35 @@ class CaptureSession {
   }
 
  private:
+  static constexpr uint32_t kMaxConsecutiveFrameWriteFailures = 3;
+
+  void SignalRuntimeFailure(const char* message, HRESULT hr = S_OK) {
+    if (runtimeFailed_.exchange(true)) return;
+    Fail(message, hr);
+    g_running = false;
+    if (g_stopEvent) SetEvent(g_stopEvent);
+  }
+
+  bool HandleFrameWriteResult(FrameWriteResult result) {
+    if (result == FrameWriteResult::kWrote) {
+      consecutiveFrameWriteFailures_ = 0;
+      return true;
+    }
+    if (result == FrameWriteResult::kSkipped) return true;
+    if (result == FrameWriteResult::kPipeClosed) {
+      g_running = false;
+      if (g_stopEvent) SetEvent(g_stopEvent);
+      return false;
+    }
+
+    consecutiveFrameWriteFailures_ += 1;
+    if (consecutiveFrameWriteFailures_ >= kMaxConsecutiveFrameWriteFailures) {
+      SignalRuntimeFailure("Native capture frame processing failed repeatedly.");
+      return false;
+    }
+    return true;
+  }
+
   bool CreateDevice(IDXGIAdapter* adapter) {
     // A specific adapter (Desktop Duplication needs the device on the output's
     // adapter) must use DRIVER_TYPE_UNKNOWN; the default-adapter path keeps the
@@ -1111,15 +1234,22 @@ class CaptureSession {
 
     TryDisableBorder();
 
-    closedRevoker_ = item_.Closed(winrt::auto_revoke, [](auto&&, auto&&) {
+    frameCallbackState_ = std::make_shared<FrameCallbackState>(this);
+    const std::shared_ptr<FrameCallbackState> callbackState = frameCallbackState_;
+    closedRevoker_ = item_.Closed(winrt::auto_revoke, [callbackState](auto&&, auto&&) {
+      FrameCallbackLease callback(callbackState);
+      if (!callback) return;
       LogEvent("closed");
       g_running = false;
       if (g_stopEvent) SetEvent(g_stopEvent);
     });
     frameArrivedRevoker_ = framePool_.FrameArrived(
         winrt::auto_revoke,
-        [this](wgc::Direct3D11CaptureFramePool const& pool, winrt::Windows::Foundation::IInspectable const&) {
-          OnFrameArrived(pool);
+        [callbackState](wgc::Direct3D11CaptureFramePool const& pool,
+                        winrt::Windows::Foundation::IInspectable const&) {
+          FrameCallbackLease callback(callbackState);
+          if (!callback) return;
+          callback.session()->OnFrameArrived(pool);
         });
 
     session_.StartCapture();
@@ -1171,51 +1301,55 @@ class CaptureSession {
       if (hr == DXGI_ERROR_ACCESS_LOST) {
         // Resolution/mode change, UAC desktop switch, etc. Rebuild and retry.
         if (RecreateDuplication()) continue;
+        SignalRuntimeFailure("Desktop Duplication recovery failed.");
         break;
       }
       if (FAILED(hr)) {
-        Fail("AcquireNextFrame failed.", hr);
+        SignalRuntimeFailure("AcquireNextFrame failed.", hr);
         break;
       }
 
-      const int64_t frameIntervalQpc = minFrameIntervalQpc_.load();
-      bool emit = true;
-      if (frameIntervalQpc > 0) {
-        LARGE_INTEGER now = {};
-        QueryPerformanceCounter(&now);
-        if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < frameIntervalQpc) {
-          emit = false;
-        } else {
-          lastFrameQpc_ = now.QuadPart;
+      bool keepRunning = true;
+      {
+        // Shares the same lock as ApplyReconfigure so an ACK cannot overtake a
+        // frame that was produced with the previous profile.
+        std::lock_guard<std::mutex> guard(frameMutex_);
+        const int64_t frameIntervalQpc = minFrameIntervalQpc_.load();
+        bool emit = true;
+        if (frameIntervalQpc > 0) {
+          LARGE_INTEGER now = {};
+          QueryPerformanceCounter(&now);
+          if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < frameIntervalQpc) {
+            emit = false;
+          } else {
+            lastFrameQpc_ = now.QuadPart;
+          }
         }
-      }
 
-      bool pipeAlive = true;
-      if (emit) {
-        auto texture = resource.try_as<ID3D11Texture2D>();
-        if (texture) {
-          D3D11_TEXTURE2D_DESC desc = {};
-          texture->GetDesc(&desc);
-          pipeAlive = writer_.WriteFrame(
-              texture.get(),
-              desc.Width,
-              desc.Height,
-              origin,
-              maxWidth_.load(),
-              maxHeight_.load(),
-              fps_.load(),
-              formatTelemetryEpoch_.load());
+        FrameWriteResult writeResult = FrameWriteResult::kSkipped;
+        if (emit && !outputPaused_.load()) {
+          auto texture = resource.try_as<ID3D11Texture2D>();
+          if (texture) {
+            D3D11_TEXTURE2D_DESC desc = {};
+            texture->GetDesc(&desc);
+            writeResult = writer_.WriteFrame(
+                texture.get(),
+                desc.Width,
+                desc.Height,
+                origin,
+                maxWidth_.load(),
+                maxHeight_.load(),
+                fps_.load(),
+                formatTelemetryEpoch_.load());
+          } else {
+            writeResult = FrameWriteResult::kRecoverableFailure;
+          }
         }
+        keepRunning = HandleFrameWriteResult(writeResult);
       }
 
       duplication_->ReleaseFrame();
-
-      if (!pipeAlive) {
-        // stdout pipe is gone — the parent process exited.
-        g_running = false;
-        if (g_stopEvent) SetEvent(g_stopEvent);
-        break;
-      }
+      if (!keepRunning) break;
     }
   }
 
@@ -1251,6 +1385,7 @@ class CaptureSession {
 
     auto frame = pool.TryGetNextFrame();
     if (!frame) return;
+    if (outputPaused_.load()) return;
 
     const int64_t frameIntervalQpc = minFrameIntervalQpc_.load();
     if (frameIntervalQpc > 0) {
@@ -1273,7 +1408,10 @@ class CaptureSession {
     winrt::com_ptr<ID3D11Texture2D> texture;
     {
       auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-      if (FAILED(access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), texture.put_void()))) return;
+      if (FAILED(access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), texture.put_void()))) {
+        HandleFrameWriteResult(FrameWriteResult::kRecoverableFailure);
+        return;
+      }
     }
 
     D3D11_TEXTURE2D_DESC desc = {};
@@ -1290,7 +1428,7 @@ class CaptureSession {
 
     const uint32_t width = std::min<uint32_t>(desc.Width, static_cast<uint32_t>(contentSize_.Width));
     const uint32_t height = std::min<uint32_t>(desc.Height, static_cast<uint32_t>(contentSize_.Height));
-    const bool ok = originKnown
+    const FrameWriteResult writeResult = originKnown
         ? writer_.WriteFrame(
               texture.get(),
               width,
@@ -1300,13 +1438,9 @@ class CaptureSession {
               maxHeight_.load(),
               fps_.load(),
               formatTelemetryEpoch_.load())
-        : true;
+        : FrameWriteResult::kRecoverableFailure;
 
-    if (!ok) {
-      // stdout pipe is gone — the parent process exited.
-      g_running = false;
-      if (g_stopEvent) SetEvent(g_stopEvent);
-    }
+    HandleFrameWriteResult(writeResult);
   }
 
   CaptureTarget target_;
@@ -1315,7 +1449,11 @@ class CaptureSession {
   std::atomic<uint32_t> maxHeight_{1080};
   std::atomic<uint32_t> formatTelemetryEpoch_{0};
   std::atomic<int64_t> minFrameIntervalQpc_{0};
+  std::atomic<bool> outputPaused_{false};
+  std::atomic<bool> runtimeFailed_{false};
+  std::atomic<bool> stopped_{false};
   int64_t lastFrameQpc_ = 0;
+  uint32_t consecutiveFrameWriteFailures_ = 0;
   bool unsupported_ = false;
 
   winrt::com_ptr<ID3D11Device> d3dDevice_;
@@ -1328,6 +1466,7 @@ class CaptureSession {
 
   wgc::GraphicsCaptureItem::Closed_revoker closedRevoker_;
   wgc::Direct3D11CaptureFramePool::FrameArrived_revoker frameArrivedRevoker_;
+  std::shared_ptr<FrameCallbackState> frameCallbackState_;
 
   winrt::com_ptr<IDXGIOutputDuplication> duplication_;
   std::thread duplicationThread_;
@@ -1339,10 +1478,20 @@ class CaptureSession {
 static void StdinCommandLoop() {
   std::string line;
   while (g_running && std::getline(std::cin, line)) {
+    if (line.find("set-paused") != std::string::npos) {
+      bool paused = false;
+      if (!ParseJsonBoolField(line, "paused", &paused)) continue;
+      std::lock_guard<std::mutex> guard(g_activeSessionMutex);
+      CaptureSession* session = g_activeSession;
+      if (session) session->ApplyFlowControl(paused);
+      continue;
+    }
     if (line.find("reconfigure") == std::string::npos) continue;
+    uint32_t requestId = 0;
     uint32_t fps = 0;
     uint32_t maxWidth = 0;
     uint32_t maxHeight = 0;
+    const bool hasRequestId = ParseJsonUintField(line, "requestId", &requestId);
     const bool hasFps = ParseJsonUintField(line, "fps", &fps);
     const bool hasWidth = ParseJsonUintField(line, "maxWidth", &maxWidth);
     const bool hasHeight = ParseJsonUintField(line, "maxHeight", &maxHeight);
@@ -1352,10 +1501,13 @@ static void StdinCommandLoop() {
     std::lock_guard<std::mutex> guard(g_activeSessionMutex);
     CaptureSession* session = g_activeSession;
     if (!session) continue;
-    session->ApplyReconfigure(
+    const CaptureSession::ReconfigureResult applied = session->ApplyReconfigure(
         hasFps ? fps : 0,
         hasWidth ? maxWidth : 0,
         hasHeight ? maxHeight : 0);
+    if (hasRequestId) {
+      LogReconfigured(requestId, applied.fps, applied.maxWidth, applied.maxHeight);
+    }
   }
 }
 
@@ -1444,6 +1596,7 @@ int wmain(int argc, wchar_t** argv) {
         g_activeSession = nullptr;
       }
       session.Stop();
+      if (session.HasRuntimeFailure()) exitCode = 1;
     }
   }
 

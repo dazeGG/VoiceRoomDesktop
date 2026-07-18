@@ -19,7 +19,7 @@ async function main() {
     width: 1040
   });
 
-  await window.loadFile(path.join(__dirname, '..', 'electron', 'screen-picker-preview.html'));
+  await window.loadFile(path.join(__dirname, '..', 'electron', 'ui', 'screen-picker-preview.html'));
   await new Promise((resolve) => setTimeout(resolve, 250));
   const image = await window.webContents.capturePage();
   require('node:fs').mkdirSync(path.dirname(outputPath), { recursive: true });

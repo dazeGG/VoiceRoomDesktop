@@ -81,6 +81,7 @@ module.exports = {
     'electron/ui/screen-picker-preload.js',
     'electron/ui/screen-picker-preview.html',
     'electron/ui/screen-picker-preview.css',
+    'electron/ui/screen-picker-icons.js',
     'electron/ui/screen-picker.js',
     'electron/policies/update-gate-policy.js',
     'electron/policies/update-gate-state.js',
@@ -90,13 +91,13 @@ module.exports = {
     'electron/ui/update-splash.html',
     'electron/ui/update-splash.js',
     'native/bin/**/*',
+    'node_modules/lucide/dist/umd/lucide.min.js',
     'package.json'
   ],
   mac: {
     category: 'public.app-category.social-networking',
     hardenedRuntime: false,
     icon: 'assets/logo/icon.icns',
-    identity: null,
     target: isDevBuild
       ? [
           {

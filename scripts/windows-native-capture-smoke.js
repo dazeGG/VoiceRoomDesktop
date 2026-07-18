@@ -27,6 +27,11 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function getTaskkillPath() {
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  return path.win32.join(systemRoot, 'System32', 'taskkill.exe');
+}
+
 async function waitFor(check, label, timeoutMs = START_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -48,7 +53,7 @@ async function terminateChildProcess(child, getExit, label) {
     return await waitFor(getExit, `${label} shutdown`, STOP_TIMEOUT_MS);
   } catch (firstError) {
     if (process.platform === 'win32' && child.pid) {
-      spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+      spawnSync(getTaskkillPath(), ['/PID', String(child.pid), '/T', '/F'], {
         stdio: 'ignore',
         timeout: STOP_TIMEOUT_MS,
         windowsHide: true
@@ -333,6 +338,55 @@ async function runCaptureLifecycle(helperPath, sourceId, iteration) {
   }
 }
 
+async function runRelayTerminationLifecycle(helperPath, sourceId, terminationMode) {
+  const electronPath = require('electron');
+  const fixturePath = path.join(
+    __dirname,
+    '..',
+    'test',
+    'fixtures',
+    'native-capture-relay-termination-electron.js'
+  );
+  const env = {
+    ...process.env,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    VOICE_ROOM_CAPTURE_HELPER: helperPath,
+    VOICE_ROOM_RELAY_TERMINATION_MODE: terminationMode,
+    VOICE_ROOM_CAPTURE_SOURCE: sourceId
+  };
+  delete env.ELECTRON_RUN_AS_NODE;
+
+  const child = spawn(electronPath, [fixturePath], {
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  let error = null;
+  let exit = null;
+  let stderr = '';
+  let stdout = '';
+  child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+  child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+  child.on('error', (spawnError) => { error = spawnError; });
+  child.on('exit', (code, signal) => { exit = { code, signal }; });
+
+  try {
+    await waitFor(() => {
+      if (error) throw error;
+      return exit;
+    }, 'Electron relay termination fixture', 20_000);
+  } finally {
+    if (!exit) await terminateChildProcess(child, () => exit, 'Electron relay termination fixture');
+  }
+  if (exit.code !== 0 || !stdout.includes('native-capture-relay-termination-ok')) {
+    fail(
+      'Native capture relay termination lifecycle failed',
+      [JSON.stringify(exit), stderr.trim(), stdout.trim()].filter(Boolean).join('\n')
+    );
+  }
+  return stdout.trim();
+}
+
 async function createWindowCaptureTarget() {
   const script = [
     "$ErrorActionPreference = 'Stop'",
@@ -448,7 +502,18 @@ async function main() {
     for (let iteration = 1; iteration <= 2; iteration += 1) {
       results.push(await runCaptureLifecycle(helperPath, `window:${target.handle}`, iteration));
     }
-    console.log(`Windows native capture runtime smoke passed: ${JSON.stringify(results)}`);
+    const relayTermination = {};
+    for (const terminationMode of ['relay-kill', 'tree-kill']) {
+      relayTermination[terminationMode] = await runRelayTerminationLifecycle(
+        helperPath,
+        `window:${target.handle}`,
+        terminationMode
+      );
+    }
+    console.log(`Windows native capture runtime smoke passed: ${JSON.stringify({
+      relayTermination,
+      results
+    })}`);
   } finally {
     await target.stop();
   }

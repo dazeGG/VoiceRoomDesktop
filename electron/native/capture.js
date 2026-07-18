@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, MessageChannelMain, utilityProcess } = require('electron');
+const { execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,6 +11,9 @@ const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./capture-contract');
 
 const PORT_CHANNEL = 'native-capture:port';
 const RECONFIGURE_TIMEOUT_MS = 2500;
+const RELAY_EXIT_TIMEOUT_MS = 2000;
+const RELAY_STOP_TIMEOUT_MS = 2000;
+const TREE_KILL_TIMEOUT_MS = 2000;
 
 let activeSession = null;
 let nextReconfigureRequestId = 1;
@@ -101,7 +105,11 @@ function startNativeCaptureSession(webContents, options = {}) {
     id: sessionId,
     pendingReconfigures: new Map(),
     relay,
+    relayExited: false,
+    relayExitTimer: null,
+    relayKillStarted: false,
     stopped: false,
+    treeKillStarted: false,
     webContents,
     webContentsDestroyedListener: null
   };
@@ -148,7 +156,7 @@ function startNativeCaptureSession(webContents, options = {}) {
     if (activeSession === session && !session.stopped && code !== 0 && code !== null) {
       log.warn('Native capture relay process exited:', { code, sessionId });
     }
-    cleanupSession(session);
+    cleanupSession(session, { relayExited: true });
   });
 
   try {
@@ -219,23 +227,113 @@ function stopNativeCaptureSession(sessionId = '') {
   }
 
   session.forceKillTimer = setTimeout(() => {
-    try {
-      if (session.relay.pid) session.relay.kill();
-    } catch {
-      // The relay may have exited between the timer check and kill.
+    session.forceKillTimer = null;
+    const relayPid = session.relay.pid;
+    // Kill the process tree while the relay is still the live root. Killing the
+    // UtilityProcess first can orphan a helper that is stuck inside a command
+    // and therefore cannot observe stdin EOF.
+    if (!forceKillRelayTree(session, relayPid, 'stop-timeout')) {
+      killRelay(session, relayPid, 'tree-kill-unavailable');
     }
-  }, 2000);
+
+    // taskkill itself is bounded, but also require Electron's actual relay exit
+    // event. UtilityProcess.kill() is a last fallback, never the first action.
+    session.relayExitTimer = setTimeout(() => {
+      session.relayExitTimer = null;
+      if (!session.relayExited && session.relay.pid === relayPid) {
+        killRelay(session, relayPid, 'tree-kill-exit-timeout');
+      }
+    }, RELAY_EXIT_TIMEOUT_MS);
+    session.relayExitTimer.unref?.();
+  }, RELAY_STOP_TIMEOUT_MS);
   session.forceKillTimer.unref?.();
   return true;
 }
 
-function cleanupSession(session) {
+function forceKillRelayTree(session, relayPid, reason) {
+  if (session.treeKillStarted || !Number.isInteger(relayPid) || relayPid <= 0) {
+    if (!session.relayExited && !session.treeKillStarted) {
+      log.error('Native capture relay tree kill could not start.', {
+        pid: relayPid,
+        reason,
+        sessionId: session.id
+      });
+    }
+    return false;
+  }
+
+  session.treeKillStarted = true;
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  const taskkillPath = path.win32.join(systemRoot, 'System32', 'taskkill.exe');
+  try {
+    const taskkill = execFile(taskkillPath, ['/PID', String(relayPid), '/T', '/F'], {
+      timeout: TREE_KILL_TIMEOUT_MS,
+      windowsHide: true
+    }, (error) => {
+      if (error && !session.relayExited) {
+        log.error('Native capture relay tree kill failed.', {
+          message: String(error?.message || error),
+          pid: relayPid,
+          reason,
+          sessionId: session.id
+        });
+        killRelay(session, relayPid, 'tree-kill-failed');
+      }
+    });
+    taskkill.unref?.();
+  } catch (error) {
+    log.error('Native capture relay tree kill could not spawn.', {
+      message: String(error?.message || error),
+      pid: relayPid,
+      reason,
+      sessionId: session.id
+    });
+    return false;
+  }
+  return true;
+}
+
+function killRelay(session, relayPid, reason) {
+  if (session.relayExited || session.relayKillStarted) return false;
+  session.relayKillStarted = true;
+  let killAccepted = false;
+  try {
+    if (relayPid && session.relay.pid === relayPid) {
+      killAccepted = session.relay.kill();
+    }
+  } catch (error) {
+    log.error('Native capture relay fallback kill threw.', {
+      message: String(error?.message || error),
+      pid: relayPid,
+      reason,
+      sessionId: session.id
+    });
+    return false;
+  }
+  if (!killAccepted) {
+    log.error('Native capture relay fallback kill was rejected.', {
+      pid: relayPid,
+      reason,
+      sessionId: session.id
+    });
+  }
+  return killAccepted;
+}
+
+function cleanupSession(session, { relayExited = false } = {}) {
   if (activeSession === session) activeSession = null;
   session.stopped = true;
+  if (relayExited) session.relayExited = true;
   failReconfigureRequests(session, 'session-ended');
-  if (session.forceKillTimer) {
-    clearTimeout(session.forceKillTimer);
-    session.forceKillTimer = null;
+  if (session.relayExited) {
+    if (session.forceKillTimer) {
+      clearTimeout(session.forceKillTimer);
+      session.forceKillTimer = null;
+    }
+    if (session.relayExitTimer) {
+      clearTimeout(session.relayExitTimer);
+      session.relayExitTimer = null;
+    }
   }
   if (session.webContentsDestroyedListener && !session.webContents.isDestroyed()) {
     session.webContents.removeListener('destroyed', session.webContentsDestroyedListener);
@@ -282,17 +380,33 @@ async function reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth } = {}
   if (!payload.fps && !payload.maxHeight && !payload.maxWidth) {
     return { ok: false, reason: 'bad-profile' };
   }
+  if (session.pendingReconfigures.size > 0) {
+    // Preserve one committed baseline per transaction. A timeout can then
+    // always roll the helper back without undoing another request that the
+    // caller already observed as successful.
+    return { ok: false, reason: 'reconfigure-in-progress' };
+  }
 
   const requestId = nextReconfigureRequestId++;
   payload.requestId = requestId;
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      if (!session.pendingReconfigures.has(requestId)) return;
+      const pending = session.pendingReconfigures.get(requestId);
+      if (!pending) return;
       session.pendingReconfigures.delete(requestId);
+      // This watchdog only wins when the relay did not complete its own
+      // shorter timeout/restart transaction. Treat that as an unresponsive
+      // relay and fail closed: stopping the utility process closes the helper
+      // pipes, while the session force-kill timer bounds relay shutdown.
+      stopNativeCaptureSession(session.id);
       resolve({ ok: false, reason: 'reconfigure-timeout' });
     }, RECONFIGURE_TIMEOUT_MS);
     timer.unref?.();
-    session.pendingReconfigures.set(requestId, { payload, resolve, timer });
+    session.pendingReconfigures.set(requestId, {
+      payload,
+      resolve,
+      timer
+    });
 
     try {
       session.relay.postMessage(payload);

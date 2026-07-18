@@ -145,11 +145,14 @@ describe('electron-builder config', () => {
     }
 
     const buildScript = fs.readFileSync(path.join(rootDir, 'scripts/build-electron.js'), 'utf8');
+    const runtimeSmoke = fs.readFileSync(path.join(rootDir, 'scripts/windows-native-capture-smoke.js'), 'utf8');
     const packageIndex = buildScript.indexOf("[electronBuilderCli, '--config'");
     const smokeIndex = buildScript.indexOf("'windows-native-capture-smoke.js'");
     const pruneIndex = buildScript.indexOf("'clean-dist.js'");
     assert.ok(packageIndex >= 0 && smokeIndex > packageIndex && pruneIndex > smokeIndex);
     assert.match(buildScript, /win-unpacked[\s\S]*app\.asar\.unpacked[\s\S]*ScreenCursorCapture\.exe/);
+    assert.match(runtimeSmoke, /native-capture-relay-termination-electron\.js/);
+    assert.match(runtimeSmoke, /VOICE_ROOM_CAPTURE_HELPER:[\s\S]*VOICE_ROOM_CAPTURE_SOURCE:/);
   });
 
   it('packages native capture utility process modules', () => {

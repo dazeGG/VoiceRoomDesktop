@@ -9,12 +9,19 @@ const { describe, it } = require('node:test');
 class FakeRelay extends EventEmitter {
   constructor() {
     super();
+    this.killCalls = 0;
+    this.killResult = true;
     this.messages = [];
     this.pid = 41;
+    this.throwOnKill = false;
     this.throwOnReconfigure = false;
   }
 
-  kill() {}
+  kill() {
+    this.killCalls += 1;
+    if (this.throwOnKill) throw new Error('relay kill failed');
+    return this.killResult;
+  }
 
   postMessage(message) {
     this.messages.push(message);
@@ -32,9 +39,12 @@ function loadCaptureSessionHarness() {
   const originalLoad = Module._load;
   const originalSetTimeout = global.setTimeout;
   const originalClearTimeout = global.clearTimeout;
+  const originalSystemRoot = process.env.SystemRoot;
   const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
   const modulePath = require.resolve('../electron/native/capture');
   const timers = new Set();
+  const treeKills = [];
+  let throwOnTreeKill = false;
   const relay = new FakeRelay();
 
   class FakeMessageChannelMain {
@@ -59,6 +69,24 @@ function loadCaptureSessionHarness() {
     info: () => {},
     warn: () => {}
   };
+  const childProcessMock = {
+    execFile(command, args, options, callback) {
+      if (throwOnTreeKill) throw new Error('taskkill spawn failed');
+      const invocation = {
+        args,
+        callback,
+        command,
+        options,
+        unrefCalls: 0
+      };
+      treeKills.push(invocation);
+      return {
+        unref() {
+          invocation.unrefCalls += 1;
+        }
+      };
+    }
+  };
 
   global.setTimeout = (callback, delay, ...args) => {
     const timer = {
@@ -73,9 +101,11 @@ function loadCaptureSessionHarness() {
     timers.delete(timer);
   };
   delete require.cache[modulePath];
+  process.env.SystemRoot = 'C:\\Windows';
   Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === 'electron') return electronMock;
+    if (request === 'node:child_process') return childProcessMock;
     if (request === 'node:fs') return { ...fs, existsSync: () => true };
     if (request === '../logger') return loggerMock;
     return originalLoad.call(this, request, parent, isMain);
@@ -100,9 +130,15 @@ function loadCaptureSessionHarness() {
       cleanup() {
         nativeCapture.stopNativeCaptureSession();
         relay.emit('message', { code: 0, reason: 'stopped', type: 'exited' });
+        relay.emit('exit', 0);
         Module._load = originalLoad;
         global.setTimeout = originalSetTimeout;
         global.clearTimeout = originalClearTimeout;
+        if (originalSystemRoot === undefined) {
+          delete process.env.SystemRoot;
+        } else {
+          process.env.SystemRoot = originalSystemRoot;
+        }
         Object.defineProperty(process, 'platform', platformDescriptor);
         delete require.cache[modulePath];
       },
@@ -117,12 +153,21 @@ function loadCaptureSessionHarness() {
         return due.length;
       },
       started,
-      timerCount: () => timers.size
+      setTreeKillThrows(value) {
+        throwOnTreeKill = value;
+      },
+      timerCount: () => timers.size,
+      treeKills
     };
   } catch (error) {
     Module._load = originalLoad;
     global.setTimeout = originalSetTimeout;
     global.clearTimeout = originalClearTimeout;
+    if (originalSystemRoot === undefined) {
+      delete process.env.SystemRoot;
+    } else {
+      process.env.SystemRoot = originalSystemRoot;
+    }
     Object.defineProperty(process, 'platform', platformDescriptor);
     delete require.cache[modulePath];
     throw error;
@@ -130,7 +175,7 @@ function loadCaptureSessionHarness() {
 }
 
 describe('native capture reconfigure session failures', { concurrency: false }, () => {
-  it('times out a helper request and ignores a late ACK', async () => {
+  it('fails closed and force-kills an unresponsive relay after the main timeout', async () => {
     const harness = loadCaptureSessionHarness();
     try {
       const resultPromise = harness.nativeCapture.reconfigureNativeCaptureSession({
@@ -142,6 +187,7 @@ describe('native capture reconfigure session failures', { concurrency: false }, 
       assert.equal(request.type, 'reconfigure');
       assert.equal(harness.runTimers(2500), 1);
       assert.deepEqual(await resultPromise, { ok: false, reason: 'reconfigure-timeout' });
+      assert.deepEqual(harness.relay.messages.at(-1), { type: 'stop' });
 
       harness.relay.emit('message', {
         fps: 15,
@@ -151,6 +197,77 @@ describe('native capture reconfigure session failures', { concurrency: false }, 
         requestId: request.requestId,
         type: 'reconfigured'
       });
+      assert.deepEqual(
+        await harness.nativeCapture.reconfigureNativeCaptureSession({ fps: 5 }),
+        { ok: false, reason: 'no-active-session' }
+      );
+      assert.equal(harness.timerCount(), 1, 'the bounded relay force-kill timer remains');
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.relay.killCalls, 0, 'tree enforcement runs before UtilityProcess.kill');
+      assert.deepEqual(harness.treeKills.map(({ args, command, options, unrefCalls }) => ({
+        args,
+        command,
+        options,
+        unrefCalls
+      })), [{
+        args: ['/PID', '41', '/T', '/F'],
+        command: 'C:\\Windows\\System32\\taskkill.exe',
+        options: { timeout: 2000, windowsHide: true },
+        unrefCalls: 1
+      }]);
+      assert.equal(harness.timerCount(), 1, 'relay exit has its own bounded enforcement timer');
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.relay.killCalls, 1);
+      assert.equal(harness.timerCount(), 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('serializes profile transactions and fails closed if a later request times out', async () => {
+    const harness = loadCaptureSessionHarness();
+    try {
+      const firstResultPromise = harness.nativeCapture.reconfigureNativeCaptureSession({
+        fps: 15,
+        maxHeight: 720,
+        maxWidth: 1280
+      });
+      const firstRequest = harness.relay.messages.at(-1);
+
+      assert.deepEqual(
+        await harness.nativeCapture.reconfigureNativeCaptureSession({ fps: 5 }),
+        { ok: false, reason: 'reconfigure-in-progress' }
+      );
+      assert.equal(harness.relay.messages.at(-1), firstRequest);
+
+      harness.relay.emit('message', {
+        fps: 15,
+        maxHeight: 720,
+        maxWidth: 1280,
+        ok: true,
+        requestId: firstRequest.requestId,
+        type: 'reconfigured'
+      });
+      assert.deepEqual(await firstResultPromise, {
+        fps: 15,
+        maxHeight: 720,
+        maxWidth: 1280,
+        ok: true
+      });
+
+      const secondResultPromise = harness.nativeCapture.reconfigureNativeCaptureSession({
+        fps: 5,
+        maxHeight: 540,
+        maxWidth: 960
+      });
+      assert.equal(harness.relay.messages.at(-1).type, 'reconfigure');
+      assert.equal(harness.runTimers(2500), 1);
+      assert.deepEqual(await secondResultPromise, { ok: false, reason: 'reconfigure-timeout' });
+      assert.deepEqual(harness.relay.messages.at(-1), { type: 'stop' });
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.treeKills.length, 1);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.relay.killCalls, 1);
       assert.equal(harness.timerCount(), 0);
     } finally {
       harness.cleanup();
@@ -219,6 +336,8 @@ describe('native capture reconfigure session failures', { concurrency: false }, 
       assert.deepEqual(await resultPromise, { ok: false, reason: 'session-stopped' });
       assert.equal(harness.timerCount(), 1, 'only the force-kill timer remains until relay exit');
       harness.relay.emit('message', { code: 0, reason: 'stopped', type: 'exited' });
+      assert.equal(harness.timerCount(), 1, 'a helper exit message is not relay process exit proof');
+      harness.relay.emit('exit', 0);
       assert.equal(harness.timerCount(), 0);
     } finally {
       harness.cleanup();
@@ -232,6 +351,84 @@ describe('native capture reconfigure session failures', { concurrency: false }, 
       harness.relay.emit('error', new Error('utility process crashed'));
       assert.deepEqual(await resultPromise, { ok: false, reason: 'session-ended' });
       assert.equal(harness.timerCount(), 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('records a rejected UtilityProcess fallback only after tree enforcement', () => {
+    const harness = loadCaptureSessionHarness();
+    try {
+      harness.relay.killResult = false;
+      assert.equal(harness.nativeCapture.stopNativeCaptureSession(harness.started.sessionId), true);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.treeKills.length, 1);
+      assert.deepEqual(harness.treeKills[0].args, ['/PID', '41', '/T', '/F']);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.relay.killCalls, 1);
+      assert.equal(harness.timerCount(), 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('contains a throwing UtilityProcess fallback after tree enforcement', () => {
+    const harness = loadCaptureSessionHarness();
+    try {
+      harness.relay.throwOnKill = true;
+      assert.equal(harness.nativeCapture.stopNativeCaptureSession(harness.started.sessionId), true);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.treeKills.length, 1);
+      assert.deepEqual(harness.treeKills[0].args, ['/PID', '41', '/T', '/F']);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.relay.killCalls, 1);
+      assert.equal(harness.timerCount(), 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('cancels the UtilityProcess fallback when tree enforcement produces relay exit', () => {
+    const harness = loadCaptureSessionHarness();
+    try {
+      assert.equal(harness.nativeCapture.stopNativeCaptureSession(harness.started.sessionId), true);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.treeKills.length, 1);
+      assert.equal(harness.relay.killCalls, 0);
+      assert.equal(harness.timerCount(), 1);
+      harness.relay.emit('exit', 0);
+      assert.equal(harness.timerCount(), 0);
+      assert.equal(harness.treeKills.length, 1);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('falls back to UtilityProcess.kill when taskkill reports an async failure', () => {
+    const harness = loadCaptureSessionHarness();
+    try {
+      assert.equal(harness.nativeCapture.stopNativeCaptureSession(harness.started.sessionId), true);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.treeKills.length, 1);
+      harness.treeKills[0].callback(new Error('access denied'));
+      assert.equal(harness.relay.killCalls, 1);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.relay.killCalls, 1, 'the exit timer does not duplicate the fallback kill');
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('falls back to UtilityProcess.kill when taskkill cannot spawn', () => {
+    const harness = loadCaptureSessionHarness();
+    try {
+      harness.setTreeKillThrows(true);
+      assert.equal(harness.nativeCapture.stopNativeCaptureSession(harness.started.sessionId), true);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.treeKills.length, 0);
+      assert.equal(harness.relay.killCalls, 1);
+      assert.equal(harness.runTimers(2000), 1);
+      assert.equal(harness.relay.killCalls, 1);
     } finally {
       harness.cleanup();
     }

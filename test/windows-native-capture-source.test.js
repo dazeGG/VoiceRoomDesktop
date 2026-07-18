@@ -17,6 +17,14 @@ const geometrySource = fs.readFileSync(
   path.join(__dirname, '..', 'native', 'capture', 'windows', 'CaptureGeometry.h'),
   'utf8'
 );
+const relayTerminationFixtureSource = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'native-capture-relay-termination-electron.js'),
+  'utf8'
+);
+const runtimeSmokeSource = fs.readFileSync(
+  path.join(__dirname, '..', 'scripts', 'windows-native-capture-smoke.js'),
+  'utf8'
+);
 
 describe('Windows native capture helper source contract', () => {
   it('keeps the BGRX fallback within the selected output size', () => {
@@ -130,6 +138,25 @@ describe('Windows native capture helper source contract', () => {
     assert.match(source, /session->ApplyFlowControl\(paused\)/);
     assert.match(source, /if \(emit && !outputPaused_\.load\(\)\)/);
     assert.match(source, /if \(outputPaused_\.load\(\)\) return/);
+  });
+
+  it('stops a paused helper when relay termination closes the command pipe', () => {
+    assert.match(source, /static void RequestStop\(\)[\s\S]*?SetEvent\(g_stopEvent\)/);
+    assert.match(
+      source,
+      /static void StdinCommandLoop\(\)[\s\S]*?while \(g_running && std::getline\(std::cin, line\)\)[\s\S]*?if \(g_running\) RequestStop\(\);/
+    );
+    assert.match(relayTerminationFixtureSource, /state\.frameCount >= 2/);
+    assert.match(relayTerminationFixtureSource, /state\.frameCount !== pausedFrameCount/);
+    assert.match(relayTerminationFixtureSource, /if \(!relay\.kill\(\)\)/);
+    assert.match(relayTerminationFixtureSource, /terminationMode === 'tree-kill'/);
+    assert.match(relayTerminationFixtureSource, /\['\/PID', String\(pid\), '\/T', '\/F'\]/);
+    assert.match(
+      relayTerminationFixtureSource,
+      /!isProcessRunning\(helperPid\)[\s\S]*?'paused native helper exit'/
+    );
+    assert.match(runtimeSmokeSource, /\['relay-kill', 'tree-kill'\]/);
+    assert.match(runtimeSmokeSource, /runRelayTerminationLifecycle\([\s\S]*?terminationMode/);
   });
 
   it('bounds renderer MessagePort frame backlog', () => {

@@ -154,9 +154,13 @@ static std::mutex g_activeSessionMutex;
 static constexpr uint32_t kFrameFlagCursorDrawn = 1u;
 static constexpr uint32_t kFrameFlagFormatNv12 = 1u << 1;
 
-static void HandleSignal(int) {
+static void RequestStop() {
   g_running = false;
   if (g_stopEvent) SetEvent(g_stopEvent);
+}
+
+static void HandleSignal(int) {
+  RequestStop();
 }
 
 static void LogEvent(const char* event, const std::string& message = "") {
@@ -1089,8 +1093,7 @@ class CaptureSession {
 
   void Stop() {
     if (stopped_.exchange(true)) return;
-    g_running = false;
-    if (g_stopEvent) SetEvent(g_stopEvent);
+    RequestStop();
     if (frameCallbackState_) frameCallbackState_->BeginStop();
 
     // Desktop Duplication path: signal already set via g_running; join the loop.
@@ -1117,8 +1120,7 @@ class CaptureSession {
   void SignalRuntimeFailure(const char* message, HRESULT hr = S_OK) {
     if (runtimeFailed_.exchange(true)) return;
     Fail(message, hr);
-    g_running = false;
-    if (g_stopEvent) SetEvent(g_stopEvent);
+    RequestStop();
   }
 
   bool HandleFrameWriteResult(FrameWriteResult result) {
@@ -1128,8 +1130,7 @@ class CaptureSession {
     }
     if (result == FrameWriteResult::kSkipped) return true;
     if (result == FrameWriteResult::kPipeClosed) {
-      g_running = false;
-      if (g_stopEvent) SetEvent(g_stopEvent);
+      RequestStop();
       return false;
     }
 
@@ -1240,8 +1241,7 @@ class CaptureSession {
       FrameCallbackLease callback(callbackState);
       if (!callback) return;
       LogEvent("closed");
-      g_running = false;
-      if (g_stopEvent) SetEvent(g_stopEvent);
+      RequestStop();
     });
     frameArrivedRevoker_ = framePool_.FrameArrived(
         winrt::auto_revoke,
@@ -1509,6 +1509,11 @@ static void StdinCommandLoop() {
       LogReconfigured(requestId, applied.fps, applied.maxWidth, applied.maxHeight);
     }
   }
+
+  // The relay owns this command pipe. EOF means the relay (or its parent) is
+  // gone, so stop even when capture output is paused and no future stdout write
+  // can discover the broken process tree.
+  if (g_running) RequestStop();
 }
 
 static std::wstring ReadStringArg(int argc, wchar_t** argv, const wchar_t* name) {

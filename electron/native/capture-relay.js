@@ -112,6 +112,35 @@ function spawnHelper(session) {
   });
 }
 
+function restartHelperAtCommittedProfile(session, reason) {
+  const child = session?.child;
+  if (!session || session.stopped || !child || child.exitCode !== null) return false;
+  if (session.restartAfterExit === child) return true;
+
+  session.restartAfterExit = child;
+  session.restartReason = reason;
+  try {
+    if (child.kill('SIGKILL') === false) throw new Error('kill returned false');
+    return true;
+  } catch (error) {
+    session.restartAfterExit = null;
+    session.restartReason = '';
+    log('error', 'Native capture helper recovery failed.', {
+      message: String(error?.message || error),
+      reason
+    });
+    postToRenderer(session, { reason: 'recovery-failed', type: 'end' });
+    finishSession(session, 'recovery-failed');
+    return false;
+  }
+}
+
+function recoverCommittedProfile(session, reason) {
+  if (!session || session.stopped) return false;
+  failPendingReconfigures(session, reason);
+  return restartHelperAtCommittedProfile(session, reason);
+}
+
 function writeReconfigureToChild(session, command) {
   const payload = buildReconfigureStdinPayload(session, command);
   const requestId = Number.isInteger(command.requestId) && command.requestId > 0
@@ -124,8 +153,11 @@ function writeReconfigureToChild(session, command) {
     const timer = setTimeout(() => {
       const pending = session.pendingReconfigures.get(requestId);
       if (!pending) return;
-      session.pendingReconfigures.delete(requestId);
-      postParent({ ok: false, reason: 'helper-ack-timeout', requestId, type: 'reconfigured' });
+      // Once the helper misses its ACK deadline, command state is uncertain: it
+      // may still apply the profile after the caller has observed a failure.
+      // Terminate it and restart from the last ACKed profile so failure is a
+      // transactional rollback rather than a silent relay/helper divergence.
+      recoverCommittedProfile(session, 'helper-ack-timeout');
     }, RECONFIGURE_ACK_TIMEOUT_MS);
     timer.unref?.();
     session.pendingReconfigures.set(requestId, { payload, timer });
@@ -295,7 +327,14 @@ function attachChild(session, child) {
     }
     failPendingReconfigures(session, 'helper-exited');
 
-    if (!session.stopped && session.restartPolicy.shouldRestart(code)) {
+    const restartReason = session.restartAfterExit === child ? session.restartReason : '';
+    if (restartReason) {
+      session.restartAfterExit = null;
+      session.restartReason = '';
+    }
+    const shouldRestart = !session.stopped
+      && session.restartPolicy.shouldRestart(restartReason ? null : code);
+    if (shouldRestart) {
       session.frameState = createFrameState();
       session.restarts += 1;
       let nextChild = null;
@@ -306,9 +345,12 @@ function attachChild(session, child) {
       }
 
       if (nextChild) {
-        log('warn', 'Native capture helper crashed; restarting.', {
+        log('warn', restartReason
+          ? 'Native capture helper profile state was uncertain; restarting at the committed profile.'
+          : 'Native capture helper crashed; restarting.', {
           attempt: session.restarts,
           code,
+          reason: restartReason || undefined,
           signal
         });
         attachChild(session, nextChild);
@@ -360,7 +402,9 @@ function startSession(options, port) {
     maxWidth,
     port,
     pendingReconfigures: new Map(),
+    restartAfterExit: null,
     restartPolicy: createRestartPolicy(),
+    restartReason: '',
     restarts: 0,
     sourceId: options.sourceId,
     statsTimer: null,
@@ -401,10 +445,10 @@ function stopSession(session, options = {}) {
   }
 
   const child = session.child;
-  if (child && child.exitCode === null && !child.killed) {
-    child.kill('SIGTERM');
+  if (child && child.exitCode === null) {
+    if (!child.killed) child.kill('SIGTERM');
     session.forceKillTimer = setTimeout(() => {
-      if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+      if (child.exitCode === null) child.kill('SIGKILL');
     }, 2000);
     session.forceKillTimer.unref?.();
   } else {

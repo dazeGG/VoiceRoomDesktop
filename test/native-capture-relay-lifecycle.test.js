@@ -278,7 +278,7 @@ describe('native capture relay child lifecycle', { concurrency: false }, () => {
     }
   });
 
-  it('correlates helper ACKs and reports timeout, exit, and stop failures', () => {
+  it('correlates helper ACKs and rolls an uncertain timeout back before continuing', () => {
     const harness = loadRelayHarness();
     try {
       harness.start();
@@ -326,14 +326,31 @@ describe('native capture relay child lifecycle', { concurrency: false }, () => {
         harness.parentMessages.filter((message) => message.requestId === 20).at(-1),
         { ok: false, reason: 'helper-ack-timeout', requestId: 20, type: 'reconfigured' }
       );
+      assert.deepEqual(harness.children[0].killSignals, ['SIGKILL']);
+
+      // Even if the timed-out helper reports that it applied the request while
+      // termination is in flight, its late ACK cannot change the committed
+      // profile used for the replacement process.
+      harness.children[0].stderr.emit('data', helperAck(20, {
+        fps: 15,
+        maxHeight: 540,
+        maxWidth: 960
+      }));
+      harness.exitChild(0, 0, 'SIGKILL');
+      assert.deepEqual(harness.spawnCalls[1].args, [
+        '--source', 'screen:1:0',
+        '--fps', '15',
+        '--max-height', '720',
+        '--max-width', '1280'
+      ]);
 
       harness.send({ fps: 5, requestId: 30, type: 'reconfigure' });
-      harness.exitChild(0, 1);
+      harness.exitChild(1, 1);
       assert.deepEqual(
         harness.parentMessages.filter((message) => message.requestId === 30).at(-1),
         { ok: false, reason: 'helper-exited', requestId: 30, type: 'reconfigured' }
       );
-      assert.equal(harness.children.length, 2);
+      assert.equal(harness.children.length, 3);
 
       harness.send({ fps: 30, requestId: 40, type: 'reconfigure' });
       harness.send({ type: 'stop' });
@@ -341,6 +358,32 @@ describe('native capture relay child lifecycle', { concurrency: false }, () => {
         harness.parentMessages.filter((message) => message.requestId === 40).at(-1),
         { ok: false, reason: 'session-stopped', requestId: 40, type: 'reconfigured' }
       );
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('escalates an explicit stop if the helper has not exited after SIGTERM', () => {
+    const harness = loadRelayHarness();
+    try {
+      harness.start();
+      harness.send({ type: 'stop' });
+      assert.deepEqual(harness.children[0].killSignals, ['SIGTERM']);
+      assert.equal(harness.runTimeouts(2000), 1);
+      assert.deepEqual(harness.children[0].killSignals, ['SIGTERM', 'SIGKILL']);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('cancels stop escalation when the helper exits after SIGTERM', () => {
+    const harness = loadRelayHarness();
+    try {
+      harness.start();
+      harness.send({ type: 'stop' });
+      harness.exitChild(0, 0, 'SIGTERM');
+      assert.equal(harness.runTimeouts(2000), 0);
+      assert.deepEqual(harness.children[0].killSignals, ['SIGTERM']);
     } finally {
       harness.cleanup();
     }

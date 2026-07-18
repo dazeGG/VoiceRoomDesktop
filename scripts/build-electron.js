@@ -65,6 +65,25 @@ const env = {
 
 run(process.execPath, [electronBuilderCli, '--config', 'electron-builder.config.js', '--publish', 'never', ...targets], { env });
 
+if (process.platform === 'win32' && env.VOICE_ROOM_NATIVE_CAPTURE_SMOKE === '1') {
+  const packagedHelperPath = path.join(
+    rootDir,
+    env.VOICE_ROOM_DIST_DIR || 'dist',
+    'win-unpacked',
+    'resources',
+    'app.asar.unpacked',
+    'native',
+    'bin',
+    'windows',
+    'ScreenCursorCapture.exe'
+  );
+  run(process.execPath, [
+    path.join(rootDir, 'scripts', 'windows-native-capture-smoke.js'),
+    '--helper',
+    packagedHelperPath
+  ], { env });
+}
+
 // Prune intermediate build output (unpacked app dirs, helper binaries, debug
 // files) down to the publishable artifacts. clean-dist reads VOICE_ROOM_DIST_DIR
 // and VOICE_ROOM_DEV_BUILD from env, so it handles both dev and stable output.

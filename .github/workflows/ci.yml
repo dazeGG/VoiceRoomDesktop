@@ -35,11 +35,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Check syntax
         run: npm run check
 
       - name: Run tests
-        run: npm test
+        run: xvfb-run -a npm test
 
   build-mac:
     name: Build macOS release artifacts
@@ -60,6 +63,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run production Electron capture bridge smoke
+        run: node --test test/electron-message-port.test.js
 
       - name: Build macOS app
         run: npm run build:mac
@@ -82,6 +88,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     env:
+      VOICE_ROOM_NATIVE_CAPTURE_SMOKE: '1'
       VOICE_ROOM_URL: ${{ vars.VOICE_ROOM_URL || 'https://voiceroom.ru' }}
     steps:
       - name: Checkout
@@ -100,6 +107,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run production Electron capture bridge smoke
+        run: node --test test/electron-message-port.test.js
 
       - name: Build Windows app
         run: npm run build:win

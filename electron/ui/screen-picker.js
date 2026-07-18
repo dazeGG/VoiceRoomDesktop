@@ -273,6 +273,7 @@ function updateSourceSelection() {
     const selected = sourceId === state.selectedSourceId;
     button.setAttribute('aria-pressed', String(selected));
     button.tabIndex = selected ? 0 : -1;
+    syncSourceCheck(button, selected);
   }
 
   elements.startButton.disabled = !state.selectedSourceId;
@@ -345,7 +346,49 @@ function syncSourceLabel(button, source) {
     label.className = 'screen-source-label';
     button.append(label);
   }
-  label.textContent = source.name;
+  const icon = source.appIcon
+    ? createSourceAppIcon(source)
+    : createLucidePlaceholder(source.type === 'screen' ? 'monitor' : 'app-window', 'sm');
+  const name = document.createElement('span');
+  name.textContent = source.name;
+  label.replaceChildren(icon, name);
+  renderPickerIcons(label);
+}
+
+function syncSourceCheck(button, selected) {
+  const preview = button.querySelector('.screen-source-preview');
+  const current = preview?.querySelector('.screen-source-check');
+  if (!selected) {
+    current?.remove();
+    return;
+  }
+  if (current || !preview) return;
+
+  const check = document.createElement('span');
+  check.className = 'screen-source-check';
+  check.setAttribute('aria-hidden', 'true');
+  check.append(createLucidePlaceholder('check', 'xs'));
+  preview.append(check);
+  renderPickerIcons(check);
+}
+
+function createSourceAppIcon(source) {
+  const image = document.createElement('img');
+  image.alt = '';
+  image.src = source.appIcon;
+  return image;
+}
+
+function createLucidePlaceholder(name, size) {
+  const icon = document.createElement('i');
+  icon.dataset.lucide = name;
+  icon.dataset.iconSize = size;
+  icon.setAttribute('aria-hidden', 'true');
+  return icon;
+}
+
+function renderPickerIcons(root) {
+  window.voiceRoomPickerIcons?.render(root);
 }
 
 function updateGridColumnCount() {

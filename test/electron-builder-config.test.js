@@ -93,6 +93,13 @@ function collectUtilityProcessForkTargets(sourceFile) {
   return targets;
 }
 
+function getWorkflowJob(workflow, jobName) {
+  const escapedName = jobName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = workflow.match(new RegExp(`(?:^|\\n)  ${escapedName}:\\n([\\s\\S]*?)(?=\\n  [a-z0-9-]+:\\n|$)`));
+  assert.ok(match, `Missing workflow job: ${jobName}`);
+  return match[1];
+}
+
 describe('electron-builder config', () => {
   it('does not pair unsigned macOS artifacts with Electron 42 notifications', () => {
     const electronVersion = packageJson.devDependencies.electron.replace(/^[^0-9]*/, '');
@@ -118,6 +125,34 @@ describe('electron-builder config', () => {
         `${workflowPath} must build macOS artifacts on the Intel runner.`
       );
     }
+  });
+
+  it('runs the packaged Windows native capture runtime smoke before pruning build output', () => {
+    for (const workflowPath of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/release.yml'
+    ]) {
+      const workflow = fs.readFileSync(path.join(rootDir, workflowPath), 'utf8');
+      const macJob = getWorkflowJob(workflow, 'build-mac');
+      const windowsJob = getWorkflowJob(workflow, 'build-windows');
+      assert.match(
+        windowsJob,
+        /VOICE_ROOM_NATIVE_CAPTURE_SMOKE:\s*'1'/,
+        `${workflowPath} must enable the runtime smoke inside build-windows.`
+      );
+      assert.match(macJob, /node --test test\/electron-message-port\.test\.js/);
+      assert.match(windowsJob, /node --test test\/electron-message-port\.test\.js/);
+    }
+
+    const buildScript = fs.readFileSync(path.join(rootDir, 'scripts/build-electron.js'), 'utf8');
+    const runtimeSmoke = fs.readFileSync(path.join(rootDir, 'scripts/windows-native-capture-smoke.js'), 'utf8');
+    const packageIndex = buildScript.indexOf("[electronBuilderCli, '--config'");
+    const smokeIndex = buildScript.indexOf("'windows-native-capture-smoke.js'");
+    const pruneIndex = buildScript.indexOf("'clean-dist.js'");
+    assert.ok(packageIndex >= 0 && smokeIndex > packageIndex && pruneIndex > smokeIndex);
+    assert.match(buildScript, /win-unpacked[\s\S]*app\.asar\.unpacked[\s\S]*ScreenCursorCapture\.exe/);
+    assert.match(runtimeSmoke, /native-capture-relay-termination-electron\.js/);
+    assert.match(runtimeSmoke, /VOICE_ROOM_CAPTURE_HELPER:[\s\S]*VOICE_ROOM_CAPTURE_SOURCE:/);
   });
 
   it('packages native capture utility process modules', () => {

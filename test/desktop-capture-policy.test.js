@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 const {
   createScreenProfileId,
   getScreenQualityMaxHeight,
+  getScreenQualityMaxWidth,
   normalizeDesktopAudioCapture,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,
@@ -118,6 +119,14 @@ describe('picker profile normalization', () => {
     assert.equal(getScreenQualityMaxHeight('high'), 1080);
     assert.equal(getScreenQualityMaxHeight('source'), 16384);
     assert.equal(getScreenQualityMaxHeight('native'), 720);
+  });
+
+  it('maps quality profiles to max capture widths', () => {
+    assert.equal(getScreenQualityMaxWidth('low'), 960);
+    assert.equal(getScreenQualityMaxWidth('balanced'), 1280);
+    assert.equal(getScreenQualityMaxWidth('high'), 1920);
+    assert.equal(getScreenQualityMaxWidth('source'), 16384);
+    assert.equal(getScreenQualityMaxWidth('native'), 1280);
   });
 
   it('normalizes picker selection', () => {

@@ -36,10 +36,10 @@ function getNativeCaptureInjectScript() {
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
       };
-      const timer = setTimeout(() => {
+      const fail = (error) => {
         cleanup();
-        reject(new Error('Native capture port timed out.'));
-      }, timeoutMs);
+        reject(error);
+      };
       const onMessage = (event) => {
         if (event.source !== window) return;
         if (event.data?.type !== PORT_MESSAGE_TYPE || event.data.sessionId !== sessionId) return;
@@ -49,7 +49,17 @@ function getNativeCaptureInjectScript() {
         cleanup();
         resolve(port);
       };
+      const timer = setTimeout(() => {
+        fail(new Error('Native capture port timed out.'));
+      }, timeoutMs);
       window.addEventListener('message', onMessage);
+      try {
+        if (bridge.requestPort?.(sessionId) !== true) {
+          fail(new Error('Native capture port is unavailable.'));
+        }
+      } catch (error) {
+        fail(error);
+      }
     });
 
     const createNativeVideoTrack = (port, sessionId) => {
@@ -63,6 +73,7 @@ function getNativeCaptureInjectScript() {
       let sawFrame = false;
       let epochOffsetUs = null;
       let lastRelayStats = null;
+      let pixelFormat;
       const counters = {
         framesDroppedBackpressure: 0,
         framesDroppedCreate: 0,
@@ -72,9 +83,15 @@ function getNativeCaptureInjectScript() {
 
       window.__voiceRoomNativeCaptureStats = () => ({
         ...counters,
+        pixelFormat,
         relay: lastRelayStats,
         sessionId
       });
+
+      const normalizePixelFormat = (value) => {
+        const normalized = String(value || '').toUpperCase();
+        return normalized === 'NV12' || normalized === 'BGRX' ? normalized : undefined;
+      };
 
       const normalizeFrameData = (data) => {
         if (data instanceof ArrayBuffer) return data;
@@ -105,23 +122,46 @@ function getNativeCaptureInjectScript() {
           lastRelayStats = message;
           return;
         }
+        if (message.type === 'format') {
+          const nextPixelFormat = normalizePixelFormat(message.pixelFormat);
+          if (nextPixelFormat) pixelFormat = nextPixelFormat;
+          return;
+        }
         if (message.type !== 'frame' || !message.data) return;
+        let frameAcked = false;
+        const ackFrame = () => {
+          if (frameAcked) return;
+          frameAcked = true;
+          try { port.postMessage({ type: 'frame-ack' }); } catch {}
+        };
         counters.framesReceived += 1;
         if (generator.readyState === 'ended') {
+          ackFrame();
           stop();
           return;
         }
-        // The encoder is behind: drop the frame instead of queueing memory.
+        // The generator is behind: drop this frame, but hold the relay slot
+        // until its writable queue is ready again. That pause propagates across
+        // the MessagePort and helper stdin so raw GPU readback/IPC work does not
+        // continue at full speed while the renderer cannot accept frames.
         if (writer.desiredSize !== null && writer.desiredSize <= 0) {
           counters.framesDroppedBackpressure += 1;
+          writer.ready.then(ackFrame).catch(() => {
+            ackFrame();
+            stop();
+          });
           return;
         }
 
         let frame = null;
         try {
           const data = normalizeFrameData(message.data);
-          if (!data) return;
-          const format = message.format === 'NV12' ? 'NV12' : 'BGRX';
+          if (!data) {
+            ackFrame();
+            return;
+          }
+          const format = normalizePixelFormat(message.format) || 'BGRX';
+          pixelFormat = format;
           // Prefer the helper's own capture timestamp over "now": the pipe/
           // utility-process/MessagePort hop between capture and here adds
           // scheduling jitter that would otherwise leak into encoder pacing.
@@ -158,14 +198,26 @@ function getNativeCaptureInjectScript() {
           frame = new VideoFrame(data, init);
         } catch {
           counters.framesDroppedCreate += 1;
+          ackFrame();
           return;
         }
-        sawFrame = true;
-        counters.framesWritten += 1;
-        writer.write(frame).catch(() => {
+        try {
+          writer.write(frame).then(() => {
+            if (!closed) {
+              counters.framesWritten += 1;
+              sawFrame = true;
+            }
+            ackFrame();
+          }).catch(() => {
+            ackFrame();
+            try { frame.close(); } catch {}
+            stop();
+          });
+        } catch {
+          ackFrame();
           try { frame.close(); } catch {}
           stop();
-        });
+        }
       };
       port.start?.();
 
@@ -179,10 +231,13 @@ function getNativeCaptureInjectScript() {
       const waitForFirstFrame = (timeoutMs) => new Promise((resolve, reject) => {
         const startedAt = performance.now();
         const poll = setInterval(() => {
-          if (sawFrame) {
+          if (closed) {
+            clearInterval(poll);
+            reject(new Error('Native capture stopped before producing a writable frame.'));
+          } else if (sawFrame) {
             clearInterval(poll);
             resolve();
-          } else if (closed || performance.now() - startedAt > timeoutMs) {
+          } else if (performance.now() - startedAt > timeoutMs) {
             clearInterval(poll);
             reject(new Error('Native capture produced no frames.'));
           }

@@ -1,6 +1,6 @@
 'use strict';
 
-const NATIVE_CAPTURE_PROTOCOL_VERSION = 1;
+const NATIVE_CAPTURE_PROTOCOL_VERSION = 2;
 const NATIVE_CAPTURE_PORT_MESSAGE_TYPE = 'voice-room-native-capture-port';
 
 function hasChromiumAudioRequest(constraints) {
@@ -26,19 +26,23 @@ function normalizeReconfigureCommand(message) {
   const fps = Number.isInteger(message.fps) && message.fps > 0 && message.fps <= 60
     ? message.fps
     : null;
-  const maxHeight = Number.isInteger(message.maxHeight) && message.maxHeight > 0 && message.maxHeight <= 16384
+  const maxHeight = Number.isInteger(message.maxHeight) && message.maxHeight >= 2 && message.maxHeight <= 16384
     ? message.maxHeight
     : null;
+  const maxWidth = Number.isInteger(message.maxWidth) && message.maxWidth >= 2 && message.maxWidth <= 16384
+    ? message.maxWidth
+    : null;
 
-  if (fps === null && maxHeight === null) return null;
-  return { fps, maxHeight };
+  if (fps === null && maxHeight === null && maxWidth === null) return null;
+  return { fps, maxHeight, maxWidth };
 }
 
 function buildReconfigureStdinPayload(session, command) {
   return {
     cmd: 'reconfigure',
     fps: command.fps ?? session.fps,
-    maxHeight: command.maxHeight ?? session.maxHeight
+    maxHeight: command.maxHeight ?? session.maxHeight,
+    maxWidth: command.maxWidth ?? session.maxWidth
   };
 }
 

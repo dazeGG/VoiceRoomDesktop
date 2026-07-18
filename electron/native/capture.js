@@ -1,6 +1,8 @@
 'use strict';
 
 const { app, MessageChannelMain, utilityProcess } = require('electron');
+const { execFile } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -8,9 +10,13 @@ const log = require('../logger');
 const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('./capture-contract');
 
 const PORT_CHANNEL = 'native-capture:port';
+const RECONFIGURE_TIMEOUT_MS = 2500;
+const RELAY_EXIT_TIMEOUT_MS = 2000;
+const RELAY_STOP_TIMEOUT_MS = 2000;
+const TREE_KILL_TIMEOUT_MS = 2000;
 
 let activeSession = null;
-let nextSessionId = 1;
+let nextReconfigureRequestId = 1;
 
 app.on('before-quit', () => {
   stopNativeCaptureSession();
@@ -70,11 +76,14 @@ function startNativeCaptureSession(webContents, options = {}) {
 
   const helperPath = findScreenCursorCaptureHelper().path;
   const fps = Number.isInteger(options.fps) && options.fps > 0 && options.fps <= 60 ? options.fps : 30;
-  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
+  const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight >= 2 && options.maxHeight <= 16384
     ? options.maxHeight
     : 1080;
+  const maxWidth = Number.isInteger(options.maxWidth) && options.maxWidth >= 2 && options.maxWidth <= 16384
+    ? options.maxWidth
+    : 1920;
   const qualityId = String(options.qualityId || 'balanced');
-  const sessionId = String(nextSessionId++);
+  const sessionId = randomUUID();
   const { port1, port2 } = new MessageChannelMain();
   let relay = null;
   try {
@@ -94,8 +103,13 @@ function startNativeCaptureSession(webContents, options = {}) {
   const session = {
     forceKillTimer: null,
     id: sessionId,
+    pendingReconfigures: new Map(),
     relay,
+    relayExited: false,
+    relayExitTimer: null,
+    relayKillStarted: false,
     stopped: false,
+    treeKillStarted: false,
     webContents,
     webContentsDestroyedListener: null
   };
@@ -126,6 +140,8 @@ function startNativeCaptureSession(webContents, options = {}) {
         });
       }
       cleanupSession(session);
+    } else if (message?.type === 'reconfigured') {
+      finishReconfigureRequest(session, message);
     }
   });
 
@@ -140,7 +156,7 @@ function startNativeCaptureSession(webContents, options = {}) {
     if (activeSession === session && !session.stopped && code !== 0 && code !== null) {
       log.warn('Native capture relay process exited:', { code, sessionId });
     }
-    cleanupSession(session);
+    cleanupSession(session, { relayExited: true });
   });
 
   try {
@@ -148,15 +164,15 @@ function startNativeCaptureSession(webContents, options = {}) {
       fps,
       helperPath,
       maxHeight,
+      maxWidth,
       protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
       qualityId,
       sourceId,
       type: 'start'
     }, [port1]);
-    // Return the IPC session descriptor before the DOM MessagePort is delivered.
-    // The injected getDisplayMedia wrapper installs its waitForPort listener
-    // after the invoke() promise resolves; posting on the next tick avoids a
-    // rare lost-port race while keeping the existing one-call bridge contract.
+    // The isolated preload buffers this port until the main-world wrapper has
+    // installed a listener and requests this unguessable session id. Keep the
+    // next-turn delivery as the common fast path, but not as an ordering guard.
     setImmediate(() => {
       if (activeSession !== session || session.stopped) {
         try {
@@ -180,7 +196,16 @@ function startNativeCaptureSession(webContents, options = {}) {
     return { ok: false, reason: 'spawn-error' };
   }
 
-  return { fps, maxHeight, ok: true, protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, qualityId, sessionId, sourceId };
+  return {
+    fps,
+    maxHeight,
+    maxWidth,
+    ok: true,
+    protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+    qualityId,
+    sessionId,
+    sourceId
+  };
 }
 
 function stopNativeCaptureSession(sessionId = '') {
@@ -190,6 +215,7 @@ function stopNativeCaptureSession(sessionId = '') {
 
   activeSession = null;
   session.stopped = true;
+  failReconfigureRequests(session, 'session-stopped');
 
   if (session.webContentsDestroyedListener && !session.webContents.isDestroyed()) {
     session.webContents.removeListener('destroyed', session.webContentsDestroyedListener);
@@ -201,29 +227,147 @@ function stopNativeCaptureSession(sessionId = '') {
   }
 
   session.forceKillTimer = setTimeout(() => {
-    try {
-      if (session.relay.pid) session.relay.kill();
-    } catch {
-      // The relay may have exited between the timer check and kill.
+    session.forceKillTimer = null;
+    const relayPid = session.relay.pid;
+    // Kill the process tree while the relay is still the live root. Killing the
+    // UtilityProcess first can orphan a helper that is stuck inside a command
+    // and therefore cannot observe stdin EOF.
+    if (!forceKillRelayTree(session, relayPid, 'stop-timeout')) {
+      killRelay(session, relayPid, 'tree-kill-unavailable');
     }
-  }, 2000);
+
+    // taskkill itself is bounded, but also require Electron's actual relay exit
+    // event. UtilityProcess.kill() is a last fallback, never the first action.
+    session.relayExitTimer = setTimeout(() => {
+      session.relayExitTimer = null;
+      if (!session.relayExited && session.relay.pid === relayPid) {
+        killRelay(session, relayPid, 'tree-kill-exit-timeout');
+      }
+    }, RELAY_EXIT_TIMEOUT_MS);
+    session.relayExitTimer.unref?.();
+  }, RELAY_STOP_TIMEOUT_MS);
   session.forceKillTimer.unref?.();
   return true;
 }
 
-function cleanupSession(session) {
+function forceKillRelayTree(session, relayPid, reason) {
+  if (session.treeKillStarted || !Number.isInteger(relayPid) || relayPid <= 0) {
+    if (!session.relayExited && !session.treeKillStarted) {
+      log.error('Native capture relay tree kill could not start.', {
+        pid: relayPid,
+        reason,
+        sessionId: session.id
+      });
+    }
+    return false;
+  }
+
+  session.treeKillStarted = true;
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  const taskkillPath = path.win32.join(systemRoot, 'System32', 'taskkill.exe');
+  try {
+    const taskkill = execFile(taskkillPath, ['/PID', String(relayPid), '/T', '/F'], {
+      timeout: TREE_KILL_TIMEOUT_MS,
+      windowsHide: true
+    }, (error) => {
+      if (error && !session.relayExited) {
+        log.error('Native capture relay tree kill failed.', {
+          message: String(error?.message || error),
+          pid: relayPid,
+          reason,
+          sessionId: session.id
+        });
+        killRelay(session, relayPid, 'tree-kill-failed');
+      }
+    });
+    taskkill.unref?.();
+  } catch (error) {
+    log.error('Native capture relay tree kill could not spawn.', {
+      message: String(error?.message || error),
+      pid: relayPid,
+      reason,
+      sessionId: session.id
+    });
+    return false;
+  }
+  return true;
+}
+
+function killRelay(session, relayPid, reason) {
+  if (session.relayExited || session.relayKillStarted) return false;
+  session.relayKillStarted = true;
+  let killAccepted = false;
+  try {
+    if (relayPid && session.relay.pid === relayPid) {
+      killAccepted = session.relay.kill();
+    }
+  } catch (error) {
+    log.error('Native capture relay fallback kill threw.', {
+      message: String(error?.message || error),
+      pid: relayPid,
+      reason,
+      sessionId: session.id
+    });
+    return false;
+  }
+  if (!killAccepted) {
+    log.error('Native capture relay fallback kill was rejected.', {
+      pid: relayPid,
+      reason,
+      sessionId: session.id
+    });
+  }
+  return killAccepted;
+}
+
+function cleanupSession(session, { relayExited = false } = {}) {
   if (activeSession === session) activeSession = null;
   session.stopped = true;
-  if (session.forceKillTimer) {
-    clearTimeout(session.forceKillTimer);
-    session.forceKillTimer = null;
+  if (relayExited) session.relayExited = true;
+  failReconfigureRequests(session, 'session-ended');
+  if (session.relayExited) {
+    if (session.forceKillTimer) {
+      clearTimeout(session.forceKillTimer);
+      session.forceKillTimer = null;
+    }
+    if (session.relayExitTimer) {
+      clearTimeout(session.relayExitTimer);
+      session.relayExitTimer = null;
+    }
   }
   if (session.webContentsDestroyedListener && !session.webContents.isDestroyed()) {
     session.webContents.removeListener('destroyed', session.webContentsDestroyedListener);
   }
 }
 
-function reconfigureNativeCaptureSession({ fps, maxHeight } = {}) {
+function finishReconfigureRequest(session, message) {
+  const requestId = Number(message?.requestId);
+  const pending = Number.isInteger(requestId) ? session.pendingReconfigures.get(requestId) : null;
+  if (!pending) return false;
+
+  clearTimeout(pending.timer);
+  session.pendingReconfigures.delete(requestId);
+  pending.resolve(message.ok
+    ? {
+        fps: Number(message.fps) || pending.payload.fps,
+        maxHeight: Number(message.maxHeight) || pending.payload.maxHeight,
+        maxWidth: Number(message.maxWidth) || pending.payload.maxWidth,
+        ok: true
+      }
+    : { ok: false, reason: message.reason || 'reconfigure-failed' });
+  return true;
+}
+
+function failReconfigureRequests(session, reason) {
+  if (!session?.pendingReconfigures) return;
+  for (const pending of session.pendingReconfigures.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({ ok: false, reason });
+  }
+  session.pendingReconfigures.clear();
+}
+
+async function reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth } = {}) {
   const session = activeSession;
   if (!session || session.stopped) {
     return { ok: false, reason: 'no-active-session' };
@@ -231,22 +375,47 @@ function reconfigureNativeCaptureSession({ fps, maxHeight } = {}) {
 
   const payload = { type: 'reconfigure' };
   if (Number.isInteger(fps) && fps > 0 && fps <= 60) payload.fps = fps;
-  if (Number.isInteger(maxHeight) && maxHeight > 0 && maxHeight <= 16384) payload.maxHeight = maxHeight;
-  if (!payload.fps && !payload.maxHeight) {
+  if (Number.isInteger(maxHeight) && maxHeight >= 2 && maxHeight <= 16384) payload.maxHeight = maxHeight;
+  if (Number.isInteger(maxWidth) && maxWidth >= 2 && maxWidth <= 16384) payload.maxWidth = maxWidth;
+  if (!payload.fps && !payload.maxHeight && !payload.maxWidth) {
     return { ok: false, reason: 'bad-profile' };
   }
-
-  try {
-    session.relay.postMessage(payload);
-  } catch {
-    return { ok: false, reason: 'relay-unavailable' };
+  if (session.pendingReconfigures.size > 0) {
+    // Preserve one committed baseline per transaction. A timeout can then
+    // always roll the helper back without undoing another request that the
+    // caller already observed as successful.
+    return { ok: false, reason: 'reconfigure-in-progress' };
   }
 
-  return {
-    fps: payload.fps,
-    maxHeight: payload.maxHeight,
-    ok: true
-  };
+  const requestId = nextReconfigureRequestId++;
+  payload.requestId = requestId;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      const pending = session.pendingReconfigures.get(requestId);
+      if (!pending) return;
+      session.pendingReconfigures.delete(requestId);
+      // This watchdog only wins when the relay did not complete its own
+      // shorter timeout/restart transaction. Treat that as an unresponsive
+      // relay and fail closed: stopping the utility process closes the helper
+      // pipes, while the session force-kill timer bounds relay shutdown.
+      stopNativeCaptureSession(session.id);
+      resolve({ ok: false, reason: 'reconfigure-timeout' });
+    }, RECONFIGURE_TIMEOUT_MS);
+    timer.unref?.();
+    session.pendingReconfigures.set(requestId, {
+      payload,
+      resolve,
+      timer
+    });
+
+    try {
+      session.relay.postMessage(payload);
+    } catch {
+      clearTimeout(timer);
+      session.pendingReconfigures.delete(requestId);
+      resolve({ ok: false, reason: 'relay-unavailable' });
+    }
+  });
 }
 
 module.exports = {

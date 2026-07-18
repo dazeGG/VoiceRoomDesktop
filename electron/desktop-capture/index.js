@@ -4,6 +4,7 @@ const { BrowserWindow, ipcMain } = require('electron');
 const {
   createScreenProfileId,
   getScreenQualityMaxHeight,
+  getScreenQualityMaxWidth,
   normalizeApplyProfileRequest,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,
@@ -94,6 +95,7 @@ function configureDesktopCaptureIpc() {
       audioCapture,
       fpsId: selection.fpsId,
       maxHeight: getScreenQualityMaxHeight(selection.qualityId),
+      maxWidth: getScreenQualityMaxWidth(selection.qualityId),
       ok: true,
       profileId: createScreenProfileId(selection.qualityId, selection.fpsId),
       qualityId: selection.qualityId,
@@ -120,6 +122,7 @@ function configureDesktopCaptureIpc() {
       audioCapture,
       fpsId: normalizeScreenFpsId(normalizedCaptureOptions.fpsId),
       maxHeight: getScreenQualityMaxHeight(qualityId),
+      maxWidth: getScreenQualityMaxWidth(qualityId),
       ok: true,
       qualityId
     };
@@ -151,6 +154,7 @@ function configureDesktopCaptureIpc() {
       return startNativeCaptureSession(event.sender, {
         fps: pending.fps,
         maxHeight: pending.maxHeight,
+        maxWidth: pending.maxWidth,
         qualityId: pending.qualityId,
         sourceId: pending.source.id
       });
@@ -181,6 +185,7 @@ function configureDesktopCaptureIpc() {
       return startNativeCaptureSession(event.sender, {
         fps: granted.fps,
         maxHeight: granted.maxHeight,
+        maxWidth: granted.maxWidth,
         qualityId: granted.qualityId,
         sourceId: granted.sourceId
       });
@@ -203,13 +208,14 @@ function configureDesktopCaptureIpc() {
       throw new Error('Desktop capture is only available for the configured Voice Room URL.');
     }
 
-    const { fps, fpsId, maxHeight, qualityId } = normalizeApplyProfileRequest(options);
-    const result = reconfigureNativeCaptureSession({ fps, maxHeight });
+    const { fps, fpsId, maxHeight, maxWidth, qualityId } = normalizeApplyProfileRequest(options);
+    const result = await reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth });
 
     if (!result.ok) {
       return {
         fpsId,
         maxHeight,
+        maxWidth,
         ok: false,
         qualityId,
         reason: result.reason || 'reconfigure-failed'
@@ -219,6 +225,7 @@ function configureDesktopCaptureIpc() {
     return {
       fpsId,
       maxHeight,
+      maxWidth,
       ok: true,
       qualityId
     };

@@ -98,7 +98,6 @@ module.exports = {
     category: 'public.app-category.social-networking',
     hardenedRuntime: false,
     icon: 'assets/logo/icon.icns',
-    identity: null,
     target: isDevBuild
       ? [
           {

@@ -11,7 +11,6 @@ const {
   normalizeScreenQualityId
 } = require('../policies/desktop-capture');
 const {
-  assertMacScreenCaptureAccess,
   createMacScreenCaptureAccessError,
   getFrameScopeKey,
   isTrustedFrame,
@@ -121,8 +120,6 @@ function takeGrantedDesktopCapture(frame) {
 }
 
 async function getDesktopCaptureSources() {
-  assertMacScreenCaptureAccess();
-
   const sources = await desktopCapturer
     .getSources({
       fetchWindowIcons: true,

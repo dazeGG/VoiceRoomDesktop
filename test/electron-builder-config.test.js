@@ -101,6 +101,10 @@ function getWorkflowJob(workflow, jobName) {
 }
 
 describe('electron-builder config', () => {
+  it('does not disable macOS signing when a release certificate is available', () => {
+    assert.equal(Object.hasOwn(builderConfig.mac, 'identity'), false);
+  });
+
   it('does not pair unsigned macOS artifacts with Electron 42 notifications', () => {
     const electronVersion = packageJson.devDependencies.electron.replace(/^[^0-9]*/, '');
     const electronMajor = Number.parseInt(electronVersion.split('.')[0], 10);

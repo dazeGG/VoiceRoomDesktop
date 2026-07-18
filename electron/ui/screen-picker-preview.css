@@ -237,12 +237,44 @@ h1 {
   object-fit: cover;
 }
 
+.screen-source-check {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--control-active);
+  color: var(--paper-deep);
+}
+
 .screen-source-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  overflow: hidden;
   color: var(--ink-strong);
   font-size: 0.86rem;
   font-weight: 800;
+}
+
+.screen-source-label img {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.screen-source-label svg {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+}
+
+.screen-source-label > span {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

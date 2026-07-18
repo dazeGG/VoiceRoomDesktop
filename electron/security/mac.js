@@ -72,6 +72,7 @@ function createMacScreenCaptureAccessError(cause) {
       'macOS не дала приложению доступ к записи экрана.',
       `Статус Screen Recording: ${status}.`,
       `Откройте System Settings -> Privacy & Security -> Screen & System Audio Recording и включите ${appName}.${devHint}`,
+      'Если переключатель уже включён, удалите старую запись приложения кнопкой «−» и добавьте текущее приложение кнопкой «+».',
       'После изменения полностью закройте и снова откройте приложение.'
     ].join('\n') + causeText
   );
@@ -90,18 +91,7 @@ function openMacScreenCaptureSettings(options = {}) {
 }
 openMacScreenCaptureSettings.lastOpenAt = 0;
 
-function assertMacScreenCaptureAccess() {
-  if (process.platform !== 'darwin') return;
-
-  const status = getMacScreenCaptureStatus();
-  if (status === 'granted' || status === 'unknown') return;
-
-  openMacScreenCaptureSettings();
-  throw createMacScreenCaptureAccessError();
-}
-
 module.exports = {
-  assertMacScreenCaptureAccess,
   createMacScreenCaptureAccessError,
   ensureMacMicrophoneAccess,
   getMacMicrophoneAccessStatus,

@@ -24,6 +24,7 @@ static bool Expect(uint32_t sourceWidth,
 int main() {
   bool ok = true;
   ok &= Expect(3440, 1440, 1920, 1080, 1920, 804);
+  ok &= Expect(3440, 1440, 1280, 720, 1280, 536);
   ok &= Expect(2560, 1080, 1920, 1080, 1920, 810);
   ok &= Expect(1920, 1200, 1920, 1080, 1728, 1080);
   ok &= Expect(1280, 720, 1920, 1080, 1280, 720);

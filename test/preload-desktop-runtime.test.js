@@ -73,6 +73,7 @@ test('preload installs desktop markers without native capture contract modules',
   assert.equal(runtime.version, '1.2.3-test');
   assert.equal(exposed.get('voiceRoomDesktop'), runtime);
   assert.equal(typeof exposed.get('voiceRoomNativeCaptureBridge')?.prepare, 'function');
+  assert.equal(typeof exposed.get('voiceRoomNativeCaptureBridge')?.requestPort, 'function');
   assert.equal(typeof listeners.get('native-capture:port'), 'function');
 
   const notifications = exposed.get('voiceRoomDesktopNotifications');
@@ -115,6 +116,154 @@ test('preload installs desktop markers without native capture contract modules',
   }
 });
 
+test('preload bounds and correlates native capture port handoff', () => {
+  const preloadPath = path.join(__dirname, '..', 'electron', 'preload.js');
+  const source = fs.readFileSync(preloadPath, 'utf8');
+  const exposed = new Map();
+  const listeners = new Map();
+  const posted = [];
+  const timers = new Map();
+  let nextTimerId = 1;
+  const context = {
+    clearTimeout(timerId) {
+      timers.delete(timerId);
+    },
+    console,
+    document: {
+      documentElement: {
+        classList: { add() {} },
+        dataset: {}
+      }
+    },
+    navigator: {},
+    process: { argv: ['electron'], platform: 'win32' },
+    require(request) {
+      if (request !== 'electron') throw new Error(`unexpected require: ${request}`);
+      return {
+        contextBridge: {
+          exposeInMainWorld(name, value) {
+            exposed.set(name, value);
+          }
+        },
+        ipcRenderer: {
+          invoke: async () => ({ ok: true }),
+          on(channel, listener) {
+            listeners.set(channel, listener);
+          },
+          removeListener() {}
+        }
+      };
+    },
+    setTimeout(callback) {
+      const timerId = nextTimerId++;
+      timers.set(timerId, callback);
+      return timerId;
+    },
+    window: {
+      addEventListener() {},
+      location: { origin: 'https://voice.example' },
+      postMessage(message, targetOrigin, ports) {
+        posted.push({ message, ports, targetOrigin });
+      }
+    }
+  };
+  context.globalThis = context;
+
+  vm.runInNewContext(source, context, { filename: preloadPath });
+
+  const bridge = exposed.get('voiceRoomNativeCaptureBridge');
+  const deliverPort = listeners.get('native-capture:port');
+  const { NATIVE_CAPTURE_PROTOCOL_VERSION } = require('../electron/native/capture-contract');
+  const sessionId = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
+  const createPort = () => ({
+    closed: 0,
+    close() { this.closed += 1; }
+  });
+  const deliver = (id, port, extraPorts = []) => deliverPort(
+    { ports: [port, ...extraPorts] },
+    { protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, sessionId: id }
+  );
+  const runTimer = (timerId) => {
+    const callback = timers.get(timerId);
+    assert.equal(typeof callback, 'function');
+    timers.delete(timerId);
+    callback();
+  };
+
+  const earlyPort = createPort();
+  deliver(sessionId(1), earlyPort);
+  assert.equal(posted.length, 0);
+  assert.equal(bridge.requestPort(sessionId(1)), true);
+  assert.equal(posted.at(-1).ports[0], earlyPort);
+
+  const latePort = createPort();
+  assert.equal(bridge.requestPort(sessionId(2)), true);
+  deliver(sessionId(2), latePort);
+  assert.equal(posted.at(-1).ports[0], latePort);
+
+  const invalidPort = createPort();
+  deliver('predictable-session', invalidPort);
+  assert.equal(invalidPort.closed, 1);
+  assert.equal(bridge.requestPort('predictable-session'), false);
+
+  const duplicateFirst = createPort();
+  const duplicateSecond = createPort();
+  deliver(sessionId(3), duplicateFirst);
+  deliver(sessionId(3), duplicateSecond);
+  assert.equal(duplicateFirst.closed, 1);
+  assert.equal(bridge.requestPort(sessionId(3)), true);
+  assert.equal(posted.at(-1).ports[0], duplicateSecond);
+
+  const pendingFlood = Array.from({ length: 5 }, (_, index) => ({
+    id: sessionId(10 + index),
+    port: createPort()
+  }));
+  for (const entry of pendingFlood) deliver(entry.id, entry.port);
+  assert.equal(pendingFlood[0].port.closed, 1);
+  for (const entry of pendingFlood.slice(1)) {
+    assert.equal(bridge.requestPort(entry.id), true);
+  }
+  assert.deepEqual(
+    posted.slice(-4).map((entry) => entry.ports[0]),
+    pendingFlood.slice(1).map((entry) => entry.port)
+  );
+
+  // The evicted pending id can only be accepted after a fresh explicit request.
+  const recoveredEvictedPort = createPort();
+  assert.equal(bridge.requestPort(pendingFlood[0].id), true);
+  deliver(pendingFlood[0].id, recoveredEvictedPort);
+  assert.equal(posted.at(-1).ports[0], recoveredEvictedPort);
+
+  const requestedFlood = Array.from({ length: 5 }, (_, index) => sessionId(20 + index));
+  for (const id of requestedFlood) assert.equal(bridge.requestPort(id), true);
+  const evictedRequestPort = createPort();
+  const retainedRequestPort = createPort();
+  const postedBeforeRequestedDelivery = posted.length;
+  deliver(requestedFlood[0], evictedRequestPort);
+  assert.equal(posted.length, postedBeforeRequestedDelivery);
+  deliver(requestedFlood[1], retainedRequestPort);
+  assert.equal(posted.at(-1).ports[0], retainedRequestPort);
+  assert.equal(bridge.requestPort(requestedFlood[0]), true);
+  assert.equal(posted.at(-1).ports[0], evictedRequestPort);
+
+  const expiringRequestId = sessionId(30);
+  assert.equal(bridge.requestPort(expiringRequestId), true);
+  const expiringRequestTimer = nextTimerId - 1;
+  runTimer(expiringRequestTimer);
+  const portAfterExpiredRequest = createPort();
+  const postedBeforeExpiredRequestDelivery = posted.length;
+  deliver(expiringRequestId, portAfterExpiredRequest);
+  assert.equal(posted.length, postedBeforeExpiredRequestDelivery);
+  assert.equal(bridge.requestPort(expiringRequestId), true);
+  assert.equal(posted.at(-1).ports[0], portAfterExpiredRequest);
+
+  const expiringPort = createPort();
+  deliver(sessionId(31), expiringPort);
+  const expiringPortTimer = nextTimerId - 1;
+  runTimer(expiringPortTimer);
+  assert.equal(expiringPort.closed, 1);
+});
+
 
 test('preload inline native-capture constants stay in sync with contract module', () => {
   const preloadSource = fs.readFileSync(
@@ -137,4 +286,15 @@ test('preload inline native-capture constants stay in sync with contract module'
   );
   assert.ok(portMessageTypeMatch);
   assert.equal(portMessageTypeMatch[2], NATIVE_CAPTURE_PORT_MESSAGE_TYPE);
+});
+
+test('native capture sessions use unguessable UUID identifiers', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'electron', 'native', 'capture.js'),
+    'utf8'
+  );
+
+  assert.match(source, /const \{ randomUUID \} = require\('node:crypto'\)/);
+  assert.match(source, /const sessionId = randomUUID\(\)/);
+  assert.doesNotMatch(source, /nextSessionId/);
 });

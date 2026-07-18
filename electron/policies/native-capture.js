@@ -36,10 +36,10 @@ function getNativeCaptureInjectScript() {
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
       };
-      const timer = setTimeout(() => {
+      const fail = (error) => {
         cleanup();
-        reject(new Error('Native capture port timed out.'));
-      }, timeoutMs);
+        reject(error);
+      };
       const onMessage = (event) => {
         if (event.source !== window) return;
         if (event.data?.type !== PORT_MESSAGE_TYPE || event.data.sessionId !== sessionId) return;
@@ -49,7 +49,17 @@ function getNativeCaptureInjectScript() {
         cleanup();
         resolve(port);
       };
+      const timer = setTimeout(() => {
+        fail(new Error('Native capture port timed out.'));
+      }, timeoutMs);
       window.addEventListener('message', onMessage);
+      try {
+        if (bridge.requestPort?.(sessionId) !== true) {
+          fail(new Error('Native capture port is unavailable.'));
+        }
+      } catch (error) {
+        fail(error);
+      }
     });
 
     const createNativeVideoTrack = (port, sessionId) => {

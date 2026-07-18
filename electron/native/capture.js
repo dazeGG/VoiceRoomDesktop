@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, MessageChannelMain, utilityProcess } = require('electron');
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,7 +13,6 @@ const RECONFIGURE_TIMEOUT_MS = 2500;
 
 let activeSession = null;
 let nextReconfigureRequestId = 1;
-let nextSessionId = 1;
 
 app.on('before-quit', () => {
   stopNativeCaptureSession();
@@ -79,7 +79,7 @@ function startNativeCaptureSession(webContents, options = {}) {
     ? options.maxWidth
     : 1920;
   const qualityId = String(options.qualityId || 'balanced');
-  const sessionId = String(nextSessionId++);
+  const sessionId = randomUUID();
   const { port1, port2 } = new MessageChannelMain();
   let relay = null;
   try {
@@ -162,10 +162,9 @@ function startNativeCaptureSession(webContents, options = {}) {
       sourceId,
       type: 'start'
     }, [port1]);
-    // Return the IPC session descriptor before the DOM MessagePort is delivered.
-    // The injected getDisplayMedia wrapper installs its waitForPort listener
-    // after the invoke() promise resolves; posting on the next tick avoids a
-    // rare lost-port race while keeping the existing one-call bridge contract.
+    // The isolated preload buffers this port until the main-world wrapper has
+    // installed a listener and requests this unguessable session id. Keep the
+    // next-turn delivery as the common fast path, but not as an ordering guard.
     setImmediate(() => {
       if (activeSession !== session || session.stopped) {
         try {

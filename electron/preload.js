@@ -5,6 +5,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 // markers even if optional native-capture module packaging drifts.
 const NATIVE_CAPTURE_PROTOCOL_VERSION = 2;
 const NATIVE_CAPTURE_PORT_MESSAGE_TYPE = 'voice-room-native-capture-port';
+const NATIVE_CAPTURE_PORT_BUFFER_LIMIT = 4;
+const NATIVE_CAPTURE_PORT_TTL_MS = 5000;
+const NATIVE_CAPTURE_SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const pendingNativeCapturePorts = new Map();
+const requestedNativeCapturePorts = new Map();
 
 const DESKTOP_VERSION_ARG = '--voice-room-desktop-version=';
 
@@ -18,6 +24,64 @@ function markDesktopDocument() {
   if (!root) return;
   root.classList.add('is-desktop');
   root.dataset.electron = 'true';
+}
+
+function isNativeCaptureSessionId(value) {
+  return typeof value === 'string' && NATIVE_CAPTURE_SESSION_ID_PATTERN.test(value);
+}
+
+function closePort(port) {
+  try { port?.close(); } catch {}
+}
+
+function removePortEntry(entries, sessionId, close = false) {
+  const entry = entries.get(sessionId);
+  if (!entry) return null;
+  clearTimeout(entry.timer);
+  entries.delete(sessionId);
+  if (close) closePort(entry.port);
+  return entry;
+}
+
+function evictOldestPortEntry(entries, close = false) {
+  const oldestSessionId = entries.keys().next().value;
+  if (oldestSessionId !== undefined) removePortEntry(entries, oldestSessionId, close);
+}
+
+function forwardNativeCapturePort(message, port) {
+  try {
+    window.postMessage(
+      {
+        protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+        sessionId: message.sessionId,
+        type: NATIVE_CAPTURE_PORT_MESSAGE_TYPE
+      },
+      window.location.origin,
+      [port]
+    );
+    return true;
+  } catch {
+    closePort(port);
+    return false;
+  }
+}
+
+function requestNativeCapturePort(sessionId) {
+  if (!isNativeCaptureSessionId(sessionId)) return false;
+
+  const pending = removePortEntry(pendingNativeCapturePorts, sessionId);
+  if (pending) return forwardNativeCapturePort(pending.message, pending.port);
+  if (requestedNativeCapturePorts.has(sessionId)) return true;
+
+  if (requestedNativeCapturePorts.size >= NATIVE_CAPTURE_PORT_BUFFER_LIMIT) {
+    evictOldestPortEntry(requestedNativeCapturePorts);
+  }
+  const timer = setTimeout(() => {
+    const requested = requestedNativeCapturePorts.get(sessionId);
+    if (requested?.timer === timer) requestedNativeCapturePorts.delete(sessionId);
+  }, NATIVE_CAPTURE_PORT_TTL_MS);
+  requestedNativeCapturePorts.set(sessionId, { timer });
+  return true;
 }
 
 const desktopRuntime = {
@@ -93,24 +157,46 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopAudio', {
 contextBridge.exposeInMainWorld('voiceRoomNativeCaptureBridge', {
   commitPrepared: (sourceId) => ipcRenderer.invoke('native-capture:commit-prepared', sourceId),
   prepare: () => ipcRenderer.invoke('native-capture:prepare'),
+  requestPort: (sessionId) => requestNativeCapturePort(sessionId),
   start: () => ipcRenderer.invoke('native-capture:start'),
   stop: (sessionId) => ipcRenderer.invoke('native-capture:stop', sessionId)
 });
 
-// The frame MessagePort cannot cross the context bridge; relay it to the main
-// world (shared DOM) where the injected getDisplayMedia wrapper picks it up.
+// MessagePorts cannot cross contextBridge. Buffer a small, short-lived set in
+// the isolated preload until the main-world wrapper installs its listener and
+// requests the unguessable session id returned by prepare()/start().
 ipcRenderer.on('native-capture:port', (event, message) => {
-  window.postMessage(
-    {
-      protocolVersion: message?.protocolVersion === NATIVE_CAPTURE_PROTOCOL_VERSION
-        ? NATIVE_CAPTURE_PROTOCOL_VERSION
-        : message?.protocolVersion,
-      sessionId: message?.sessionId,
-      type: NATIVE_CAPTURE_PORT_MESSAGE_TYPE
-    },
-    window.location.origin,
-    event.ports
-  );
+  const ports = Array.from(event.ports || []);
+  const port = ports.shift();
+  for (const extraPort of ports) closePort(extraPort);
+
+  const sessionId = message?.sessionId;
+  if (
+    message?.protocolVersion !== NATIVE_CAPTURE_PROTOCOL_VERSION
+    || !isNativeCaptureSessionId(sessionId)
+    || !port
+  ) {
+    closePort(port);
+    return;
+  }
+
+  const requested = removePortEntry(requestedNativeCapturePorts, sessionId);
+  if (requested) {
+    forwardNativeCapturePort(message, port);
+    return;
+  }
+
+  removePortEntry(pendingNativeCapturePorts, sessionId, true);
+  if (pendingNativeCapturePorts.size >= NATIVE_CAPTURE_PORT_BUFFER_LIMIT) {
+    evictOldestPortEntry(pendingNativeCapturePorts, true);
+  }
+  const timer = setTimeout(() => {
+    const pending = pendingNativeCapturePorts.get(sessionId);
+    if (pending?.timer !== timer || pending.port !== port) return;
+    pendingNativeCapturePorts.delete(sessionId);
+    closePort(port);
+  }, NATIVE_CAPTURE_PORT_TTL_MS);
+  pendingNativeCapturePorts.set(sessionId, { message, port, timer });
 });
 
 contextBridge.exposeInMainWorld('voiceRoomWindow', {

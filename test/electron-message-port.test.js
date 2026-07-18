@@ -20,27 +20,66 @@ test('production native capture bridge writes cloned BGRX and NV12 frames in Ele
 
   let child = null;
   const result = await new Promise((resolve, reject) => {
+    const successMarker = 'production-native-capture-bridge-ok';
+    let drainTimer = null;
+    let exitResult = null;
+    let settled = false;
     child = spawn(electronPath, electronArgs, {
       env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    const timeout = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error('Electron production native-capture fixture timed out.'));
-    }, 15000);
     let stderr = '';
     let stdout = '';
+    const destroyPipes = () => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+    };
+    const settle = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      clearTimeout(drainTimer);
+      destroyPipes();
+      callback();
+    };
+    const resolveExitedChild = () => {
+      if (!exitResult || settled) return;
+      if (stdout.includes(successMarker)) {
+        settle(() => resolve({ ...exitResult, stderr, stdout }));
+        return;
+      }
+      if (drainTimer) return;
+      drainTimer = setTimeout(() => {
+        settle(() => resolve({ ...exitResult, stderr, stdout }));
+      }, 500);
+    };
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      child.kill('SIGKILL');
+      const diagnostics = [stderr, stdout].filter(Boolean).join('\n');
+      settle(() => reject(new Error(
+        `Electron production native-capture fixture timed out.${diagnostics ? `\n${diagnostics}` : ''}`
+      )));
+    }, 15000);
     child.stderr.setEncoding('utf8');
     child.stdout.setEncoding('utf8');
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.once('error', (error) => {
-      clearTimeout(timeout);
-      reject(error);
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      resolveExitedChild();
     });
-    child.once('close', (code, signal) => {
+    child.once('error', (error) => {
+      settle(() => reject(error));
+    });
+    // Chromium utility processes can briefly retain inherited stdio handles on
+    // Linux after the Electron main process is gone. Wait for the fixture's
+    // flushed success marker (or a bounded diagnostic drain), then explicitly
+    // destroy both read pipes instead of waiting for descendant-owned handles.
+    child.once('exit', (code, signal) => {
+      if (settled) return;
       clearTimeout(timeout);
-      resolve({ code, signal, stderr, stdout });
+      exitResult = { code, signal };
+      resolveExitedChild();
     });
   });
 

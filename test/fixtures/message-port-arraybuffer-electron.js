@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, BrowserWindow, ipcMain, MessageChannelMain } = require('electron');
+const { randomUUID } = require('node:crypto');
 const http = require('node:http');
 const path = require('node:path');
 
@@ -105,7 +106,7 @@ app.whenReady().then(async () => {
     if (!format) return { ok: false, reason: 'fixture-exhausted' };
 
     prepareCalls += 1;
-    const sessionId = `fixture-${prepareCalls}`;
+    const sessionId = randomUUID();
     const channel = new MessageChannelMain();
     let resolveAck = null;
     const ack = new Promise((resolve) => { resolveAck = resolve; });
@@ -121,22 +122,21 @@ app.whenReady().then(async () => {
     });
     channel.port1.start();
 
-    // Match electron/native/capture.js: the invoke result reaches the main
-    // world before preload forwards the transferred port on the next turn.
-    setImmediate(() => {
-      event.sender.postMessage('native-capture:port', {
-        protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
-        sessionId
-      }, [channel.port2]);
-      channel.port1.postMessage({
-        fps: 30,
-        height: 2,
-        pixelFormat: format,
-        type: 'format',
-        width: 2
-      });
-      channel.port1.postMessage(createFrame(format));
+    // Deliberately post before the invoke handler returns. The production
+    // wrapper must buffer the port even when this renderer event wins the race
+    // against completion of bridge.prepare().
+    event.sender.postMessage('native-capture:port', {
+      protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+      sessionId
+    }, [channel.port2]);
+    channel.port1.postMessage({
+      fps: 30,
+      height: 2,
+      pixelFormat: format,
+      type: 'format',
+      width: 2
     });
+    channel.port1.postMessage(createFrame(format));
 
     return {
       fps: 30,

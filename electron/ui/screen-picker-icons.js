@@ -7,20 +7,28 @@ const ICON_SIZES = Object.freeze({
   xs: 12
 });
 
-const PICKER_ICONS = Object.freeze({
-  AppWindow: window.lucide.icons.AppWindow,
-  Check: window.lucide.icons.Check,
-  Monitor: window.lucide.icons.Monitor,
-  Play: window.lucide.icons.Play,
-  Settings: window.lucide.icons.Settings,
-  Type: window.lucide.icons.Type,
-  X: window.lucide.icons.X
-});
+const PICKER_ICON_NAMES = Object.freeze(['AppWindow', 'Check', 'Monitor', 'Play', 'Settings', 'Type', 'X']);
+
+function getPickerIcons(lucide) {
+  if (!lucide || typeof lucide.createIcons !== 'function' || !lucide.icons) return null;
+
+  const pickerIcons = {};
+  for (const name of PICKER_ICON_NAMES) {
+    const icon = lucide.icons[name];
+    if (!icon) return null;
+    pickerIcons[name] = icon;
+  }
+  return Object.freeze(pickerIcons);
+}
 
 function renderPickerIcons(root = document) {
-  window.lucide.createIcons({
+  const lucide = window.lucide;
+  const pickerIcons = getPickerIcons(lucide);
+  if (!pickerIcons) return false;
+
+  lucide.createIcons({
     attrs: { 'stroke-width': 2 },
-    icons: PICKER_ICONS,
+    icons: pickerIcons,
     root
   });
 
@@ -30,6 +38,8 @@ function renderPickerIcons(root = document) {
     icon.setAttribute('width', String(size));
     if (icon.dataset.iconFill === 'true') icon.setAttribute('fill', 'currentColor');
   }
+
+  return true;
 }
 
 window.voiceRoomPickerIcons = Object.freeze({

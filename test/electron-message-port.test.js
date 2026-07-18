@@ -9,11 +9,18 @@ test('Electron MessagePortMain carries cloned ArrayBuffer frame payloads', { tim
   const electronPath = require('electron');
   const fixturePath = path.join(__dirname, 'fixtures', 'message-port-arraybuffer-electron.js');
   const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' };
+  // GitHub-hosted Linux runners cannot install Electron's chrome-sandbox with
+  // the root-owned setuid permissions Chromium requires. This is a local IPC
+  // fixture with no untrusted content, so disable the sandbox only for that
+  // child process; packaged application behavior is unchanged.
+  const electronArgs = process.platform === 'linux'
+    ? ['--no-sandbox', fixturePath]
+    : [fixturePath];
   delete env.ELECTRON_RUN_AS_NODE;
 
   let child = null;
   const result = await new Promise((resolve, reject) => {
-    child = spawn(electronPath, [fixturePath], {
+    child = spawn(electronPath, electronArgs, {
       env,
       stdio: ['ignore', 'pipe', 'pipe']
     });

@@ -11,7 +11,7 @@ const { getNativeCaptureInjectScript } = require('../electron/policies/native-ca
 // Runs the injected main-world script against a mock window/navigator pair.
 // The script must never break getDisplayMedia: when the native path is
 // unavailable or refuses to start, the original stream is returned untouched.
-function runInjectScript({ window, navigator, withGenerators = true }) {
+function runInjectScript({ createWriter, window, navigator, withGenerators = true }) {
   const script = getNativeCaptureInjectScript();
   const runner = new Function(
     'window',
@@ -26,7 +26,7 @@ function runInjectScript({ window, navigator, withGenerators = true }) {
     constructor() {
       this.readyState = 'live';
       this.writable = {
-        getWriter: () => ({
+        getWriter: () => createWriter?.() || ({
           desiredSize: 1,
           close: async () => {},
           write: async () => {}
@@ -141,6 +141,8 @@ describe('getNativeCaptureInjectScript', () => {
   it('returns a native-only stream without opening Chromium video capture when prepare succeeds', async () => {
     let originalCalls = 0;
     let committedSourceId = '';
+    let statsAfterFormat = null;
+    const portMessages = [];
     const navigator = {
       mediaDevices: {
         getDisplayMedia: async () => {
@@ -152,9 +154,19 @@ describe('getNativeCaptureInjectScript', () => {
     const listeners = new Map();
     const port = {
       close() {},
-      postMessage() {},
+      postMessage(message) { portMessages.push(message); },
       start() {
         setImmediate(() => {
+          this.onmessage?.({
+            data: {
+              fps: 30,
+              height: 1080,
+              pixelFormat: 'nv12',
+              type: 'format',
+              width: 1920
+            }
+          });
+          statsAfterFormat = window.__voiceRoomNativeCaptureStats?.();
           this.onmessage?.({
             data: {
               data: new ArrayBuffer(16),
@@ -202,6 +214,9 @@ describe('getNativeCaptureInjectScript', () => {
     assert.equal(originalCalls, 0);
     assert.equal(committedSourceId, 'screen:1:0');
     assert.equal(result.getVideoTracks().length, 1);
+    assert.deepEqual(portMessages, [{ type: 'frame-ack' }]);
+    assert.equal(statsAfterFormat?.pixelFormat, 'NV12');
+    assert.equal(window.__voiceRoomNativeCaptureStats().pixelFormat, 'BGRX');
   });
 
   it('uses the original Chromium stream when native-only prepare is unavailable', async () => {
@@ -229,6 +244,79 @@ describe('getNativeCaptureInjectScript', () => {
     const result = await navigator.mediaDevices.getDisplayMedia({ video: true });
     assert.equal(originalCalls, 1);
     assert.equal(result, stream);
+  });
+
+  it('falls back to Chromium when the first native frame cannot enter the generator', async () => {
+    let committed = false;
+    let originalCalls = 0;
+    const stream = createFakeStream();
+    const navigator = {
+      mediaDevices: {
+        getDisplayMedia: async () => {
+          originalCalls += 1;
+          return stream;
+        }
+      }
+    };
+    const port = {
+      close() {},
+      postMessage() {},
+      start() {
+        setImmediate(() => {
+          this.onmessage?.({
+            data: {
+              data: new ArrayBuffer(16),
+              format: 'BGRX',
+              height: 2,
+              type: 'frame',
+              width: 2
+            }
+          });
+        });
+      }
+    };
+    const window = {
+      addEventListener(type, handler) {
+        if (type === 'message') {
+          setImmediate(() => handler({
+            data: {
+              protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+              sessionId: 'native-write-fails',
+              type: NATIVE_CAPTURE_PORT_MESSAGE_TYPE
+            },
+            ports: [port],
+            source: window
+          }));
+        }
+      },
+      removeEventListener() {},
+      voiceRoomNativeCaptureBridge: {
+        commitPrepared: async () => { committed = true; },
+        prepare: async () => ({
+          ok: true,
+          protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+          sessionId: 'native-write-fails',
+          sourceId: 'screen:1:0'
+        }),
+        start: async () => ({ ok: false, reason: 'native-write-fails' }),
+        stop: async () => {}
+      }
+    };
+
+    runInjectScript({
+      createWriter: () => ({
+        desiredSize: 1,
+        close: async () => {},
+        write: async () => { throw new Error('generator rejected frame'); }
+      }),
+      window,
+      navigator
+    });
+
+    const result = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    assert.equal(result, stream);
+    assert.equal(originalCalls, 1);
+    assert.equal(committed, false);
   });
 
   it('falls back when a native session has an incompatible protocol version', async () => {

@@ -5,6 +5,7 @@ const path = require('node:path');
 const { getNativeAudioCapabilities } = require('../native/audio');
 const {
   getScreenQualityMaxHeight,
+  getScreenQualityMaxWidth,
   normalizeDesktopAudioCapture,
   normalizeScreenFpsId,
   normalizeScreenQualityId
@@ -72,10 +73,12 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
   const fps = Number(normalizeScreenFpsId(normalizedCaptureOptions.fpsId));
   const qualityId = normalizeScreenQualityId(normalizedCaptureOptions.qualityId);
   const maxHeight = getScreenQualityMaxHeight(qualityId);
+  const maxWidth = getScreenQualityMaxWidth(qualityId);
   const pendingSource = {
     audioCapture,
     fps,
     maxHeight,
+    maxWidth,
     qualityId,
     source,
     timer
@@ -87,6 +90,7 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
     expiresAt: Date.now() + DESKTOP_CAPTURE_PENDING_TTL_MS,
     fps,
     maxHeight,
+    maxWidth,
     qualityId,
     source
   };
@@ -102,6 +106,7 @@ function recordGrantedDesktopCapture(frame, pending) {
     fps: pending.fps || 30,
     grantedAt: Date.now(),
     maxHeight: pending.maxHeight || getScreenQualityMaxHeight(pending.qualityId),
+    maxWidth: pending.maxWidth || getScreenQualityMaxWidth(pending.qualityId),
     qualityId: normalizeScreenQualityId(pending.qualityId),
     sourceId: pending.source.id
   });
@@ -196,9 +201,9 @@ function takeLatestPendingDesktopCaptureSource() {
     return null;
   }
 
-  const { audioCapture, fps, maxHeight, qualityId, source } = latestPendingDesktopCaptureSource;
+  const { audioCapture, fps, maxHeight, maxWidth, qualityId, source } = latestPendingDesktopCaptureSource;
   clearPendingDesktopCaptureSource(source.id);
-  return { audioCapture, fps, maxHeight, qualityId, source };
+  return { audioCapture, fps, maxHeight, maxWidth, qualityId, source };
 }
 
 function takePendingDesktopCaptureSource(frame, securityOrigin = '') {

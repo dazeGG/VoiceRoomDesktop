@@ -63,6 +63,7 @@ function getNativeCaptureInjectScript() {
       let sawFrame = false;
       let epochOffsetUs = null;
       let lastRelayStats = null;
+      let pixelFormat;
       const counters = {
         framesDroppedBackpressure: 0,
         framesDroppedCreate: 0,
@@ -72,9 +73,15 @@ function getNativeCaptureInjectScript() {
 
       window.__voiceRoomNativeCaptureStats = () => ({
         ...counters,
+        pixelFormat,
         relay: lastRelayStats,
         sessionId
       });
+
+      const normalizePixelFormat = (value) => {
+        const normalized = String(value || '').toUpperCase();
+        return normalized === 'NV12' || normalized === 'BGRX' ? normalized : undefined;
+      };
 
       const normalizeFrameData = (data) => {
         if (data instanceof ArrayBuffer) return data;
@@ -105,7 +112,17 @@ function getNativeCaptureInjectScript() {
           lastRelayStats = message;
           return;
         }
+        if (message.type === 'format') {
+          const nextPixelFormat = normalizePixelFormat(message.pixelFormat);
+          if (nextPixelFormat) pixelFormat = nextPixelFormat;
+          return;
+        }
         if (message.type !== 'frame' || !message.data) return;
+        // Release the relay's MessagePort slot as soon as this event reaches
+        // the renderer. The writer.desiredSize check below independently
+        // protects the encoder queue; this ack prevents raw frames from piling
+        // up cross-process while the renderer event loop is busy.
+        try { port.postMessage({ type: 'frame-ack' }); } catch {}
         counters.framesReceived += 1;
         if (generator.readyState === 'ended') {
           stop();
@@ -121,7 +138,8 @@ function getNativeCaptureInjectScript() {
         try {
           const data = normalizeFrameData(message.data);
           if (!data) return;
-          const format = message.format === 'NV12' ? 'NV12' : 'BGRX';
+          const format = normalizePixelFormat(message.format) || 'BGRX';
+          pixelFormat = format;
           // Prefer the helper's own capture timestamp over "now": the pipe/
           // utility-process/MessagePort hop between capture and here adds
           // scheduling jitter that would otherwise leak into encoder pacing.
@@ -160,12 +178,19 @@ function getNativeCaptureInjectScript() {
           counters.framesDroppedCreate += 1;
           return;
         }
-        sawFrame = true;
-        counters.framesWritten += 1;
-        writer.write(frame).catch(() => {
+        try {
+          writer.write(frame).then(() => {
+            if (closed) return;
+            counters.framesWritten += 1;
+            sawFrame = true;
+          }).catch(() => {
+            try { frame.close(); } catch {}
+            stop();
+          });
+        } catch {
           try { frame.close(); } catch {}
           stop();
-        });
+        }
       };
       port.start?.();
 
@@ -179,10 +204,13 @@ function getNativeCaptureInjectScript() {
       const waitForFirstFrame = (timeoutMs) => new Promise((resolve, reject) => {
         const startedAt = performance.now();
         const poll = setInterval(() => {
-          if (sawFrame) {
+          if (closed) {
+            clearInterval(poll);
+            reject(new Error('Native capture stopped before producing a writable frame.'));
+          } else if (sawFrame) {
             clearInterval(poll);
             resolve();
-          } else if (closed || performance.now() - startedAt > timeoutMs) {
+          } else if (performance.now() - startedAt > timeoutMs) {
             clearInterval(poll);
             reject(new Error('Native capture produced no frames.'));
           }

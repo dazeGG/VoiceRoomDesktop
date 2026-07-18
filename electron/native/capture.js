@@ -73,6 +73,9 @@ function startNativeCaptureSession(webContents, options = {}) {
   const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
     ? options.maxHeight
     : 1080;
+  const maxWidth = Number.isInteger(options.maxWidth) && options.maxWidth > 0 && options.maxWidth <= 16384
+    ? options.maxWidth
+    : 1920;
   const qualityId = String(options.qualityId || 'balanced');
   const sessionId = String(nextSessionId++);
   const { port1, port2 } = new MessageChannelMain();
@@ -148,6 +151,7 @@ function startNativeCaptureSession(webContents, options = {}) {
       fps,
       helperPath,
       maxHeight,
+      maxWidth,
       protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
       qualityId,
       sourceId,
@@ -180,7 +184,16 @@ function startNativeCaptureSession(webContents, options = {}) {
     return { ok: false, reason: 'spawn-error' };
   }
 
-  return { fps, maxHeight, ok: true, protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, qualityId, sessionId, sourceId };
+  return {
+    fps,
+    maxHeight,
+    maxWidth,
+    ok: true,
+    protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
+    qualityId,
+    sessionId,
+    sourceId
+  };
 }
 
 function stopNativeCaptureSession(sessionId = '') {
@@ -223,7 +236,7 @@ function cleanupSession(session) {
   }
 }
 
-function reconfigureNativeCaptureSession({ fps, maxHeight } = {}) {
+function reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth } = {}) {
   const session = activeSession;
   if (!session || session.stopped) {
     return { ok: false, reason: 'no-active-session' };
@@ -232,7 +245,8 @@ function reconfigureNativeCaptureSession({ fps, maxHeight } = {}) {
   const payload = { type: 'reconfigure' };
   if (Number.isInteger(fps) && fps > 0 && fps <= 60) payload.fps = fps;
   if (Number.isInteger(maxHeight) && maxHeight > 0 && maxHeight <= 16384) payload.maxHeight = maxHeight;
-  if (!payload.fps && !payload.maxHeight) {
+  if (Number.isInteger(maxWidth) && maxWidth > 0 && maxWidth <= 16384) payload.maxWidth = maxWidth;
+  if (!payload.fps && !payload.maxHeight && !payload.maxWidth) {
     return { ok: false, reason: 'bad-profile' };
   }
 
@@ -245,6 +259,7 @@ function reconfigureNativeCaptureSession({ fps, maxHeight } = {}) {
   return {
     fps: payload.fps,
     maxHeight: payload.maxHeight,
+    maxWidth: payload.maxWidth,
     ok: true
   };
 }

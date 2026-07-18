@@ -3,7 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 // Keep these constants inline: preload must always install desktop runtime
 // markers even if optional native-capture module packaging drifts.
-const NATIVE_CAPTURE_PROTOCOL_VERSION = 1;
+const NATIVE_CAPTURE_PROTOCOL_VERSION = 2;
 const NATIVE_CAPTURE_PORT_MESSAGE_TYPE = 'voice-room-native-capture-port';
 
 const DESKTOP_VERSION_ARG = '--voice-room-desktop-version=';

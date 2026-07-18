@@ -13,6 +13,7 @@ const {
 } = require('./capture-contract');
 const { createRestartPolicy } = require('../policies/native-capture-restart');
 
+const MAX_RENDERER_FRAMES_IN_FLIGHT = 2;
 const STATS_INTERVAL_MS = 2000;
 const parentPort = process.parentPort;
 let activeSession = null;
@@ -31,15 +32,26 @@ function log(level, message, detail = undefined) {
 
 function postToRenderer(session, message) {
   if (!session || session.stopped || !session.port) return false;
+  const isFrame = message.type === 'frame';
+  if (isFrame && session.framesInFlight >= MAX_RENDERER_FRAMES_IN_FLIGHT) {
+    // Keep the cross-process MessagePort queue bounded. The renderer acks as
+    // soon as it starts handling a frame; until then, retaining more raw frame
+    // buffers only adds latency and memory pressure without helping the encoder.
+    session.framesDroppedBackpressure += 1;
+    return true;
+  }
+
   try {
-    // Frame payloads are large (NV12 1080p30 is ~35MB/s); transfer ownership
-    // of the ArrayBuffer instead of structured-cloning it on every frame, or
-    // this copy competes with the game/encoder for CPU on weaker machines.
-    // `message.data` is not read again after this call, so transfer is safe.
-    session.port.postMessage(message, message.data ? [message.data] : []);
-    if (message.type === 'frame') session.framesPosted += 1;
+    // Electron MessagePortMain transfer lists accept MessagePortMain objects,
+    // not ArrayBuffers. Passing the frame buffer as a transferable throws and
+    // tears down the native session, so raw payloads must use structured clone
+    // until the bridge has a supported shared/encoded transport.
+    if (isFrame) session.framesInFlight += 1;
+    session.port.postMessage(message);
+    if (isFrame) session.framesPosted += 1;
     return true;
   } catch (error) {
+    if (isFrame && session.framesInFlight > 0) session.framesInFlight -= 1;
     log('warn', 'Native capture relay port post failed.', { message: String(error?.message || error) });
     stopSession(session, { closePort: true });
     return false;
@@ -53,7 +65,9 @@ function spawnHelper(session) {
     '--fps',
     String(session.fps),
     '--max-height',
-    String(session.maxHeight)
+    String(session.maxHeight),
+    '--max-width',
+    String(session.maxWidth)
   ], {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true
@@ -64,6 +78,7 @@ function writeReconfigureToChild(session, command) {
   const payload = buildReconfigureStdinPayload(session, command);
   if (payload.fps) session.fps = payload.fps;
   if (payload.maxHeight) session.maxHeight = payload.maxHeight;
+  if (payload.maxWidth) session.maxWidth = payload.maxWidth;
 
   const child = session.child;
   if (!child?.stdin?.writable) return false;
@@ -88,6 +103,8 @@ function startStatsTimer(session) {
     if (activeSession !== session || session.stopped) return;
     postToRenderer(session, {
       framesParsed: session.framesParsed,
+      framesDroppedBackpressure: session.framesDroppedBackpressure,
+      framesInFlight: session.framesInFlight,
       framesPosted: session.framesPosted,
       restarts: session.restarts,
       type: 'stats'
@@ -208,15 +225,21 @@ function startSession(options, port) {
   const maxHeight = Number.isInteger(options.maxHeight) && options.maxHeight > 0 && options.maxHeight <= 16384
     ? options.maxHeight
     : 1080;
+  const maxWidth = Number.isInteger(options.maxWidth) && options.maxWidth > 0 && options.maxWidth <= 16384
+    ? options.maxWidth
+    : 1920;
   const session = {
     child: null,
     forceKillTimer: null,
     fps,
     frameState: createFrameState(),
+    framesDroppedBackpressure: 0,
+    framesInFlight: 0,
     framesParsed: 0,
     framesPosted: 0,
     helperPath: options.helperPath,
     maxHeight,
+    maxWidth,
     port,
     restartPolicy: createRestartPolicy(),
     restarts: 0,
@@ -227,7 +250,11 @@ function startSession(options, port) {
   activeSession = session;
 
   port.on?.('message', (event) => {
-    if (event.data?.type === 'stop') stopSession(session, { closePort: true });
+    if (event.data?.type === 'frame-ack') {
+      if (session.framesInFlight > 0) session.framesInFlight -= 1;
+    } else if (event.data?.type === 'stop') {
+      stopSession(session, { closePort: true });
+    }
   });
   port.on?.('close', () => stopSession(session, { closePort: false }));
   port.start?.();

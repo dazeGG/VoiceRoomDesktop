@@ -14,6 +14,7 @@ function createElectronMock() {
     on() {},
     quit() {},
     requestSingleInstanceLock: () => true,
+    setAppUserModelId() {},
     whenReady: () => new Promise(() => {})
   };
 
@@ -162,8 +163,10 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 1);
-    assert.equal(handleCalls, 7);
+    assert.equal(handleCalls, 9);
     assert.deepEqual([...handledChannels].sort(), [
+      'desktop-attention:request',
+      'desktop-attention:set-badge-count',
       'desktop-hotkeys:configure',
       'desktop-hotkeys:set-suspended',
       'desktop-idle:get-system-idle-time',
@@ -180,7 +183,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 3);
-    assert.equal(handleCalls, 7);
+    assert.equal(handleCalls, 9);
   } finally {
     delete require.cache[require.resolve(mainPath)];
     Module._load = originalLoad;

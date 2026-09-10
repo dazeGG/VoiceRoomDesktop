@@ -91,6 +91,13 @@ test('preload installs desktop markers without native capture contract modules',
   idle.getSystemIdleTime();
   assert.deepEqual(invoked.at(-1), ['desktop-idle:get-system-idle-time']);
 
+  const attention = exposed.get('voiceRoomDesktopAttention');
+  assert.deepEqual(Object.keys(attention), ['requestAttention', 'setBadgeCount']);
+  attention.setBadgeCount(3);
+  assert.deepEqual(invoked.at(-1), ['desktop-attention:set-badge-count', 3]);
+  attention.requestAttention({ critical: true });
+  assert.deepEqual(invoked.at(-1), ['desktop-attention:request', { critical: true }]);
+
   const hotkeys = exposed.get('voiceRoomDesktopHotkeys');
   assert.deepEqual(Object.keys(hotkeys), ['configure', 'onAction', 'onStatus', 'setSuspended']);
   hotkeys.configure({ active: true, bindings: {} });

@@ -50,6 +50,7 @@ module.exports = {
     'electron/hotkeys.js',
     'electron/native/hotkeys.js',
     'electron/idle.js',
+    'electron/attention.js',
     'electron/native/audio.js',
     'electron/notifications.js',
     'electron/native-capture-contract.js',

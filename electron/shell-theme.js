@@ -2,14 +2,18 @@
 
 const WINDOW_BACKGROUND = '#10110f';
 const TITLEBAR_HEIGHT = 32;
+// Windows paints the caption buttons itself, over the topbar view, so their
+// background must match --paper from shell-tokens.css (oklch(15.5% 0.015 92)).
+const TITLEBAR_OVERLAY_COLOR = '#0e0c06';
 const TITLEBAR_OVERLAY_SYMBOL_COLOR = '#b0aea8';
 const TITLEBAR_MAC_TRAFFIC_LIGHTS_PADDING = '78px';
 const TITLEBAR_WIN_CONTROLS_PADDING = '140px';
 
 const TITLEBAR_OVERLAY = {
-  color: WINDOW_BACKGROUND,
+  color: TITLEBAR_OVERLAY_COLOR,
   symbolColor: TITLEBAR_OVERLAY_SYMBOL_COLOR,
-  height: TITLEBAR_HEIGHT
+  // Stop above the topbar's 1px bottom border so it runs under the buttons too.
+  height: TITLEBAR_HEIGHT - 1
 };
 
 function getMainWindowChromeOptions(platform = process.platform) {

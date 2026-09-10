@@ -117,6 +117,11 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopIdle', {
   getSystemIdleTime: () => ipcRenderer.invoke('desktop-idle:get-system-idle-time')
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopAttention', {
+  requestAttention: (options) => ipcRenderer.invoke('desktop-attention:request', options),
+  setBadgeCount: (count) => ipcRenderer.invoke('desktop-attention:set-badge-count', count)
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopHotkeys', {
   configure: (payload) => ipcRenderer.invoke('desktop-hotkeys:configure', payload),
   onAction: (handler) => {

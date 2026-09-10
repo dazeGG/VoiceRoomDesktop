@@ -1,9 +1,10 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, shell, Notification, powerMonitor } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, shell, nativeImage, Notification, powerMonitor } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { configureDesktopAttentionIpc } = require('./attention');
 const { getNativeCaptureCapabilities } = require('./native/capture');
 const { runUpdateGate } = require('./policies/update-gate');
 const { readBuildProfile } = require('./policies/update-gate-policy');
@@ -268,6 +269,13 @@ if (!gotLock) {
         Notification,
         isTrustedFrame,
         restoreMainWindow: () => windowLifecycle.restoreMainWindow()
+      });
+      configureDesktopAttentionIpc({
+        app,
+        BrowserWindow,
+        ipcMain,
+        isTrustedFrame,
+        nativeImage
       });
       desktopHotkeys.install(ipcMain);
       desktopHotkeys.installPowerMonitor(powerMonitor);

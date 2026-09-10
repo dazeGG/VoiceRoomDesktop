@@ -47,6 +47,22 @@ The helper is tied to the Electron process through its stdin pipe. Screen lock a
 
 If the native helper is missing or exits, the shell releases push-to-talk immediately and falls back to Electron global shortcuts for the two toggle actions. That fallback requires a modifier for letters, digits, punctuation, and navigation keys; function keys and Print Screen may be used without modifiers. The renderer receives a status update so it stops suppressing its focused-window fallback.
 
+## Taskbar badge and attention
+
+The hosted web app can mirror unread activity on the app icon and ask for attention while the window is in the background through `window.voiceRoomDesktopAttention`:
+
+```js
+await window.voiceRoomDesktopAttention.setBadgeCount(3); // 0 clears the badge
+
+const result = await window.voiceRoomDesktopAttention.requestAttention({ critical: false });
+// { ok: true, requested: false } when the window is already focused
+```
+
+- macOS: `setBadgeCount` shows the number on the Dock icon. `requestAttention` bounces the Dock icon once, or until the app is activated when `critical: true`.
+- Windows: `setBadgeCount` shows a red dot over the taskbar button (the count is exposed as its accessible description) and re-applies it when the window returns from the tray. `requestAttention` flashes the taskbar button until the window is focused. A window hidden to the tray has no taskbar button, so `requestAttention` returns `{ ok: false, reason: 'window-hidden' }`; show a desktop notification instead.
+
+The web app owns the count: send the current value whenever it changes, including `0` once everything is read and again after a page reload. Counts are floored and capped at 9999; anything that is not a finite number clears the badge.
+
 ## Supported platforms
 
 | Platform | Status | Notes |

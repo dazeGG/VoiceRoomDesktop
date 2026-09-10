@@ -15,6 +15,10 @@ native/.cache/
 
 # Graphify
 graphify-out/
+# Share only the graph and its report; everything else is local or regenerable
+.graphify/*
+!.graphify/graph.json
+!.graphify/GRAPH_REPORT.md
 
 # Logs
 *.log
@@ -28,4 +32,5 @@ pnpm-debug.log*
 .idea/
 .vscode/
 .omx/
+.omc/
 .codex/

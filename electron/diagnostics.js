@@ -42,6 +42,7 @@ function formatDiagnosticsText(info) {
     `os: ${info.os.platform} ${info.os.release} ${info.os.arch}, locale: ${info.os.locale}`,
     `gpu: ${info.gpu}`,
     `native helpers: audio=${yesNo(info.nativeHelpers.audio)}, capture=${yesNo(info.nativeHelpers.capture)}, hotkeys=${yesNo(info.nativeHelpers.hotkeys)}`,
+    `hotkeys backend: ${info.hotkeysBackend}`,
     `update: ${info.update.phase}${info.update.version ? ` ${info.update.version}` : ''}`,
     `autostart: ${info.autostart.supported ? yesNo(info.autostart.openAtLogin) : 'unsupported'}${info.autostart.startMinimized ? ' (minimized)' : ''}`,
     `voice active: ${yesNo(info.voiceActive)}`,
@@ -64,6 +65,7 @@ function createDiagnosticsController({
   getNativeHelpers = () => ({}),
   getUpdateState = () => null,
   getAutostartSettings = () => null,
+  getHotkeysBackend = () => 'none',
   isVoiceActive = () => false,
   now = () => new Date()
 }) {
@@ -85,7 +87,7 @@ function createDiagnosticsController({
     const autostart = safely(getAutostartSettings, null);
     const info = {
       app: {
-        channel: profile?.channel === 'dev' ? 'dev' : app.isPackaged ? 'release' : 'local',
+        channel: profile?.channel === 'dev' ? 'dev' : app.isPackaged ? 'stable' : 'local',
         packageType: resolvePackageType({ env, isPackaged: app.isPackaged, platform }),
         version: app.getVersion()
       },
@@ -97,6 +99,7 @@ function createDiagnosticsController({
       context: { ...context },
       generatedAt: now().toISOString(),
       gpu: summarizeGpuStatus(safely(() => app.getGPUFeatureStatus(), null)),
+      hotkeysBackend: String(safely(getHotkeysBackend, 'none') || 'none'),
       nativeHelpers: {
         audio: helpers.audio === true,
         capture: helpers.capture === true,

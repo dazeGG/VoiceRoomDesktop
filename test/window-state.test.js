@@ -91,7 +91,7 @@ class FakeWindow extends EventEmitter {
   isMinimized() { return this.minimized; }
 }
 
-function createHarness({ fileContent } = {}) {
+function createHarness({ fileContent, getDisplayMatching } = {}) {
   const files = new Map();
   const userData = path.join('C:', 'data');
   const filePath = path.join(userData, WINDOW_STATE_FILE);
@@ -114,7 +114,11 @@ function createHarness({ fileContent } = {}) {
     fs,
     log: { warn() {} },
     path,
-    screen: { getAllDisplays: () => [primary], getPrimaryDisplay: () => primary },
+    screen: {
+      getAllDisplays: () => [primary],
+      getPrimaryDisplay: () => primary,
+      ...(getDisplayMatching ? { getDisplayMatching } : {})
+    },
     clearTimeout: (timer) => { timer.cancelled = true; },
     setTimeout: (callback, delay) => {
       const timer = { callback, delay, cancelled: false };
@@ -170,6 +174,21 @@ describe('window state controller', () => {
     window.maximized = false;
     window.emit('close');
     assert.equal(harness.read().isMaximized, false);
+  });
+
+  it('records the display the window sits on', () => {
+    const harness = createHarness({
+      getDisplayMatching: () => ({ bounds: { x: 0, y: 0, width: 1920, height: 1080 }, id: 2528732444 })
+    });
+    const window = new FakeWindow();
+    harness.controller.track(window);
+    window.emit('close');
+
+    assert.deepEqual(harness.read(), {
+      bounds: window.normalBounds,
+      display: { bounds: { x: 0, y: 0, width: 1920, height: 1080 }, id: 2528732444 },
+      isMaximized: false
+    });
   });
 
   it('never persists fullscreen or minimized geometry', () => {

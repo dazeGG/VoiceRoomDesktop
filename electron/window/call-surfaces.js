@@ -5,6 +5,42 @@ const { describeCallControls, describeCallTooltip } = require('../call-controls'
 
 const CALL_ICONS_DIR = path.join(__dirname, '..', '..', 'assets', 'call');
 const TRAY_IN_CALL_ICON_PATH = path.join(CALL_ICONS_DIR, 'tray-in-call.png');
+const PERSONALIZE_REGISTRY_KEY = ['HKCU', 'Software', 'Microsoft', 'Windows', 'CurrentVersion', 'Themes', 'Personalize']
+  .join(String.fromCharCode(92));
+
+function parseSystemUsesLightTheme(output) {
+  const match = /SystemUsesLightTheme\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(String(output || ''));
+  return match ? Number.parseInt(match[1], 16) !== 0 : null;
+}
+
+/**
+ * The thumbnail toolbar sits on the taskbar flyout, which follows the Windows
+ * system (taskbar) theme rather than the app theme Electron reports. Reads it
+ * once and again after a theme change; unknown means dark, the Windows default.
+ */
+function createWindowsTaskbarThemeReader({ execFileSync, log = console }) {
+  let dark = null;
+  return {
+    invalidate() {
+      dark = null;
+    },
+    isDark() {
+      if (dark !== null) return dark;
+      try {
+        const output = execFileSync('reg', ['query', PERSONALIZE_REGISTRY_KEY, '/v', 'SystemUsesLightTheme'], {
+          encoding: 'utf8',
+          timeout: 2000,
+          windowsHide: true
+        });
+        dark = parseSystemUsesLightTheme(output) !== true;
+      } catch (error) {
+        log.warn?.('Failed to read the taskbar theme:', error?.message || error);
+        dark = true;
+      }
+      return dark;
+    }
+  };
+}
 
 // Glyph colour is picked for contrast with the shell theme: light glyphs on a
 // dark taskbar flyout, dark glyphs on a light one.
@@ -37,6 +73,10 @@ function createCallSurfaces({
   nativeImage,
   nativeTheme,
   platform = process.platform,
+  taskbarTheme = {
+    invalidate() {},
+    isDark: () => nativeTheme?.shouldUseDarkColors !== false
+  },
   windowLifecycle,
   dispatch,
   log = console
@@ -46,7 +86,7 @@ function createCallSurfaces({
   let currentState = null;
 
   function loadIcon(icon) {
-    const iconPath = resolveCallIconPath(icon, { dark: nativeTheme?.shouldUseDarkColors !== false });
+    const iconPath = resolveCallIconPath(icon, { dark: taskbarTheme.isDark() });
     if (!iconCache.has(iconPath)) iconCache.set(iconPath, nativeImage.createFromPath(iconPath));
     return iconCache.get(iconPath);
   }
@@ -84,6 +124,7 @@ function createCallSurfaces({
   }
 
   nativeTheme?.on?.('updated', () => {
+    taskbarTheme.invalidate();
     if (platform === 'win32' && currentState?.active) applyThumbar(windowLifecycle.getMainWindow());
   });
 
@@ -97,9 +138,12 @@ function createCallSurfaces({
 
 module.exports = {
   CALL_ICONS_DIR,
+  PERSONALIZE_REGISTRY_KEY,
   TRAY_IN_CALL_ICON_PATH,
   buildCallMenuItems,
   buildThumbarButtons,
   createCallSurfaces,
+  createWindowsTaskbarThemeReader,
+  parseSystemUsesLightTheme,
   resolveCallIconPath
 };

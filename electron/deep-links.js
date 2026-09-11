@@ -4,6 +4,7 @@ const STABLE_PROTOCOL_SCHEME = 'voiceroom';
 const DEV_PROTOCOL_SCHEME = 'voiceroom-dev';
 const OPEN_CHANNEL = 'desktop-links:open';
 const READY_CHANNEL = 'desktop-links:ready';
+const UNSUBSCRIBE_CHANNEL = 'desktop-links:unsubscribe';
 const MAX_LINK_LENGTH = 2048;
 // Mirrors extractRoomId() in the web client.
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{3,48}$/;
@@ -57,7 +58,9 @@ function findDeepLinkArgument(argv, scheme = STABLE_PROTOCOL_SCHEME) {
 function resolveAppRouteUrl(appUrl, route = '/') {
   try {
     const base = new URL(appUrl);
-    const target = new URL(route, base);
+    if (!base.pathname.endsWith('/')) base.pathname = `${base.pathname}/`;
+    // Routes are relative to the configured app path, which may not be the root.
+    const target = new URL(String(route).replace(/^\/+/, ''), base);
     return target.origin === base.origin ? target.toString() : base.toString();
   } catch {
     return appUrl;
@@ -112,11 +115,17 @@ function createDeepLinkController({
     if (!state) {
       state = { loadedAt: 0, pending: null, subscribed: false, timer: null };
       pages.set(webContents, state);
+      // A new document must subscribe again. A waiting link survives the
+      // navigation: did-finish-load restarts its grace period on the new page.
+      webContents.on('did-start-navigation', (event, _url, isInPlace, isMainFrame) => {
+        const mainFrame = event?.isMainFrame ?? isMainFrame;
+        const sameDocument = event?.isSameDocument ?? isInPlace;
+        if (mainFrame && !sameDocument) state.subscribed = false;
+      });
       webContents.on('did-navigate', () => {
-        // A new document must subscribe again; a link that was waiting for the
-        // old one is replaced by whatever that navigation loads.
         state.subscribed = false;
-        clearPending(state);
+        if (state.timer) cancel(state.timer);
+        state.timer = null;
       });
       webContents.on('did-finish-load', () => {
         state.loadedAt = now();
@@ -274,6 +283,16 @@ function createDeepLinkController({
       if (link) event.sender.send(OPEN_CHANNEL, link);
       return { ok: true, scheme };
     });
+
+    // The page stopped routing links (e.g. the lobby unmounted on logout):
+    // later links fall back to navigation instead of reaching no listener.
+    ipcMain.handle(UNSUBSCRIBE_CHANNEL, (event) => {
+      if (!isTrustedFrame(event.senderFrame)) {
+        throw new Error('Desktop links are only available for the configured Voice Room URL.');
+      }
+      pageState(event.sender).subscribed = false;
+      return { ok: true };
+    });
   }
 
   return {
@@ -294,6 +313,7 @@ module.exports = {
   READY_CHANNEL,
   STABLE_PROTOCOL_SCHEME,
   SUBSCRIBE_GRACE_MS,
+  UNSUBSCRIBE_CHANNEL,
   createDeepLinkController,
   findDeepLinkArgument,
   parseDeepLink,

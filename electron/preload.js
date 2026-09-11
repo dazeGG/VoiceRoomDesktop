@@ -127,15 +127,25 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopAttention', {
   setBadgeCount: (count) => ipcRenderer.invoke('desktop-attention:set-badge-count', count)
 });
 
+let desktopLinkListenerCount = 0;
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopLinks', {
   onOpen: (handler) => {
     if (typeof handler !== 'function') return () => {};
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('desktop-links:open', listener);
+    desktopLinkListenerCount += 1;
     // Subscribing tells the shell this page routes links itself; links that
     // arrived while it was loading are delivered right after.
     ipcRenderer.invoke('desktop-links:ready').catch(() => {});
-    return () => ipcRenderer.removeListener('desktop-links:open', listener);
+    let removed = false;
+    return () => {
+      if (removed) return;
+      removed = true;
+      ipcRenderer.removeListener('desktop-links:open', listener);
+      desktopLinkListenerCount -= 1;
+      if (desktopLinkListenerCount === 0) ipcRenderer.invoke('desktop-links:unsubscribe').catch(() => {});
+    };
   }
 });
 

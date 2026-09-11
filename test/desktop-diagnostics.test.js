@@ -32,6 +32,7 @@ function createHarness(overrides = {}) {
     clipboard: { writeText: (text) => copied.push(text) },
     env: {},
     getAutostartSettings: () => ({ openAtLogin: true, startMinimized: true, supported: true }),
+    getHotkeysBackend: () => 'native',
     getNativeHelpers: () => ({ audio: true, capture: false, hotkeys: true }),
     getUpdateState: () => ({ phase: 'ready', version: '1.3.1' }),
     isVoiceActive: () => true,
@@ -86,7 +87,8 @@ describe('desktop diagnostics controller', () => {
     controller.setContext({ roomId: 'room-1', userId: 'user-7' });
     const info = controller.getInfo();
 
-    assert.deepEqual(info.app, { channel: 'release', packageType: 'nsis', version: '1.3.0' });
+    assert.deepEqual(info.app, { channel: 'stable', packageType: 'nsis', version: '1.3.0' });
+    assert.equal(info.hotkeysBackend, 'native');
     assert.deepEqual(info.nativeHelpers, { audio: true, capture: false, hotkeys: true });
     assert.deepEqual(info.update, { phase: 'ready', version: '1.3.1' });
     assert.deepEqual(info.context, { roomId: 'room-1', userId: 'user-7' });
@@ -94,11 +96,12 @@ describe('desktop diagnostics controller', () => {
     assert.equal(info.text, [
       'Voice Room Desktop diagnostics',
       'generated: 2026-09-11T10:00:00.000Z',
-      'app: 1.3.0 (release, nsis)',
+      'app: 1.3.0 (stable, nsis)',
       'electron: 41.10.2, chromium: 146.0.0.0, node: 24.1.0',
       'os: win32 10.0.26200 x64, locale: ru',
       'gpu: gpu_compositing=enabled, video_decode=enabled',
       'native helpers: audio=yes, capture=no, hotkeys=yes',
+      'hotkeys backend: native',
       'update: ready 1.3.1',
       'autostart: yes (minimized)',
       'voice active: yes',

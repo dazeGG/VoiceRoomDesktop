@@ -11,7 +11,7 @@ const { createDeepLinkController, resolveProtocolScheme } = require('./deep-link
 const { createDiagnosticsController } = require('./diagnostics');
 const { getNativeAudioCapabilities } = require('./native/audio');
 const { findNativeHotkeyHelper } = require('./native/hotkeys');
-const { createCallSurfaces } = require('./window/call-surfaces');
+const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
 const { consumeRelaunchIntent, resolveStartHidden, writeRelaunchIntent } = require('./app/launch-mode');
 const { createKeepAwakeController } = require('./keep-awake');
 const { getNativeCaptureCapabilities } = require('./native/capture');
@@ -182,6 +182,7 @@ const windowState = createWindowStateController({
   // The screen module is only usable after app ready; resolve it lazily.
   screen: {
     getAllDisplays: () => require('electron').screen.getAllDisplays(),
+    getDisplayMatching: (bounds) => require('electron').screen.getDisplayMatching(bounds),
     getPrimaryDisplay: () => require('electron').screen.getPrimaryDisplay()
   }
 });
@@ -211,6 +212,9 @@ const callSurfaces = createCallSurfaces({
   nativeImage,
   nativeTheme,
   platform: process.platform,
+  ...(process.platform === 'win32'
+    ? { taskbarTheme: createWindowsTaskbarThemeReader({ execFileSync: require('node:child_process').execFileSync, log }) }
+    : {}),
   windowLifecycle
 });
 callControls.onStateChange((state) => callSurfaces.apply(state));
@@ -219,6 +223,7 @@ const diagnostics = createDiagnosticsController({
   app,
   clipboard,
   getAutostartSettings: () => autostart.getSettings(),
+  getHotkeysBackend: () => desktopHotkeys.getBackend(),
   getNativeHelpers: () => ({
     audio: getNativeAudioCapabilities().nativeSafeLoopback,
     capture: getNativeCaptureCapabilities().available,

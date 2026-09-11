@@ -7,8 +7,11 @@ const { describe, it } = require('node:test');
 const { INACTIVE_CALL_STATE } = require('../electron/call-controls');
 const {
   CALL_ICONS_DIR,
+  PERSONALIZE_REGISTRY_KEY,
   buildThumbarButtons,
   createCallSurfaces,
+  createWindowsTaskbarThemeReader,
+  parseSystemUsesLightTheme,
   resolveCallIconPath
 } = require('../electron/window/call-surfaces');
 
@@ -124,6 +127,59 @@ describe('call surfaces on Windows', () => {
     harness.surfaces.apply(ACTIVE);
     harness.surfaces.attachWindow(lateWindow);
     assert.equal(lateWindow.thumbarCalls.at(-1).length, 3);
+  });
+});
+
+describe('Windows taskbar theme', () => {
+  const BACKSLASH = String.fromCharCode(92);
+
+  it('parses the reg query output', () => {
+    assert.equal(PERSONALIZE_REGISTRY_KEY.split(BACKSLASH).join('/'), 'HKCU/Software/Microsoft/Windows/CurrentVersion/Themes/Personalize');
+    assert.equal(parseSystemUsesLightTheme('    SystemUsesLightTheme    REG_DWORD    0x0'), false);
+    assert.equal(parseSystemUsesLightTheme('    SystemUsesLightTheme    REG_DWORD    0x1'), true);
+    assert.equal(parseSystemUsesLightTheme('ERROR: nothing'), null);
+  });
+
+  it('caches the answer until invalidated and defaults to dark', () => {
+    const outputs = ['SystemUsesLightTheme    REG_DWORD    0x1', 'SystemUsesLightTheme    REG_DWORD    0x0'];
+    const calls = [];
+    const reader = createWindowsTaskbarThemeReader({
+      execFileSync: (file, args) => {
+        calls.push([file, args]);
+        return outputs.shift();
+      },
+      log: { warn() {} }
+    });
+
+    assert.equal(reader.isDark(), false);
+    assert.equal(reader.isDark(), false);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], ['reg', ['query', PERSONALIZE_REGISTRY_KEY, '/v', 'SystemUsesLightTheme']]);
+    reader.invalidate();
+    assert.equal(reader.isDark(), true);
+
+    const failing = createWindowsTaskbarThemeReader({ execFileSync: () => { throw new Error('no reg'); }, log: { warn() {} } });
+    assert.equal(failing.isDark(), true);
+  });
+
+  it('picks glyphs from the taskbar theme and re-reads it after a theme change', () => {
+    const harness = createHarness();
+    let invalidations = 0;
+    const lightTaskbar = createCallSurfaces({
+      app: {},
+      Menu: { buildFromTemplate: (template) => template },
+      dispatch() {},
+      nativeImage: { createFromPath: (iconPath) => ({ iconPath }) },
+      nativeTheme: harness.nativeTheme,
+      platform: 'win32',
+      taskbarTheme: { invalidate: () => { invalidations += 1; }, isDark: () => false },
+      windowLifecycle: { getMainWindow: () => harness.window, setCallMenu() {} }
+    });
+
+    lightTaskbar.apply(ACTIVE);
+    assert.deepEqual(harness.window.thumbarCalls.at(-1)[0].icon, { iconPath: path.join(CALL_ICONS_DIR, 'mic-off-dark.png') });
+    harness.nativeTheme.emit('updated');
+    assert.equal(invalidations, 1);
   });
 });
 

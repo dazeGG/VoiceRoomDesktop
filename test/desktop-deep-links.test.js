@@ -7,6 +7,7 @@ const {
   OPEN_CHANNEL,
   READY_CHANNEL,
   SUBSCRIBE_GRACE_MS,
+  UNSUBSCRIBE_CHANNEL,
   createDeepLinkController,
   findDeepLinkArgument,
   parseDeepLink,
@@ -71,7 +72,10 @@ describe('deep link parsing', () => {
   it('keeps routes on the configured origin', () => {
     assert.equal(resolveAppRouteUrl('https://voiceroom.ru', '/r/abc123'), 'https://voiceroom.ru/r/abc123');
     assert.equal(resolveAppRouteUrl('https://voiceroom.ru/', '/?dm=x1'), 'https://voiceroom.ru/?dm=x1');
-    assert.equal(resolveAppRouteUrl('https://voiceroom.ru', '//evil.example/r/abc123'), 'https://voiceroom.ru/');
+    assert.equal(resolveAppRouteUrl('https://voiceroom.ru', '//evil.example/r/abc123'), 'https://voiceroom.ru/evil.example/r/abc123');
+    assert.equal(resolveAppRouteUrl('https://voiceroom.ru', 'https://evil.example/r/abc123'), 'https://voiceroom.ru/');
+    assert.equal(resolveAppRouteUrl('https://host.example/app', '/r/abc123'), 'https://host.example/app/r/abc123');
+    assert.equal(resolveAppRouteUrl('https://host.example/app/', '/'), 'https://host.example/app/');
     assert.equal(resolveAppRouteUrl('', '/r/abc123'), '');
   });
 });
@@ -180,6 +184,7 @@ function createHarness({
     fireTimers: () => timers.filter((timer) => !timer.cancelled).forEach((timer) => { timer.cancelled = true; timer.callback(); }),
     missing,
     ready: (webContents, frame = { trusted: true }) => handlers.get(READY_CHANNEL)({ sender: webContents, senderFrame: frame }),
+    unsubscribe: (webContents, frame = { trusted: true }) => handlers.get(UNSUBSCRIBE_CHANNEL)({ sender: webContents, senderFrame: frame }),
     registrations,
     restores,
     state,
@@ -295,6 +300,56 @@ describe('deep link controller', () => {
 
     harness.ready(window.webContents);
     assert.deepEqual(window.webContents.sent.map(([channel]) => channel), [OPEN_CHANNEL]);
+  });
+
+  it('keeps a link that arrives while a navigation is committing', () => {
+    const window = new FakeWindow({ loading: true });
+    const harness = createHarness({ window });
+    harness.controller.attachWindow(window);
+
+    harness.controller.handleUrl('voiceroom://r/abc123');
+    window.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    window.webContents.emit('did-navigate');
+    window.webContents.loading = false;
+    window.webContents.emit('did-finish-load');
+    harness.ready(window.webContents);
+
+    assert.deepEqual(window.webContents.sent, [[OPEN_CHANNEL, { kind: 'room', roomId: 'abc123', route: '/r/abc123' }]]);
+    harness.fireTimers();
+    assert.deepEqual(window.loaded, []);
+    assert.equal(window.webContents.sent.length, 1, 'delivered exactly once');
+  });
+
+  it('stops sending to a page that started reloading', () => {
+    const window = new FakeWindow();
+    const harness = createHarness({ window });
+    harness.controller.attachWindow(window);
+    harness.ready(window.webContents);
+
+    window.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
+    harness.controller.handleUrl('voiceroom://r/abc123');
+    assert.equal(window.webContents.sent.length, 1, 'same-document navigation keeps the subscription');
+
+    window.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    window.webContents.loading = true;
+    harness.controller.handleUrl('voiceroom://r/xyz789');
+    assert.equal(window.webContents.sent.length, 1, 'the outgoing document gets nothing');
+  });
+
+  it('falls back to navigation once the page unsubscribes', async () => {
+    const window = new FakeWindow();
+    const harness = createHarness({ window });
+    harness.controller.attachWindow(window);
+    harness.ready(window.webContents);
+    assert.deepEqual(harness.unsubscribe(window.webContents), { ok: true });
+
+    harness.controller.handleUrl('voiceroom://r/abc123');
+    harness.fireTimers();
+    await flush();
+
+    assert.deepEqual(window.webContents.sent, []);
+    assert.deepEqual(window.loaded, ['https://voiceroom.ru/r/abc123']);
+    assert.throws(() => harness.unsubscribe(window.webContents, { trusted: false }), /Desktop links are only available/);
   });
 
   it('only focuses the window for an unsupported link', () => {

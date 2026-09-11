@@ -97,7 +97,7 @@ Release builds register the `voiceroom://` scheme; development and unpackaged bu
 
 Anything else only brings the window to the front.
 
-- The NSIS installer and the macOS app bundle register the scheme. On launch, installed builds re-register it; the portable build takes it only when no other installation owns it.
+- The NSIS installer registers the scheme for the current user (`build/installer.nsh`, removed again on uninstall) and the macOS app bundle declares it in `Info.plist`, so links work before the first launch. On launch, installed builds re-register it; the portable build takes it only when no other installation owns it.
 - A link that starts the app opens its route as the first page, never starts hidden, and still goes through the update gate.
 - A link that arrives while the app runs restores the window and is handed to the page:
 

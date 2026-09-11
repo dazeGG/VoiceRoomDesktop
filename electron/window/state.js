@@ -142,6 +142,18 @@ function createWindowStateController({
     }
   }
 
+  // Recorded for troubleshooting multi-monitor setups; restoring works from
+  // the live display list and does not depend on it.
+  function matchDisplay(bounds) {
+    try {
+      const display = screen.getDisplayMatching?.(bounds);
+      const displayBounds = normalizeRect(display?.bounds);
+      return display && displayBounds ? { bounds: displayBounds, id: display.id } : null;
+    } catch {
+      return null;
+    }
+  }
+
   function resolveInitialState() {
     try {
       return resolveWindowBounds({
@@ -166,7 +178,11 @@ function createWindowStateController({
       if (window.isDestroyed() || window.isMinimized()) return null;
       if (window.isVisible() && !window.isFullScreen()) lastMaximized = window.isMaximized();
       const bounds = normalizeRect(window.getNormalBounds());
-      return bounds ? { bounds, isMaximized: lastMaximized } : null;
+      if (!bounds) return null;
+      const state = { bounds, isMaximized: lastMaximized };
+      const display = matchDisplay(bounds);
+      if (display) state.display = display;
+      return state;
     }
 
     function saveNow() {

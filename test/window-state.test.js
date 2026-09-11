@@ -191,13 +191,26 @@ describe('window state controller', () => {
     });
   });
 
-  it('applies restored bounds with setBounds so a scaled monitor keeps the window size', () => {
+  it('applies restored bounds twice so the size is converted with the target monitor scale', () => {
     const harness = createHarness();
-    const applied = [];
-    const window = { setBounds: (bounds) => applied.push(bounds) };
+    const bounds = { x: 2100, y: 120, width: 1000, height: 700 };
+    const placedWindow = (placed) => {
+      const applied = [];
+      return { applied, getBounds: () => placed, setBounds: (next) => applied.push(next) };
+    };
 
-    harness.controller.applyBounds(window, { x: 2100, y: 120, width: 1000, height: 700 });
-    assert.deepEqual(applied, [{ x: 2100, y: 120, width: 1000, height: 700 }]);
+    const exact = placedWindow(bounds);
+    harness.controller.applyBounds(exact, bounds);
+    assert.deepEqual(exact.applied, [bounds, bounds]);
+
+    // Measured on a 125% monitor: 1000x776 came back as 1003x778.
+    const rounded = placedWindow({ ...bounds, width: 1003, height: 702 });
+    harness.controller.applyBounds(rounded, bounds);
+    assert.deepEqual(rounded.applied, [bounds, bounds, { ...bounds, width: 997, height: 698 }]);
+
+    const clamped = placedWindow({ ...bounds, width: 1400, height: 700 });
+    harness.controller.applyBounds(clamped, bounds);
+    assert.deepEqual(clamped.applied, [bounds, bounds], 'a real size constraint is not rounding drift');
 
     assert.doesNotThrow(() => harness.controller.applyBounds({ setBounds: () => { throw new Error('destroyed'); } }, { x: 0, y: 0, width: 10, height: 10 }));
   });

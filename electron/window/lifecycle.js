@@ -18,6 +18,7 @@ function createWindowLifecycleController({
   let nextCloseIsExplicit = false;
   let quitRequested = false;
   let tray = null;
+  let updateAction = null;
 
   function attachMainWindow(window) {
     mainWindow = window;
@@ -49,21 +50,40 @@ function createWindowLifecycleController({
 
     tray = new Tray(resolveTrayIconPath());
     tray.setToolTip('Voice Room');
-    tray.setContextMenu(Menu.buildFromTemplate([
+    tray.setContextMenu(buildTrayMenu());
+    tray.on('click', restoreMainWindow);
+    tray.on('double-click', restoreMainWindow);
+  }
+
+  function buildTrayMenu() {
+    const template = [
       {
         label: 'Открыть Voice Room',
         click: restoreMainWindow
-      },
-      {
-        label: 'Выход',
-        click: () => {
-          requestQuit();
-          app.quit();
-        }
       }
-    ]));
-    tray.on('click', restoreMainWindow);
-    tray.on('double-click', restoreMainWindow);
+    ];
+    if (updateAction) {
+      template.push({ label: updateAction.label, click: updateAction.click });
+    }
+    template.push({
+      label: 'Выход',
+      click: () => {
+        requestQuit();
+        app.quit();
+      }
+    });
+    return Menu.buildFromTemplate(template);
+  }
+
+  function setUpdateAction(action) {
+    updateAction = action && typeof action.click === 'function'
+      ? { label: String(action.label || 'Обновить и перезапустить'), click: action.click }
+      : null;
+    if (tray) tray.setContextMenu(buildTrayMenu());
+  }
+
+  function isMainWindowVisible() {
+    return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
   }
 
   function installExplicitQuitShortcut(window) {
@@ -116,9 +136,11 @@ function createWindowLifecycleController({
     attachMainWindow,
     hasTray,
     installTray,
+    isMainWindowVisible,
     isQuitRequested,
     requestQuit,
     restoreMainWindow,
+    setUpdateAction,
     shouldQuitForWindowAllClosed
   };
 }

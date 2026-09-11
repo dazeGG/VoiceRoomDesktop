@@ -59,7 +59,7 @@ function createUpdateSplashWindow() {
 }
 
 function sendState(window, state) {
-  if (!window?.isDestroyed()) {
+  if (window && !window.isDestroyed()) {
     window.webContents.send('update-gate:state', state);
   }
 }
@@ -115,7 +115,11 @@ function runUpdateGate(options = {}) {
   autoUpdater.allowDowngrade = false;
   autoUpdater.disableDifferentialDownload = true;
 
-  const splash = createUpdateSplashWindow();
+  // Silent gates run for hidden launches (autostart to tray, background update
+  // relaunch): no splash, never block on errors, and leave downloads to the
+  // background updater so the app is usable from the tray right away.
+  const silent = options.silent === true;
+  const splash = silent ? null : createUpdateSplashWindow();
 
   return new Promise((resolve) => {
     let settled = false;
@@ -144,7 +148,7 @@ function runUpdateGate(options = {}) {
       if (settled) return;
       settled = true;
       cleanup();
-      if (!splash.isDestroyed()) splash.close();
+      if (splash && !splash.isDestroyed()) splash.close();
       resolve(result);
     }
 
@@ -157,6 +161,10 @@ function runUpdateGate(options = {}) {
       fallbackStarted = true;
       cleanup();
       if (error) log.error('Auto-updater unavailable:', error);
+      if (silent) {
+        finish({ ok: true, updateError: true });
+        return;
+      }
       sendState(splash, createUpdateErrorState({ canProceed: false }));
 
       const siteAvailable = await (options.checkSiteAvailability || checkSiteAvailability)(options.appUrl);
@@ -183,6 +191,10 @@ function runUpdateGate(options = {}) {
       },
       'update-available': () => {
         clearTimers();
+        if (silent) {
+          finish({ ok: true, updateAvailable: true });
+          return;
+        }
         sendState(splash, {
           blocked: false,
           message: 'Загрузка обновления...',
@@ -226,15 +238,7 @@ function runUpdateGate(options = {}) {
       }
     });
 
-    splash.once('ready-to-show', () => {
-      splash.show();
-      sendState(splash, {
-        blocked: false,
-        message: 'Проверка обновлений...',
-        phase: 'checking',
-        progress: null
-      });
-
+    function startCheck() {
       checkTimer = setTimeout(() => {
         handleUpdateFailure(new Error('Update check timed out.'));
       }, CHECK_TIMEOUT_MS);
@@ -244,6 +248,22 @@ function runUpdateGate(options = {}) {
         log.error('Update check failed:', error);
         handleUpdateFailure(error);
       });
+    }
+
+    if (!splash) {
+      startCheck();
+      return;
+    }
+
+    splash.once('ready-to-show', () => {
+      splash.show();
+      sendState(splash, {
+        blocked: false,
+        message: 'Проверка обновлений...',
+        phase: 'checking',
+        progress: null
+      });
+      startCheck();
     });
 
     splash.loadFile(path.join(__dirname, '../ui/update-splash.html')).catch((error) => {

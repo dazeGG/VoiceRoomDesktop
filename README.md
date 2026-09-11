@@ -47,6 +47,27 @@ The helper is tied to the Electron process through its stdin pipe. Screen lock a
 
 If the native helper is missing or exits, the shell releases push-to-talk immediately and falls back to Electron global shortcuts for the two toggle actions. That fallback requires a modifier for letters, digits, punctuation, and navigation keys; function keys and Print Screen may be used without modifiers. The renderer receives a status update so it stops suppressing its focused-window fallback.
 
+## Keep the display awake in voice
+
+While the renderer reports an active voice connection through `voiceRoomDesktopHotkeys.configure({ active: true })`, the shell holds a `prevent-display-sleep` power blocker, so the screen does not dim or turn off while you talk, stream, or watch a stream. The blocker is released when voice ends (`active: false`, navigation, renderer failure, quit) and while the screen is locked. No extra web API is needed.
+
+## Autostart
+
+The hosted web app renders desktop-only autostart switches through `window.voiceRoomDesktopAutostart`:
+
+```js
+const settings = await window.voiceRoomDesktopAutostart.getSettings();
+// { supported: true, openAtLogin: false, startMinimized: false }
+
+await window.voiceRoomDesktopAutostart.setSettings({ openAtLogin: true, startMinimized: true });
+```
+
+- `openAtLogin` registers a login item: the `HKCU\...\Run` entry on Windows (the original executable for portable builds), a login item on macOS. On Windows it reads as `false` when the entry is disabled in Task Manager, and enabling it again re-enables the entry.
+- `startMinimized` starts the login launch hidden: in the tray on Windows (via the `--hidden` argument), without a window on macOS (click the Dock icon to open it). The preference is kept in `desktop-settings.json` in the user data folder, so it can be set while autostart is off.
+- Development builds report `{ supported: false, reason: 'unsupported' }`.
+
+A hidden launch skips the update splash (see below) and retries loading Voice Room in the background every 30 seconds until the network is up, instead of showing an error dialog at login.
+
 ## Taskbar badge and attention
 
 The hosted web app can mirror unread activity on the app icon and ask for attention while the window is in the background through `window.voiceRoomDesktopAttention`:
@@ -202,7 +223,15 @@ Packaged builds check GitHub Releases on startup before opening Voice Room.
 - if Voice Room is reachable, the launch screen shows the update error and an explicit button to enter the app without updating
 - if Voice Room is unreachable too, the app stays on the launch screen and shows a site-unavailable error
 
-Development builds started with `npm run electron` skip the update gate.
+Hidden launches (autostart to tray, background update relaunch) run the same check silently: no splash, errors never block, and an available update is left to the background updater.
+
+While the app runs, it checks GitHub Releases again every 4 hours (15 minutes after a failed check, and on wake from sleep once 4 hours have passed) and downloads updates silently. A downloaded update is installed:
+
+- when the user quits the app for real (tray "Выход", Alt+F4);
+- from the tray menu item "Установить обновление X.Y.Z", which restarts the app with its window open;
+- automatically once the window has stayed in the tray for 10 minutes with no voice connection; the app relaunches back into the tray.
+
+Development builds started with `npm run electron` skip the update gate and background updates. macOS auto-update stays disabled until Apple code signing is ready.
 
 ## Code signing policy
 

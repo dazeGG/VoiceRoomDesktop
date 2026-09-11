@@ -9,6 +9,7 @@ function createElectronMock() {
   const app = {
     commandLine: { appendSwitch() {} },
     getAppPath: () => path.join(__dirname, '..'),
+    getPath: () => path.join(__dirname, 'fixtures', 'missing-user-data'),
     getVersion: () => '0.0.0-test',
     isPackaged: false,
     on() {},
@@ -163,10 +164,12 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 1);
-    assert.equal(handleCalls, 9);
+    assert.equal(handleCalls, 11);
     assert.deepEqual([...handledChannels].sort(), [
       'desktop-attention:request',
       'desktop-attention:set-badge-count',
+      'desktop-autostart:get-settings',
+      'desktop-autostart:set-settings',
       'desktop-hotkeys:configure',
       'desktop-hotkeys:set-suspended',
       'desktop-idle:get-system-idle-time',
@@ -183,7 +186,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 3);
-    assert.equal(handleCalls, 9);
+    assert.equal(handleCalls, 11);
   } finally {
     delete require.cache[require.resolve(mainPath)];
     Module._load = originalLoad;

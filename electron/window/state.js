@@ -7,6 +7,9 @@ const MIN_WINDOW_SIZE = Object.freeze({ width: 420, height: 620 });
 // overlaps a display the user can still see.
 const MIN_VISIBLE_OVERLAP = Object.freeze({ width: 120, height: 48 });
 const SAVE_DEBOUNCE_MS = 500;
+// Largest size error (DIP) put down to pixel rounding on a scaled monitor;
+// anything bigger is a real constraint such as the minimum size.
+const MAX_ROUNDING_DRIFT = 4;
 
 function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value);
@@ -171,14 +174,25 @@ function createWindowStateController({
 
   /**
    * Places a freshly created (still hidden) window on its restored rectangle.
-   * A BrowserWindow constructed with x/y on a monitor whose scale differs from
-   * the primary one is resized again by Windows' DPI change and opens larger
-   * than it was closed. setBounds converts the DIP rectangle with the scale of
-   * the monitor it lands on, so the window keeps its size on every monitor.
+   * Windows converts the DIP size with the scale of the monitor the window is
+   * on at that moment, which for a new window is the primary one: restored onto
+   * a 125% monitor from a 100% primary it opened 25% larger than it was closed.
+   * The first call moves the window onto its monitor, the second one sizes it
+   * with that monitor's scale. Converting to pixels and back still rounds up by
+   * a pixel or two, which would grow the window a little on every launch, so
+   * that drift is taken back as well.
    */
   function applyBounds(window, bounds) {
     try {
       window.setBounds(bounds);
+      window.setBounds(bounds);
+      const placed = normalizeRect(window.getBounds());
+      if (!placed) return;
+      const width = placed.width - bounds.width;
+      const height = placed.height - bounds.height;
+      if ((width || height) && Math.abs(width) <= MAX_ROUNDING_DRIFT && Math.abs(height) <= MAX_ROUNDING_DRIFT) {
+        window.setBounds({ ...bounds, width: bounds.width - width, height: bounds.height - height });
+      }
     } catch (error) {
       log.warn?.('Failed to apply restored window bounds:', error);
     }

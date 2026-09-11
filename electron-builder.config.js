@@ -155,6 +155,8 @@ module.exports = {
   // Only nsis needs a suffix: in stable builds it coexists with the portable .exe,
   // so it takes "-setup" while portable keeps the plain base name.
   nsis: {
-    artifactName: `${artifactBase}-setup.\${ext}`
+    artifactName: `${artifactBase}-setup.\${ext}`,
+    // Removes the (possibly disabled) autostart Run entry on uninstall.
+    include: 'build/installer.nsh'
   }
 };

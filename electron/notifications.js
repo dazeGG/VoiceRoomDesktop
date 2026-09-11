@@ -40,8 +40,10 @@ function describeNotificationError(error) {
 
 function showDesktopNotification({ Notification, payload, restoreMainWindow }) {
   const sanitized = sanitizeNotificationPayload(payload);
+  // Silent: the web client plays its own cues, so the OS sound would double them.
   const notification = new Notification({
     body: sanitized.body || '',
+    silent: true,
     title: sanitized.title || 'Voice Room'
   });
 

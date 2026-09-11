@@ -102,6 +102,14 @@ describe('desktop notifications bridge', () => {
     assert.equal(notifications.length, 0);
   });
 
+  it('creates silent notifications so the OS sound never doubles the app cue', async () => {
+    const { handler, notifications } = createHarness();
+
+    await handler(createEvent(), { body: 'Body', title: 'Title' });
+
+    assert.equal(notifications[0].options.silent, true);
+  });
+
   it('creates supported notifications with sanitized title/body only', async () => {
     const { handler, notifications } = createHarness();
 
@@ -114,7 +122,7 @@ describe('desktop notifications bridge', () => {
 
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0].shown, true);
-    assert.deepEqual(Object.keys(notifications[0].options).sort(), ['body', 'title']);
+    assert.deepEqual(Object.keys(notifications[0].options).sort(), ['body', 'silent', 'title']);
     assert.equal(notifications[0].options.title.length, 120);
     assert.equal(notifications[0].options.body.length, 512);
   });

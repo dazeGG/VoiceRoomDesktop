@@ -178,4 +178,35 @@ describe('window lifecycle controller', () => {
     assert.equal(trayInstances.length, 0);
     assert.equal(controller.shouldQuitForWindowAllClosed(), false);
   });
+
+  it('shows a ready update between open and exit in the tray menu', () => {
+    const { controller, trayInstances } = createControllerHarness();
+    const installs = [];
+    controller.installTray();
+
+    controller.setUpdateAction({ label: 'Установить обновление 1.3.0', click: () => installs.push(true) });
+    assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), [
+      'Открыть Voice Room',
+      'Установить обновление 1.3.0',
+      'Выход'
+    ]);
+    trayInstances[0].menu[1].click();
+    assert.deepEqual(installs, [true]);
+
+    controller.setUpdateAction(null);
+    assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), ['Открыть Voice Room', 'Выход']);
+  });
+
+  it('reports main window visibility for background update deferral', () => {
+    const { controller } = createControllerHarness();
+    assert.equal(controller.isMainWindowVisible(), false);
+
+    const window = createFakeWindow();
+    controller.installTray();
+    controller.attachMainWindow(window);
+    assert.equal(controller.isMainWindowVisible(), true);
+
+    window.emit('close', { preventDefault() {} });
+    assert.equal(controller.isMainWindowVisible(), false);
+  });
 });

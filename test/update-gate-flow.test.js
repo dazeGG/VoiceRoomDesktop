@@ -343,3 +343,67 @@ describe('runUpdateGate updater failure flow', () => {
   });
 
 });
+
+describe('runUpdateGate silent hidden launch', () => {
+  it('checks without a splash and never blocks on updater failures', async () => {
+    const gate = loadUpdateGateWithMocks();
+    try {
+      const result = await gate.runUpdateGate({
+        appUrl: 'https://voiceroom.example',
+        autoUpdater: createAutoUpdater({ checkError: new Error('offline at login') }),
+        checkSiteAvailability: async () => {
+          throw new Error('site check should not run');
+        },
+        silent: true
+      });
+
+      assert.deepEqual(result, { ok: true, updateError: true });
+      assert.equal(gate.windows.length, 0);
+    } finally {
+      gate.restore();
+    }
+  });
+
+  it('hands an available update to the background updater instead of downloading', async () => {
+    const gate = loadUpdateGateWithMocks();
+    try {
+      const updater = createAutoUpdater();
+      let downloads = 0;
+      updater.checkForUpdates = async () => {
+        updater.emit('update-available');
+      };
+      updater.downloadUpdate = async () => {
+        downloads += 1;
+      };
+
+      const result = await gate.runUpdateGate({
+        appUrl: 'https://voiceroom.example',
+        autoUpdater: updater,
+        silent: true
+      });
+
+      assert.deepEqual(result, { ok: true, updateAvailable: true });
+      assert.equal(downloads, 0);
+      assert.equal(gate.windows.length, 0);
+      assert.equal(updater.listenerCount('update-available'), 0);
+    } finally {
+      gate.restore();
+    }
+  });
+
+  it('resolves normally when no update is available', async () => {
+    const gate = loadUpdateGateWithMocks();
+    try {
+      const result = await gate.runUpdateGate({
+        appUrl: 'https://voiceroom.example',
+        autoUpdater: createAutoUpdater(),
+        silent: true
+      });
+
+      assert.deepEqual(result, { ok: true });
+      assert.equal(gate.windows.length, 0);
+    } finally {
+      gate.restore();
+    }
+  });
+});

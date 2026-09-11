@@ -178,7 +178,7 @@ describe('window state controller', () => {
 
   it('records the display the window sits on', () => {
     const harness = createHarness({
-      getDisplayMatching: () => ({ bounds: { x: 0, y: 0, width: 1920, height: 1080 }, id: 2528732444 })
+      getDisplayMatching: () => ({ bounds: { x: 1920, y: 0, width: 2752, height: 1152 }, id: 2528732444, scaleFactor: 1.25 })
     });
     const window = new FakeWindow();
     harness.controller.track(window);
@@ -186,9 +186,20 @@ describe('window state controller', () => {
 
     assert.deepEqual(harness.read(), {
       bounds: window.normalBounds,
-      display: { bounds: { x: 0, y: 0, width: 1920, height: 1080 }, id: 2528732444 },
+      display: { bounds: { x: 1920, y: 0, width: 2752, height: 1152 }, id: 2528732444, scaleFactor: 1.25 },
       isMaximized: false
     });
+  });
+
+  it('applies restored bounds with setBounds so a scaled monitor keeps the window size', () => {
+    const harness = createHarness();
+    const applied = [];
+    const window = { setBounds: (bounds) => applied.push(bounds) };
+
+    harness.controller.applyBounds(window, { x: 2100, y: 120, width: 1000, height: 700 });
+    assert.deepEqual(applied, [{ x: 2100, y: 120, width: 1000, height: 700 }]);
+
+    assert.doesNotThrow(() => harness.controller.applyBounds({ setBounds: () => { throw new Error('destroyed'); } }, { x: 0, y: 0, width: 10, height: 10 }));
   });
 
   it('never persists fullscreen or minimized geometry', () => {

@@ -159,6 +159,21 @@ describe('electron-builder config', () => {
     assert.match(runtimeSmoke, /VOICE_ROOM_CAPTURE_HELPER:[\s\S]*VOICE_ROOM_CAPTURE_SOURCE:/);
   });
 
+  it('removes the Windows autostart entry on uninstall but keeps it across updates', () => {
+    assert.equal(builderConfig.nsis.include, 'build/installer.nsh');
+    const script = fs.readFileSync(path.join(rootDir, builderConfig.nsis.include), 'utf8');
+    const macro = script.match(/!macro customUnInstall\s([\s\S]*?)!macroend/);
+    assert.ok(macro, 'build/installer.nsh must define customUnInstall');
+
+    const guarded = macro[1].match(/\$\{ifNot\} \$\{isUpdated\}([\s\S]*?)\$\{endIf\}/);
+    assert.ok(guarded, 'autostart cleanup must skip update uninstalls');
+    assert.match(guarded[1], /DeleteRegValue HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "\$\{APP_ID\}"/);
+    assert.match(
+      guarded[1],
+      /DeleteRegValue HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run" "\$\{APP_ID\}"/
+    );
+  });
+
   it('packages native capture utility process modules', () => {
     assert.ok(builderConfig.files.includes('electron/native/capture.js'));
     assert.ok(builderConfig.files.includes('electron/native-capture-contract.js'));

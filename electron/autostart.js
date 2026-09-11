@@ -57,17 +57,21 @@ function createAutostartController({
       return app.getLoginItemSettings().openAtLogin === true;
     }
 
-    // `openAtLogin` matches our Run entry exactly. Electron only reports an entry
-    // in `launchItems` (and `executableWillLaunchAtLogin`) once it has a
-    // StartupApproved value, which `setLoginItemSettings` does not write for an
-    // enabled entry — so a missing approval means enabled, and an entry listed
-    // as not enabled was turned off in Task Manager.
-    const settings = app.getLoginItemSettings(windowsLoginItem(startMinimized));
+    // Electron matches Run entries by parsing `path` as a command line, so an
+    // unquoted path with a space ("…\Voice Room.exe") never matches and
+    // `launchItems` comes back empty. It strips surrounding quotes before
+    // comparing `openAtLogin`, so the quoted path serves both: `openAtLogin`
+    // matches our Run entry (path and args), `launchItems` carries its Task
+    // Manager enabled state.
+    const executable = windowsExecutablePath();
+    const settings = app.getLoginItemSettings({
+      ...windowsLoginItem(startMinimized),
+      path: `"${executable}"`
+    });
     if (settings.openAtLogin !== true) return false;
-    const executable = windowsExecutablePath().toLowerCase();
-    const approval = (settings.launchItems || [])
-      .find((item) => typeof item?.path === 'string' && item.path.toLowerCase() === executable);
-    return approval?.enabled !== false;
+    const entry = (settings.launchItems || [])
+      .find((item) => typeof item?.path === 'string' && item.path.toLowerCase() === executable.toLowerCase());
+    return entry?.enabled !== false;
   }
 
   function getSettings() {
@@ -86,9 +90,12 @@ function createAutostartController({
 
   function applyLoginItem(openAtLogin, startMinimized) {
     if (platform === 'win32') {
+      // Turning autostart off keeps the Run entry and marks it disabled, the
+      // same state Task Manager writes, so the app switch and Task Manager
+      // control one startup entry. The uninstaller removes it.
       app.setLoginItemSettings({
-        enabled: true,
-        openAtLogin,
+        enabled: openAtLogin,
+        openAtLogin: true,
         ...windowsLoginItem(startMinimized)
       });
       return;

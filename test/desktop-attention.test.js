@@ -10,6 +10,7 @@ const {
   REQUEST_CHANNEL,
   configureDesktopAttentionIpc,
   createBadgeOverlayBitmap,
+  formatBadgeLabel,
   normalizeBadgeCount
 } = require('../electron/attention');
 
@@ -119,22 +120,38 @@ describe('desktop attention badge', () => {
     assert.deepEqual(harness.setBadgeCount(2), { ok: false, reason: 'unsupported' });
   });
 
-  it('shows and clears a Windows taskbar overlay, creating the icon once', () => {
+  it('labels counts up to 99 and shows 99+ beyond that', () => {
+    assert.equal(formatBadgeLabel(1), '1');
+    assert.equal(formatBadgeLabel(42), '42');
+    assert.equal(formatBadgeLabel(99), '99');
+    assert.equal(formatBadgeLabel(100), '99+');
+    assert.equal(formatBadgeLabel(MAX_BADGE_COUNT), '99+');
+  });
+
+  it('shows and clears a numbered Windows taskbar overlay, creating each label once', () => {
     const harness = createHarness();
 
     assert.deepEqual(harness.setBadgeCount(3), { ok: true, count: 3 });
     assert.deepEqual(harness.setBadgeCount(12), { ok: true, count: 12 });
+    assert.deepEqual(harness.setBadgeCount(3), { ok: true, count: 3 });
+    assert.deepEqual(harness.setBadgeCount(150), { ok: true, count: 150 });
+    assert.deepEqual(harness.setBadgeCount(420), { ok: true, count: 420 });
     assert.deepEqual(harness.setBadgeCount(0), { ok: true, count: 0 });
 
-    assert.equal(harness.createdImages.length, 1);
+    assert.equal(harness.createdImages.length, 3);
     assert.deepEqual(harness.createdImages[0].options, {
       width: OVERLAY_ICON_PIXELS,
       height: OVERLAY_ICON_PIXELS,
       scaleFactor: 2
     });
+    assert.deepEqual(harness.createdImages[0].buffer, createBadgeOverlayBitmap(OVERLAY_ICON_PIXELS, '3'));
+    assert.deepEqual(harness.createdImages[2].buffer, createBadgeOverlayBitmap(OVERLAY_ICON_PIXELS, '99+'));
     assert.deepEqual(harness.window.overlayCalls, [
       [harness.createdImages[0], 'Непрочитанных: 3'],
-      [harness.createdImages[0], 'Непрочитанных: 12'],
+      [harness.createdImages[1], 'Непрочитанных: 12'],
+      [harness.createdImages[0], 'Непрочитанных: 3'],
+      [harness.createdImages[2], 'Непрочитанных: 150'],
+      [harness.createdImages[2], 'Непрочитанных: 420'],
       [null, '']
     ]);
     assert.deepEqual(harness.badgeCounts, []);
@@ -148,7 +165,7 @@ describe('desktop attention badge', () => {
     assert.equal(harness.window.listenerCount('show'), 1);
 
     harness.window.emit('show');
-    assert.deepEqual(harness.window.overlayCalls.at(-1), [harness.createdImages[0], 'Непрочитанных: 6']);
+    assert.deepEqual(harness.window.overlayCalls.at(-1), [harness.createdImages[1], 'Непрочитанных: 6']);
 
     harness.setBadgeCount(0);
     const callsAfterClear = harness.window.overlayCalls.length;
@@ -181,6 +198,30 @@ describe('desktop attention overlay bitmap', () => {
       if (alpha > 0 && alpha < 255) partial++;
     }
     assert.ok(partial > 0, 'edge pixels should be anti-aliased');
+  });
+
+  it('writes the count in white inside the dot', () => {
+    const size = OVERLAY_ICON_PIXELS;
+    const white = (bitmap) => {
+      let count = 0;
+      for (let offset = 0; offset < bitmap.length; offset += 4) {
+        if (bitmap[offset + 3] === 255 && bitmap[offset] >= 230 && bitmap[offset + 1] >= 230 && bitmap[offset + 2] >= 230) count++;
+      }
+      return count;
+    };
+
+    assert.equal(white(createBadgeOverlayBitmap()), 0);
+    for (const label of ['1', '8', '47', '99+']) {
+      const bitmap = createBadgeOverlayBitmap(size, label);
+      assert.equal(bitmap.length, size * size * 4);
+      assert.deepEqual([...bitmap.subarray(0, 4)], [0, 0, 0, 0], `${label}: corners stay transparent`);
+      assert.ok(white(bitmap) > 6, `${label}: text is drawn`);
+      for (let offset = 0; offset < bitmap.length; offset += 4) {
+        const alpha = bitmap[offset + 3];
+        assert.ok(bitmap[offset] <= alpha && bitmap[offset + 1] <= alpha && bitmap[offset + 2] <= alpha);
+      }
+    }
+    assert.notDeepEqual(createBadgeOverlayBitmap(size, '1'), createBadgeOverlayBitmap(size, '7'));
   });
 });
 

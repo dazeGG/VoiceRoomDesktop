@@ -1,13 +1,17 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, shell, nativeImage, Notification, powerMonitor } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, shell, nativeImage, Notification, powerMonitor, powerSaveBlocker } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { configureDesktopAttentionIpc } = require('./attention');
+const { createAutostartController } = require('./autostart');
+const { consumeRelaunchIntent, resolveStartHidden, writeRelaunchIntent } = require('./app/launch-mode');
+const { createKeepAwakeController } = require('./keep-awake');
 const { getNativeCaptureCapabilities } = require('./native/capture');
+const { createBackgroundUpdateController } = require('./policies/update-background');
 const { runUpdateGate } = require('./policies/update-gate');
-const { readBuildProfile } = require('./policies/update-gate-policy');
+const { readBuildProfile, shouldRunUpdateGateState } = require('./policies/update-gate-policy');
 const {
   installBuildLabel,
   installMediaDeviceFilter,
@@ -170,6 +174,12 @@ const desktopHotkeys = createDesktopHotkeyController({
   nativeHotkeys: createNativeHotkeyBackend({ app, log })
 });
 
+const keepAwake = createKeepAwakeController({ powerSaveBlocker, log });
+desktopHotkeys.onVoiceActiveChange((active) => keepAwake.setVoiceActive(active));
+
+const autostart = createAutostartController({ app, fs, log, path });
+let backgroundUpdates = null;
+
 function configureWindowIpc() {
   ipcMain.handle('window:set-fullscreen', (event, fullscreen) => {
     if (!isTrustedFrame(event.senderFrame)) {
@@ -247,10 +257,68 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     desktopHotkeys.dispose();
+    keepAwake.dispose();
+    backgroundUpdates?.dispose();
   });
 
-  async function launchApplication() {
-    await appBootstrap.launchApplication();
+  function resolveInitialStartHidden() {
+    if (PICKER_PREVIEW_ENABLED) return false;
+
+    const relaunchIntent = consumeRelaunchIntent({ fs, path, userDataPath: app.getPath('userData') });
+    let loginItemSettings = null;
+    if (process.platform === 'darwin' && app.isPackaged) {
+      try {
+        loginItemSettings = app.getLoginItemSettings();
+      } catch (error) {
+        log.warn('Failed to read macOS login item state:', error);
+      }
+    }
+
+    return resolveStartHidden({
+      argv: process.argv,
+      loginItemSettings,
+      platform: process.platform,
+      relaunchIntent,
+      startMinimized: autostart.readStoredSettings().startMinimized
+    });
+  }
+
+  function startBackgroundUpdates(gate) {
+    if (backgroundUpdates) return;
+    const enabled = shouldRunUpdateGateState({
+      appPath: app.getAppPath(),
+      isPackaged: app.isPackaged,
+      previewEnabled: PICKER_PREVIEW_ENABLED
+    });
+    if (!enabled) return;
+
+    backgroundUpdates = createBackgroundUpdateController({
+      autoUpdater: require('electron-updater').autoUpdater,
+      beforeInstall: ({ startHidden }) => {
+        writeRelaunchIntent({ fs, path, startHidden, userDataPath: app.getPath('userData') });
+      },
+      isMainWindowVisible: () => windowLifecycle.isMainWindowVisible(),
+      isVoiceActive: () => desktopHotkeys.isVoiceActive(),
+      log,
+      onStateChange: ({ phase, version }) => {
+        windowLifecycle.setUpdateAction(phase === 'ready'
+          ? {
+              click: () => backgroundUpdates?.installNow({ startHidden: false }),
+              label: version ? `Установить обновление ${version}` : 'Установить обновление'
+            }
+          : null);
+      }
+    });
+    backgroundUpdates.installPowerMonitor(powerMonitor);
+    backgroundUpdates.start({
+      lastCheckFailed: gate.updateError === true,
+      updatePending: gate.updateAvailable === true
+    });
+  }
+
+  async function launchApplication(options) {
+    const gate = await appBootstrap.launchApplication(options);
+    if (gate?.ok) startBackgroundUpdates(gate);
   }
 
   app.whenReady().then(() => {
@@ -279,13 +347,15 @@ if (!gotLock) {
       });
       desktopHotkeys.install(ipcMain);
       desktopHotkeys.installPowerMonitor(powerMonitor);
+      keepAwake.installPowerMonitor(powerMonitor);
+      autostart.configureIpc({ ipcMain, isTrustedFrame });
     } catch (error) {
       log.error('Application service setup failed:', error);
       app.quit();
       return;
     }
 
-    launchApplication().catch((error) => {
+    launchApplication({ startHidden: resolveInitialStartHidden() }).catch((error) => {
       log.error('Application launch failed:', error);
       app.quit();
     });
@@ -296,7 +366,11 @@ if (!gotLock) {
           log.error('Application relaunch failed:', error);
           app.quit();
         });
+        return;
       }
+      // macOS: a login-item launch keeps the window hidden until the Dock icon
+      // is clicked.
+      windowLifecycle.restoreMainWindow();
     });
   });
 }

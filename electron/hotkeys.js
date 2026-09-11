@@ -115,6 +115,28 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
   const fallbackRegistrations = new Map();
   const nativeRegistrations = new Set();
   const systemSuspensionReasons = new Set();
+  const voiceActiveListeners = new Set();
+
+  // `configure({ active })` is the renderer's report of an active voice
+  // connection; other shell services (keep-awake, update deferral) follow it.
+  function setVoiceActive(nextActive) {
+    const next = Boolean(nextActive);
+    if (voiceActive === next) return;
+    voiceActive = next;
+    for (const listener of voiceActiveListeners) {
+      try {
+        listener(next);
+      } catch (error) {
+        log.warn?.('Voice activity listener failed:', error);
+      }
+    }
+  }
+
+  function onVoiceActiveChange(listener) {
+    if (typeof listener !== 'function') return () => {};
+    voiceActiveListeners.add(listener);
+    return () => voiceActiveListeners.delete(listener);
+  }
 
   function isSuspended() {
     return rendererSuspended || systemSuspensionReasons.size > 0;
@@ -192,7 +214,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
 
   function deactivate(options = {}) {
     generation += 1;
-    voiceActive = false;
+    setVoiceActive(false);
     currentBindings = {};
     unregisterOwnedShortcuts(options);
     clearRendererSuspension();
@@ -399,7 +421,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
     configurationId = nextConfigurationId;
 
     const active = payload?.active === true;
-    voiceActive = active;
+    setVoiceActive(active);
     const result = createRegistrationResult(active, 'none', configurationId);
     if (!active) {
       currentBindings = {};
@@ -514,6 +536,8 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
     dispose,
     install,
     installPowerMonitor,
+    isVoiceActive: () => voiceActive,
+    onVoiceActiveChange,
     setSuspended,
     setSystemSuspended
   };

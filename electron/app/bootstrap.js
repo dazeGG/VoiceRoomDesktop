@@ -8,6 +8,8 @@ const {
   installDesktopLayoutCss
 } = require('../window/app-topbar-view');
 
+const HIDDEN_LOAD_RETRY_MS = 30_000;
+
 function createAppBootstrap({
   app,
   BrowserWindow,
@@ -110,7 +112,52 @@ function createAppBootstrap({
     );
   }
 
-  function createWindow() {
+  // A hidden launch (autostart to tray) often races the network at login. Retry
+  // quietly while the window stays in the tray instead of popping an error box;
+  // once the user opens the window, fall back to the regular loud load.
+  function loadMainApplicationInBackground(mainWindow) {
+    let retryTimer = null;
+    let settled = false;
+
+    const loadVisibly = () => {
+      settled = true;
+      mainWindow.removeListener('show', onShow);
+      loadMainApplication(mainWindow, appUrl, { dialog });
+    };
+
+    function onShow() {
+      if (settled || !retryTimer) return;
+      clearTimeout(retryTimer);
+      retryTimer = null;
+      loadVisibly();
+    }
+
+    const attempt = () => {
+      retryTimer = null;
+      if (mainWindow.isDestroyed()) return;
+      mainWindow.loadURL(appUrl).then(() => {
+        settled = true;
+        mainWindow.removeListener('show', onShow);
+      }).catch((error) => {
+        if (mainWindow.isDestroyed() || settled) return;
+        if (mainWindow.isVisible()) {
+          loadVisibly();
+          return;
+        }
+        log.warn('Voice Room is not reachable yet, retrying in the background:', error?.message || error);
+        retryTimer = setTimeout(attempt, HIDDEN_LOAD_RETRY_MS);
+      });
+    };
+
+    mainWindow.on('show', onShow);
+    mainWindow.once('closed', () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+    });
+    attempt();
+  }
+
+  function createWindow({ startHidden = false } = {}) {
     if (previewEnabled) {
       const previewWindow = new BrowserWindow({
         backgroundColor: WINDOW_BACKGROUND,
@@ -162,9 +209,11 @@ function createAppBootstrap({
       },
       width: 1180
     });
-    mainWindow.once('ready-to-show', () => {
-      mainWindow.show();
-    });
+    if (!startHidden) {
+      mainWindow.once('ready-to-show', () => {
+        mainWindow.show();
+      });
+    }
 
     installMediaDeviceFilter(mainWindow.webContents, { log });
     installNativeCaptureBridge(mainWindow.webContents, { log });
@@ -201,10 +250,14 @@ function createAppBootstrap({
       showRendererRecovery(mainWindow, details, { log });
     });
 
-    loadMainApplication(mainWindow, appUrl, { dialog });
+    if (startHidden) {
+      loadMainApplicationInBackground(mainWindow);
+    } else {
+      loadMainApplication(mainWindow, appUrl, { dialog });
+    }
   }
 
-  async function launchApplication() {
+  async function launchApplication({ startHidden = false } = {}) {
     configurePermissions();
     configureDesktopCaptureIpc();
     configureScreenPickerIpc();
@@ -214,8 +267,9 @@ function createAppBootstrap({
       log.warn('Microphone access denied in macOS privacy settings.');
     }
 
-    const gate = await runUpdateGate({ appUrl, previewEnabled });
-    if (gate.ok) createWindow();
+    const gate = await runUpdateGate({ appUrl, previewEnabled, silent: startHidden });
+    if (gate.ok) createWindow({ startHidden });
+    return gate;
   }
 
   return {

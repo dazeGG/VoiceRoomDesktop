@@ -213,7 +213,7 @@ const callSurfaces = createCallSurfaces({
   nativeTheme,
   platform: process.platform,
   ...(process.platform === 'win32'
-    ? { taskbarTheme: createWindowsTaskbarThemeReader({ execFileSync: require('node:child_process').execFileSync, log }) }
+    ? { taskbarTheme: createWindowsTaskbarThemeReader({ execFile: require('node:child_process').execFile, log }) }
     : {}),
   windowLifecycle
 });

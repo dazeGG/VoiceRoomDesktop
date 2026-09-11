@@ -1,5 +1,7 @@
 'use strict';
 
+const path = require('node:path');
+
 const STABLE_PROTOCOL_SCHEME = 'voiceroom';
 const DEV_PROTOCOL_SCHEME = 'voiceroom-dev';
 const OPEN_CHANNEL = 'desktop-links:open';
@@ -149,7 +151,7 @@ function createDeepLinkController({
       isClaimed = false;
     }
     const registration = resolveProtocolRegistration({
-      appEntry: process.argv[1] ? require('node:path').resolve(process.argv[1]) : '',
+      appEntry: process.argv[1] ? path.resolve(process.argv[1]) : '',
       env,
       execPath: process.execPath,
       isClaimed,
@@ -266,9 +268,9 @@ function createDeepLinkController({
     if (rawUrl) handleUrl(rawUrl);
   }
 
+  // Registers the load listeners before the first page load starts.
   function attachWindow(window) {
-    const state = pageState(window.webContents);
-    state.loadedAt = 0;
+    pageState(window.webContents);
   }
 
   function configureIpc({ ipcMain }) {

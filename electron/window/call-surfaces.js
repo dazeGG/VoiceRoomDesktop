@@ -15,29 +15,49 @@ function parseSystemUsesLightTheme(output) {
 
 /**
  * The thumbnail toolbar sits on the taskbar flyout, which follows the Windows
- * system (taskbar) theme rather than the app theme Electron reports. Reads it
- * once and again after a theme change; unknown means dark, the Windows default.
+ * system (taskbar) theme rather than the app theme Electron reports. The
+ * registry is read in the background at creation and after each theme change;
+ * until then, or when it fails, the taskbar counts as dark (the Windows default).
  */
-function createWindowsTaskbarThemeReader({ execFileSync, log = console }) {
-  let dark = null;
-  return {
-    invalidate() {
-      dark = null;
-    },
-    isDark() {
-      if (dark !== null) return dark;
-      try {
-        const output = execFileSync('reg', ['query', PERSONALIZE_REGISTRY_KEY, '/v', 'SystemUsesLightTheme'], {
-          encoding: 'utf8',
-          timeout: 2000,
-          windowsHide: true
-        });
-        dark = parseSystemUsesLightTheme(output) !== true;
-      } catch (error) {
-        log.warn?.('Failed to read the taskbar theme:', error?.message || error);
-        dark = true;
+function createWindowsTaskbarThemeReader({ execFile, log = console }) {
+  const listeners = new Set();
+  let dark = true;
+  let reading = false;
+  let rereadQueued = false;
+
+  function refresh() {
+    if (reading) {
+      rereadQueued = true;
+      return;
+    }
+    reading = true;
+    execFile('reg', ['query', PERSONALIZE_REGISTRY_KEY, '/v', 'SystemUsesLightTheme'], {
+      encoding: 'utf8',
+      timeout: 2000,
+      windowsHide: true
+    }, (error, stdout) => {
+      reading = false;
+      if (error) log.warn?.('Failed to read the taskbar theme:', error?.message || error);
+      const next = error ? true : parseSystemUsesLightTheme(stdout) !== true;
+      const changed = next !== dark;
+      dark = next;
+      if (changed) {
+        for (const listener of listeners) listener();
       }
-      return dark;
+      if (rereadQueued) {
+        rereadQueued = false;
+        refresh();
+      }
+    });
+  }
+
+  refresh();
+  return {
+    invalidate: refresh,
+    isDark: () => dark,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     }
   };
 }
@@ -123,10 +143,15 @@ function createCallSurfaces({
     }
   }
 
+  function reapplyThumbar() {
+    if (platform === 'win32' && currentState?.active) applyThumbar(windowLifecycle.getMainWindow());
+  }
+
   nativeTheme?.on?.('updated', () => {
     taskbarTheme.invalidate();
-    if (platform === 'win32' && currentState?.active) applyThumbar(windowLifecycle.getMainWindow());
+    reapplyThumbar();
   });
+  taskbarTheme.subscribe?.(reapplyThumbar);
 
   return {
     apply,

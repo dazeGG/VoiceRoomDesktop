@@ -217,6 +217,5 @@ module.exports = {
   SAVE_DEBOUNCE_MS,
   WINDOW_STATE_FILE,
   createWindowStateController,
-  normalizeStoredWindowState,
   resolveWindowBounds
 };

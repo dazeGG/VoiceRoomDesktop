@@ -140,31 +140,39 @@ describe('Windows taskbar theme', () => {
     assert.equal(parseSystemUsesLightTheme('ERROR: nothing'), null);
   });
 
-  it('caches the answer until invalidated and defaults to dark', () => {
-    const outputs = ['SystemUsesLightTheme    REG_DWORD    0x1', 'SystemUsesLightTheme    REG_DWORD    0x0'];
+  it('reads the theme in the background, notifies real changes and defaults to dark', () => {
     const calls = [];
     const reader = createWindowsTaskbarThemeReader({
-      execFileSync: (file, args) => {
-        calls.push([file, args]);
-        return outputs.shift();
-      },
+      execFile: (file, args, _options, callback) => calls.push({ args, callback, file }),
       log: { warn() {} }
     });
+    const changes = [];
+    reader.subscribe(() => changes.push(reader.isDark()));
 
-    assert.equal(reader.isDark(), false);
-    assert.equal(reader.isDark(), false);
-    assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0], ['reg', ['query', PERSONALIZE_REGISTRY_KEY, '/v', 'SystemUsesLightTheme']]);
+    assert.equal(reader.isDark(), true, 'dark until the first read returns');
+    assert.equal(calls.length, 1, 'the first read starts immediately');
+    assert.deepEqual([calls[0].file, calls[0].args], ['reg', ['query', PERSONALIZE_REGISTRY_KEY, '/v', 'SystemUsesLightTheme']]);
+
     reader.invalidate();
-    assert.equal(reader.isDark(), true);
+    assert.equal(calls.length, 1, 'a read in flight is not duplicated');
+    calls[0].callback(null, 'SystemUsesLightTheme    REG_DWORD    0x1');
+    assert.equal(reader.isDark(), false);
+    assert.deepEqual(changes, [false]);
+    assert.equal(calls.length, 2, 'the queued re-read runs afterwards');
 
-    const failing = createWindowsTaskbarThemeReader({ execFileSync: () => { throw new Error('no reg'); }, log: { warn() {} } });
-    assert.equal(failing.isDark(), true);
+    calls[1].callback(null, 'SystemUsesLightTheme    REG_DWORD    0x1');
+    assert.deepEqual(changes, [false], 'an unchanged theme does not notify');
+
+    reader.invalidate();
+    calls[2].callback(new Error('no reg'));
+    assert.equal(reader.isDark(), true);
+    assert.deepEqual(changes, [false, true]);
   });
 
   it('picks glyphs from the taskbar theme and re-reads it after a theme change', () => {
     const harness = createHarness();
     let invalidations = 0;
+    let themeListener = null;
     const lightTaskbar = createCallSurfaces({
       app: {},
       Menu: { buildFromTemplate: (template) => template },
@@ -172,7 +180,11 @@ describe('Windows taskbar theme', () => {
       nativeImage: { createFromPath: (iconPath) => ({ iconPath }) },
       nativeTheme: harness.nativeTheme,
       platform: 'win32',
-      taskbarTheme: { invalidate: () => { invalidations += 1; }, isDark: () => false },
+      taskbarTheme: {
+        invalidate: () => { invalidations += 1; },
+        isDark: () => false,
+        subscribe: (listener) => { themeListener = listener; }
+      },
       windowLifecycle: { getMainWindow: () => harness.window, setCallMenu() {} }
     });
 
@@ -180,6 +192,10 @@ describe('Windows taskbar theme', () => {
     assert.deepEqual(harness.window.thumbarCalls.at(-1)[0].icon, { iconPath: path.join(CALL_ICONS_DIR, 'mic-off-dark.png') });
     harness.nativeTheme.emit('updated');
     assert.equal(invalidations, 1);
+
+    const before = harness.window.thumbarCalls.length;
+    themeListener();
+    assert.equal(harness.window.thumbarCalls.length, before + 1, 'a finished background read re-applies the toolbar');
   });
 });
 

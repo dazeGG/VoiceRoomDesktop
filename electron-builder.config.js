@@ -30,6 +30,14 @@ module.exports = {
     repo: 'VoiceRoomDesktop'
   },
   artifactName: `${artifactBase}.\${ext}`,
+  // Installers (nsis, mac Info.plist) register the link scheme; dev builds use
+  // their own scheme so they never capture production links.
+  protocols: [
+    {
+      name: 'Voice Room',
+      schemes: [isDevBuild ? 'voiceroom-dev' : 'voiceroom']
+    }
+  ],
   directories: {
     output: outputDir
   },
@@ -37,7 +45,13 @@ module.exports = {
     'native/bin/**/*'
   ],
   files: [
+    'assets/call/*.png',
     'assets/logo/icon.ico',
+    'electron/call-controls.js',
+    'electron/deep-links.js',
+    'electron/diagnostics.js',
+    'electron/window/call-surfaces.js',
+    'electron/window/state.js',
     'electron/app/bootstrap.js',
     'electron/app/launch-mode.js',
     'electron/build-profile.json',

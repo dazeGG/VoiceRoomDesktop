@@ -84,6 +84,75 @@ const result = await window.voiceRoomDesktopAttention.requestAttention({ critica
 
 The web app owns the count: send the current value whenever it changes, including `0` once everything is read and again after a page reload. Counts are floored and capped at 9999; anything that is not a finite number clears the badge.
 
+## Links (`voiceroom://`)
+
+Release builds register the `voiceroom://` scheme; development and unpackaged builds use `voiceroom-dev://`, so they never capture production links.
+
+| Link | Opens |
+|------|-------|
+| `voiceroom://r/<roomId>` | `/r/<roomId>` (joins voice) |
+| `voiceroom://?room=<roomId>&message=<messageId>` | the mention preview, without joining voice |
+| `voiceroom://?dm=<userId>` | the direct message thread |
+| `voiceroom://` | just the window |
+
+Anything else only brings the window to the front.
+
+- The NSIS installer and the macOS app bundle register the scheme. On launch, installed builds re-register it; the portable build takes it only when no other installation owns it.
+- A link that starts the app opens its route as the first page, never starts hidden, and still goes through the update gate.
+- A link that arrives while the app runs restores the window and is handed to the page:
+
+```js
+const removeListener = window.voiceRoomDesktopLinks.onOpen((link) => {
+  // { kind: 'room', roomId } | { kind: 'mention', roomId, messageId, route }
+  // | { kind: 'dm', dmId } | { kind: 'app' }; each also carries `route`.
+});
+```
+
+Subscribing tells the shell that the page routes links itself; links received while the page was loading are delivered right after the subscription. A page that has not subscribed within 5 seconds of loading (an older web client) is navigated to the link's route instead — after a native "Перейти / Отмена" confirmation when a voice call is active.
+
+## Call controls in the tray, taskbar and Dock
+
+The web app mirrors the active call into the OS through `window.voiceRoomDesktopCall`:
+
+```js
+await window.voiceRoomDesktopCall.setState({
+  active: true,
+  roomId: 'abc123',
+  roomName: 'Гостиная',
+  micMuted: false,
+  outputMuted: false
+});
+await window.voiceRoomDesktopCall.setState({ active: false });
+
+const removeListener = window.voiceRoomDesktopCall.onAction(({ action }) => {
+  // 'toggle-mic' | 'toggle-output' | 'disconnect'
+});
+```
+
+- Windows: during a call the tray menu gets "Выключить/Включить микрофон", "Выключить/Включить звук" and "Отключиться", the tray tooltip shows the room name and the tray icon gets a green dot. The taskbar thumbnail toolbar shows the same three buttons, with icons for the current state; it is re-applied when the window returns from the tray.
+- macOS: the Dock menu shows the same three items during a call.
+- Outside a call nothing extra is shown. "Отключиться" acts immediately, like the in-app button.
+- The call ends on the shell side when the page navigates to a new document, crashes or closes, so stale controls never outlive the page.
+
+The glyphs in `assets/call` are rendered from lucide and the app logo by `npm run icons:call`; commit the PNGs after changing either.
+
+## Window size and position
+
+The main window reopens with its last size, position and maximized state (stored in `window-state.json` in the user data folder). Fullscreen is not restored. When the saved position is no longer visible — a disconnected monitor, a smaller display — the window keeps its size (shrunk to fit if needed) and is centered on the primary display.
+
+## Diagnostics
+
+The web app exposes support helpers through `window.voiceRoomDesktopDiagnostics`, and the Windows tray has the same two actions under "Диагностика":
+
+```js
+await window.voiceRoomDesktopDiagnostics.setContext({ userId: 'u1', roomId: 'abc123' });
+await window.voiceRoomDesktopDiagnostics.copyInfo();        // { ok: true }, text in the clipboard
+await window.voiceRoomDesktopDiagnostics.openLogsFolder();  // { ok: true } | { ok: false, reason }
+const info = await window.voiceRoomDesktopDiagnostics.getInfo(); // structured data plus `text`
+```
+
+The summary lists the app version, channel and package type, Electron/Chromium/Node versions, OS, locale, GPU feature status, native helper availability, update and autostart state, whether voice is active, and the user and room ids from `setContext`. It never includes file paths or the OS user name.
+
 ## Supported platforms
 
 | Platform | Status | Notes |

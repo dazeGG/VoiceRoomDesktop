@@ -164,15 +164,22 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 1);
-    assert.equal(handleCalls, 11);
+    assert.equal(handleCalls, 18);
     assert.deepEqual([...handledChannels].sort(), [
       'desktop-attention:request',
       'desktop-attention:set-badge-count',
       'desktop-autostart:get-settings',
       'desktop-autostart:set-settings',
+      'desktop-call:set-state',
+      'desktop-diagnostics:copy-info',
+      'desktop-diagnostics:get-info',
+      'desktop-diagnostics:open-logs',
+      'desktop-diagnostics:set-context',
       'desktop-hotkeys:configure',
       'desktop-hotkeys:set-suspended',
       'desktop-idle:get-system-idle-time',
+      'desktop-links:ready',
+      'desktop-links:unsubscribe',
       'desktop-notifications:show',
       'window:is-fullscreen',
       'window:reload-main',
@@ -181,12 +188,18 @@ test('main process installs IPC services once when macOS recreates its window', 
 
     const activate = appListeners.get('activate')?.[0];
     assert.equal(typeof activate, 'function');
+    // Activations while a launch is still running join it instead of opening
+    // a second window.
     activate();
+    activate();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(launchCalls, 2);
+
     activate();
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 3);
-    assert.equal(handleCalls, 11);
+    assert.equal(handleCalls, 18);
   } finally {
     delete require.cache[require.resolve(mainPath)];
     Module._load = originalLoad;

@@ -127,6 +127,45 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopAttention', {
   setBadgeCount: (count) => ipcRenderer.invoke('desktop-attention:set-badge-count', count)
 });
 
+let desktopLinkListenerCount = 0;
+
+contextBridge.exposeInMainWorld('voiceRoomDesktopLinks', {
+  onOpen: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-links:open', listener);
+    desktopLinkListenerCount += 1;
+    // Subscribing tells the shell this page routes links itself; links that
+    // arrived while it was loading are delivered right after.
+    ipcRenderer.invoke('desktop-links:ready').catch(() => {});
+    let removed = false;
+    return () => {
+      if (removed) return;
+      removed = true;
+      ipcRenderer.removeListener('desktop-links:open', listener);
+      desktopLinkListenerCount -= 1;
+      if (desktopLinkListenerCount === 0) ipcRenderer.invoke('desktop-links:unsubscribe').catch(() => {});
+    };
+  }
+});
+
+contextBridge.exposeInMainWorld('voiceRoomDesktopCall', {
+  onAction: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-call:action', listener);
+    return () => ipcRenderer.removeListener('desktop-call:action', listener);
+  },
+  setState: (state) => ipcRenderer.invoke('desktop-call:set-state', state)
+});
+
+contextBridge.exposeInMainWorld('voiceRoomDesktopDiagnostics', {
+  copyInfo: () => ipcRenderer.invoke('desktop-diagnostics:copy-info'),
+  getInfo: () => ipcRenderer.invoke('desktop-diagnostics:get-info'),
+  openLogsFolder: () => ipcRenderer.invoke('desktop-diagnostics:open-logs'),
+  setContext: (context) => ipcRenderer.invoke('desktop-diagnostics:set-context', context)
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopHotkeys', {
   configure: (payload) => ipcRenderer.invoke('desktop-hotkeys:configure', payload),
   onAction: (handler) => {

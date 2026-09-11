@@ -119,6 +119,9 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
 
   // `configure({ active })` is the renderer's report of an active voice
   // connection; other shell services (keep-awake, update deferral) follow it.
+  // Which listener currently delivers the global actions, for diagnostics.
+  let activeBackend = 'none';
+
   function setVoiceActive(nextActive) {
     const next = Boolean(nextActive);
     if (voiceActive === next) return;
@@ -214,6 +217,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
 
   function deactivate(options = {}) {
     generation += 1;
+    activeBackend = 'none';
     setVoiceActive(false);
     currentBindings = {};
     unregisterOwnedShortcuts(options);
@@ -323,6 +327,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
     }
     registerFallback(currentBindings, result);
     if (isSuspended()) setFallbackSuspended(true);
+    activeBackend = result.backend;
     sendToOwner(STATUS_CHANNEL, result);
   }
 
@@ -424,6 +429,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
     setVoiceActive(active);
     const result = createRegistrationResult(active, 'none', configurationId);
     if (!active) {
+      activeBackend = 'none';
       currentBindings = {};
       clearRendererSuspension();
       detachOwner();
@@ -434,7 +440,10 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
       ? payload.bindings
       : {};
     currentBindings = prepareBindings(bindings, result);
-    return registerPreparedBindings(nextGeneration, result, event.sender);
+    return registerPreparedBindings(nextGeneration, result, event.sender).then((registration) => {
+      if (nextGeneration === generation) activeBackend = registration.backend;
+      return registration;
+    });
   }
 
   function setSuspended(event, nextSuspended) {
@@ -482,7 +491,10 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
         && voiceActive
         && owner === expectedOwner
         && systemSuspensionReasons.size === 0
-      ) sendToOwner(STATUS_CHANNEL, registration);
+      ) {
+        activeBackend = registration.backend;
+        sendToOwner(STATUS_CHANNEL, registration);
+      }
     }).catch((error) => {
       log.warn?.('Desktop hotkeys failed to resume after system suspension:', error);
     });
@@ -536,6 +548,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
     dispose,
     install,
     installPowerMonitor,
+    getBackend: () => (voiceActive ? activeBackend : 'none'),
     isVoiceActive: () => voiceActive,
     onVoiceActiveChange,
     setSuspended,

@@ -57,13 +57,17 @@ function createAutostartController({
       return app.getLoginItemSettings().openAtLogin === true;
     }
 
-    // `executableWillLaunchAtLogin` ignores args and honours the Task Manager
-    // "disabled" state, so a user-disabled startup entry reads as off.
+    // `openAtLogin` matches our Run entry exactly. Electron only reports an entry
+    // in `launchItems` (and `executableWillLaunchAtLogin`) once it has a
+    // StartupApproved value, which `setLoginItemSettings` does not write for an
+    // enabled entry — so a missing approval means enabled, and an entry listed
+    // as not enabled was turned off in Task Manager.
     const settings = app.getLoginItemSettings(windowsLoginItem(startMinimized));
-    if (typeof settings.executableWillLaunchAtLogin === 'boolean') {
-      return settings.executableWillLaunchAtLogin;
-    }
-    return settings.openAtLogin === true;
+    if (settings.openAtLogin !== true) return false;
+    const executable = windowsExecutablePath().toLowerCase();
+    const approval = (settings.launchItems || [])
+      .find((item) => typeof item?.path === 'string' && item.path.toLowerCase() === executable);
+    return approval?.enabled !== false;
   }
 
   function getSettings() {

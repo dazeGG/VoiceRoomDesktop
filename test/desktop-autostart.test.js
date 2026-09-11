@@ -16,6 +16,10 @@ function sameArgs(left = [], right = []) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+// Mirrors Electron 41 on Windows: `approved` is the StartupApproved value
+// (undefined when absent). An entry registered with `enabled: true` has no
+// StartupApproved value, so Electron leaves it out of `launchItems` and reports
+// `executableWillLaunchAtLogin: false` even though Windows will launch it.
 function createWindowsApp(userDataPath, { isPackaged = true } = {}) {
   const app = {
     isPackaged,
@@ -24,15 +28,19 @@ function createWindowsApp(userDataPath, { isPackaged = true } = {}) {
     getPath: () => userDataPath,
     getLoginItemSettings({ path: exePath, args } = {}) {
       const entry = app.runEntry;
+      const listed = Boolean(entry && entry.approved !== undefined && entry.path === exePath);
       return {
-        executableWillLaunchAtLogin: Boolean(entry && entry.path === exePath && entry.enabled),
+        executableWillLaunchAtLogin: listed && entry.approved === true,
+        launchItems: listed
+          ? [{ args: entry.args, enabled: entry.approved, name: 'ru.dazinho.voiceroom', path: entry.path, scope: 'user' }]
+          : [],
         openAtLogin: Boolean(entry && entry.path === exePath && sameArgs(entry.args, args))
       };
     },
     setLoginItemSettings(settings) {
       app.setCalls.push(settings);
       app.runEntry = settings.openAtLogin
-        ? { args: settings.args, enabled: settings.enabled !== false, path: settings.path }
+        ? { approved: settings.enabled === false ? false : undefined, args: settings.args, path: settings.path }
         : null;
     }
   };
@@ -79,14 +87,15 @@ describe('desktop autostart controller', () => {
       startMinimized: false,
       supported: true
     });
-    assert.deepEqual(app.runEntry, { args: [], enabled: true, path: exePath });
+    assert.deepEqual(app.runEntry, { approved: undefined, args: [], path: exePath });
+    assert.equal(controller.getSettings().openAtLogin, true);
 
     assert.deepEqual(controller.setSettings({ startMinimized: true }), {
       openAtLogin: true,
       startMinimized: true,
       supported: true
     });
-    assert.deepEqual(app.runEntry, { args: ['--hidden'], enabled: true, path: exePath });
+    assert.deepEqual(app.runEntry, { approved: undefined, args: ['--hidden'], path: exePath });
     assert.deepEqual(
       JSON.parse(fs.readFileSync(path.join(userDataPath, SETTINGS_FILE), 'utf8')),
       { startMinimized: true }
@@ -125,12 +134,20 @@ describe('desktop autostart controller', () => {
   it('reads a startup entry disabled in Task Manager as off and re-enables it', (t) => {
     const { app, controller } = createHarness(t);
     controller.setSettings({ openAtLogin: true });
-    app.runEntry.enabled = false;
+    app.runEntry.approved = false;
 
     assert.equal(controller.getSettings().openAtLogin, false);
 
     controller.setSettings({ openAtLogin: true });
-    assert.equal(app.runEntry.enabled, true);
+    assert.notEqual(app.runEntry.approved, false);
+    assert.equal(controller.getSettings().openAtLogin, true);
+  });
+
+  it('reads a startup entry re-approved in Task Manager as on', (t) => {
+    const { app, controller } = createHarness(t);
+    controller.setSettings({ openAtLogin: true });
+    app.runEntry.approved = true;
+
     assert.equal(controller.getSettings().openAtLogin, true);
   });
 

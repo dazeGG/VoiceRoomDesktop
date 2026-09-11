@@ -148,7 +148,9 @@ function createWindowStateController({
     try {
       const display = screen.getDisplayMatching?.(bounds);
       const displayBounds = normalizeRect(display?.bounds);
-      return display && displayBounds ? { bounds: displayBounds, id: display.id } : null;
+      if (!display || !displayBounds) return null;
+      const scaleFactor = isFiniteNumber(display.scaleFactor) ? display.scaleFactor : 1;
+      return { bounds: displayBounds, id: display.id, scaleFactor };
     } catch {
       return null;
     }
@@ -164,6 +166,21 @@ function createWindowStateController({
     } catch (error) {
       log.warn?.('Failed to resolve window state:', error);
       return { bounds: { ...DEFAULT_WINDOW_SIZE }, isMaximized: false };
+    }
+  }
+
+  /**
+   * Places a freshly created (still hidden) window on its restored rectangle.
+   * A BrowserWindow constructed with x/y on a monitor whose scale differs from
+   * the primary one is resized again by Windows' DPI change and opens larger
+   * than it was closed. setBounds converts the DIP rectangle with the scale of
+   * the monitor it lands on, so the window keeps its size on every monitor.
+   */
+  function applyBounds(window, bounds) {
+    try {
+      window.setBounds(bounds);
+    } catch (error) {
+      log.warn?.('Failed to apply restored window bounds:', error);
     }
   }
 
@@ -206,6 +223,7 @@ function createWindowStateController({
   }
 
   return {
+    applyBounds,
     resolveInitialState,
     track
   };

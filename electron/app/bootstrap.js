@@ -196,9 +196,13 @@ function createAppBootstrap({
     }
 
     const initialWindowState = windowState.resolveInitialState();
+    log.info('Restoring main window:', initialWindowState);
+    // Size only: the position is applied with setBounds below, which keeps the
+    // size right on a monitor scaled differently from the primary one.
     const mainWindow = new BrowserWindow({
       backgroundColor: WINDOW_BACKGROUND,
-      ...initialWindowState.bounds,
+      height: initialWindowState.bounds.height,
+      width: initialWindowState.bounds.width,
       minHeight: MIN_WINDOW_SIZE.height,
       minWidth: MIN_WINDOW_SIZE.width,
       show: false,
@@ -213,6 +217,7 @@ function createAppBootstrap({
         sandbox: true
       }
     });
+    windowState.applyBounds(mainWindow, initialWindowState.bounds);
     // maximize() also shows the window, so a hidden launch defers it until the
     // user opens the window from the tray or the Dock.
     if (startHidden) {

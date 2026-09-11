@@ -1,11 +1,17 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, dialog, globalShortcut, ipcMain, shell, nativeImage, Notification, powerMonitor, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, Menu, Tray, clipboard, dialog, globalShortcut, ipcMain, shell, nativeImage, nativeTheme, Notification, powerMonitor, powerSaveBlocker } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { configureDesktopAttentionIpc } = require('./attention');
 const { createAutostartController } = require('./autostart');
+const { createCallControlsController } = require('./call-controls');
+const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
+const { createDiagnosticsController } = require('./diagnostics');
+const { getNativeAudioCapabilities } = require('./native/audio');
+const { findNativeHotkeyHelper } = require('./native/hotkeys');
+const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
 const { consumeRelaunchIntent, resolveStartHidden, writeRelaunchIntent } = require('./app/launch-mode');
 const { createKeepAwakeController } = require('./keep-awake');
 const { getNativeCaptureCapabilities } = require('./native/capture');
@@ -29,6 +35,7 @@ const {
 } = require('./desktop-capture');
 const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture');
 const { createWindowLifecycleController } = require('./window/lifecycle');
+const { createWindowStateController } = require('./window/state');
 const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
 const { disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
@@ -167,6 +174,19 @@ const windowLifecycle = createWindowLifecycleController({
   resolveTrayIconPath: resolveWindowsTrayIconPath
 });
 
+const windowState = createWindowStateController({
+  app,
+  fs,
+  log,
+  path,
+  // The screen module is only usable after app ready; resolve it lazily.
+  screen: {
+    getAllDisplays: () => require('electron').screen.getAllDisplays(),
+    getDisplayMatching: (bounds) => require('electron').screen.getDisplayMatching(bounds),
+    getPrimaryDisplay: () => require('electron').screen.getPrimaryDisplay()
+  }
+});
+
 const desktopHotkeys = createDesktopHotkeyController({
   globalShortcut,
   isTrustedFrame,
@@ -179,6 +199,67 @@ desktopHotkeys.onVoiceActiveChange((active) => keepAwake.setVoiceActive(active))
 
 const autostart = createAutostartController({ app, fs, log, path });
 let backgroundUpdates = null;
+let launchInProgress = null;
+// Replaced by the guarded launcher once the single-instance lock is held.
+let requestLaunch = () => Promise.resolve();
+
+const callControls = createCallControlsController({ log });
+const callSurfaces = createCallSurfaces({
+  app,
+  Menu,
+  dispatch: (action) => callControls.dispatch(action),
+  log,
+  nativeImage,
+  nativeTheme,
+  platform: process.platform,
+  ...(process.platform === 'win32'
+    ? { taskbarTheme: createWindowsTaskbarThemeReader({ execFile: require('node:child_process').execFile, log }) }
+    : {}),
+  windowLifecycle
+});
+callControls.onStateChange((state) => callSurfaces.apply(state));
+
+const diagnostics = createDiagnosticsController({
+  app,
+  clipboard,
+  getAutostartSettings: () => autostart.getSettings(),
+  getHotkeysBackend: () => desktopHotkeys.getBackend(),
+  getNativeHelpers: () => ({
+    audio: getNativeAudioCapabilities().nativeSafeLoopback,
+    capture: getNativeCaptureCapabilities().available,
+    hotkeys: Boolean(findNativeHotkeyHelper({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath }).path)
+  }),
+  getUpdateState: () => backgroundUpdates?.getState?.() ?? null,
+  isVoiceActive: () => desktopHotkeys.isVoiceActive() || callControls.getState().active,
+  log,
+  readBuildProfile,
+  shell
+});
+windowLifecycle.setDiagnosticsActions({
+  copyInfo: () => diagnostics.copyInfo(),
+  openLogsFolder: () => {
+    void diagnostics.openLogsFolder();
+  }
+});
+
+const deepLinks = createDeepLinkController({
+  app,
+  appUrl: APP_URL,
+  dialog,
+  getMainWindow: () => windowLifecycle.getMainWindow(),
+  isTrustedFrame,
+  isVoiceActive: () => desktopHotkeys.isVoiceActive() || callControls.getState().active,
+  log,
+  // macOS keeps running without windows; a link then opens a fresh one.
+  onWindowMissing: () => {
+    if (!app.isReady() || launchInProgress) return;
+    requestLaunch().catch((error) => {
+      log.error('Application relaunch for a link failed:', error);
+    });
+  },
+  restoreMainWindow: () => windowLifecycle.restoreMainWindow(),
+  scheme: resolveProtocolScheme({ isPackaged: app.isPackaged, buildProfile: readBuildProfile(app.getAppPath()) })
+});
 
 function configureWindowIpc() {
   ipcMain.handle('window:set-fullscreen', (event, fullscreen) => {
@@ -240,15 +321,28 @@ const appBootstrap = createAppBootstrap({
   allowedSessionPermissions: ALLOWED_SESSION_PERMISSIONS,
   desktopLayoutCss: DESKTOP_LAYOUT_CSS,
   previewEnabled: PICKER_PREVIEW_ENABLED,
-  windowLifecycle
+  onMainWindowCreated: (window) => {
+    deepLinks.attachWindow(window);
+    callSurfaces.attachWindow(window);
+  },
+  resolveLaunchUrl: () => deepLinks.takeInitialUrl(),
+  windowLifecycle,
+  windowState
 });
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  // macOS delivers links through open-url, possibly before the app is ready.
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    deepLinks.handleUrl(url);
+  });
+
+  app.on('second-instance', (_event, argv) => {
     windowLifecycle.restoreMainWindow();
+    deepLinks.handleArgv(argv);
   });
 
   app.on('before-quit', () => {
@@ -265,6 +359,8 @@ if (!gotLock) {
     if (PICKER_PREVIEW_ENABLED) return false;
 
     const relaunchIntent = consumeRelaunchIntent({ fs, path, userDataPath: app.getPath('userData') });
+    // A link click is an explicit request to see the app, even at login.
+    if (deepLinks.hasInitialLink()) return false;
     let loginItemSettings = null;
     if (process.platform === 'darwin' && app.isPackaged) {
       try {
@@ -316,10 +412,20 @@ if (!gotLock) {
     });
   }
 
-  async function launchApplication(options) {
-    const gate = await appBootstrap.launchApplication(options);
-    if (gate?.ok) startBackgroundUpdates(gate);
+  // One launch at a time: the Dock, second instances and links share the guard.
+  function launchApplication(options) {
+    if (launchInProgress) return launchInProgress;
+    launchInProgress = (async () => {
+      const gate = await appBootstrap.launchApplication(options);
+      if (gate?.ok) startBackgroundUpdates(gate);
+    })().finally(() => {
+      launchInProgress = null;
+    });
+    return launchInProgress;
   }
+  requestLaunch = launchApplication;
+
+  deepLinks.captureInitialArgv(process.argv);
 
   app.whenReady().then(() => {
     // Process-wide IPC handlers and power-monitor listeners must be installed
@@ -349,6 +455,10 @@ if (!gotLock) {
       desktopHotkeys.installPowerMonitor(powerMonitor);
       keepAwake.installPowerMonitor(powerMonitor);
       autostart.configureIpc({ ipcMain, isTrustedFrame });
+      callControls.configureIpc({ ipcMain, isTrustedFrame });
+      diagnostics.configureIpc({ ipcMain, isTrustedFrame });
+      deepLinks.configureIpc({ ipcMain });
+      if (!PICKER_PREVIEW_ENABLED) deepLinks.registerProtocol();
     } catch (error) {
       log.error('Application service setup failed:', error);
       app.quit();

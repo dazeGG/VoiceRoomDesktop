@@ -78,6 +78,9 @@ function createControllerHarness({ platform = 'win32' } = {}) {
     setContextMenu(menu) {
       this.menu = menu;
     }
+    setImage(iconPath) {
+      this.iconPath = iconPath;
+    }
     setToolTip(text) {
       this.tooltip = text;
     }
@@ -91,7 +94,7 @@ function createControllerHarness({ platform = 'win32' } = {}) {
       quit: () => appCalls.push('quit')
     },
     platform,
-    resolveTrayIconPath: () => 'icon.ico'
+    resolveTrayIconPath: ({ inCall = false } = {}) => (inCall ? 'in-call.png' : 'icon.ico')
   });
   return { appCalls, controller, trayInstances };
 }
@@ -195,6 +198,81 @@ describe('window lifecycle controller', () => {
 
     controller.setUpdateAction(null);
     assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), ['Открыть Voice Room', 'Выход']);
+  });
+
+  it('shows call controls, tooltip and the in-call icon only during a call', () => {
+    const { controller, trayInstances } = createControllerHarness();
+    const clicks = [];
+    controller.installTray();
+    const tray = trayInstances[0];
+    assert.equal(tray.iconPath, 'icon.ico');
+    assert.equal(tray.tooltip, 'Voice Room');
+
+    controller.setCallMenu({
+      inCall: true,
+      items: [
+        { label: 'Выключить микрофон', click: () => clicks.push('mic') },
+        { label: 'Отключиться', click: () => clicks.push('leave') }
+      ],
+      tooltip: 'Voice Room — Гостиная'
+    });
+    assert.deepEqual(tray.menu.map(({ label, type }) => label || type), [
+      'Открыть Voice Room',
+      'separator',
+      'Выключить микрофон',
+      'Отключиться',
+      'separator',
+      'Выход'
+    ]);
+    assert.equal(tray.tooltip, 'Voice Room — Гостиная');
+    assert.equal(tray.iconPath, 'in-call.png');
+    tray.menu[3].click();
+    assert.deepEqual(clicks, ['leave']);
+
+    controller.setCallMenu({ inCall: false, items: [], tooltip: 'Voice Room' });
+    assert.deepEqual(tray.menu.map(({ label }) => label), ['Открыть Voice Room', 'Выход']);
+    assert.equal(tray.iconPath, 'icon.ico');
+    assert.equal(tray.tooltip, 'Voice Room');
+  });
+
+  it('creates the tray with the call state set before it existed', () => {
+    const { controller, trayInstances } = createControllerHarness();
+    controller.setCallMenu({ inCall: true, items: [{ label: 'Отключиться', click() {} }], tooltip: 'Voice Room — в звонке' });
+    controller.installTray();
+
+    assert.equal(trayInstances[0].iconPath, 'in-call.png');
+    assert.equal(trayInstances[0].tooltip, 'Voice Room — в звонке');
+    assert.equal(trayInstances[0].menu[2].label, 'Отключиться');
+  });
+
+  it('adds a diagnostics submenu above exit', () => {
+    const { controller, trayInstances } = createControllerHarness();
+    const calls = [];
+    controller.installTray();
+    controller.setUpdateAction({ label: 'Установить обновление 1.3.1', click() {} });
+    controller.setDiagnosticsActions({
+      copyInfo: () => calls.push('copy'),
+      openLogsFolder: () => calls.push('logs')
+    });
+
+    const menu = trayInstances[0].menu;
+    assert.deepEqual(menu.map(({ label }) => label), ['Открыть Voice Room', 'Установить обновление 1.3.1', 'Диагностика', 'Выход']);
+    assert.deepEqual(menu[2].submenu.map(({ label }) => label), ['Открыть папку логов', 'Скопировать информацию о системе']);
+    menu[2].submenu.forEach((item) => item.click());
+    assert.deepEqual(calls, ['logs', 'copy']);
+
+    controller.setDiagnosticsActions(null);
+    assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), ['Открыть Voice Room', 'Установить обновление 1.3.1', 'Выход']);
+  });
+
+  it('exposes the live main window only', () => {
+    const { controller } = createControllerHarness();
+    assert.equal(controller.getMainWindow(), null);
+    const window = createFakeWindow();
+    controller.attachMainWindow(window);
+    assert.equal(controller.getMainWindow(), window);
+    window.destroyed = true;
+    assert.equal(controller.getMainWindow(), null);
   });
 
   it('reports main window visibility for background update deferral', () => {

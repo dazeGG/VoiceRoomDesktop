@@ -3,6 +3,7 @@
 const { session } = require('electron');
 const path = require('node:path');
 const { WINDOW_BACKGROUND, getMainWindowChromeOptions } = require('../shell-theme');
+const { MIN_WINDOW_SIZE } = require('../window/state');
 const {
   createAppTopbarView,
   installDesktopLayoutCss
@@ -33,6 +34,9 @@ function createAppBootstrap({
   installBuildLabel,
   showRendererRecovery,
   windowLifecycle,
+  windowState,
+  onMainWindowCreated = () => {},
+  resolveLaunchUrl = () => appUrl,
   devDiagnostics,
   previewEnabled,
   desktopLayoutCss,
@@ -115,14 +119,14 @@ function createAppBootstrap({
   // A hidden launch (autostart to tray) often races the network at login. Retry
   // quietly while the window stays in the tray instead of popping an error box;
   // once the user opens the window, fall back to the regular loud load.
-  function loadMainApplicationInBackground(mainWindow) {
+  function loadMainApplicationInBackground(mainWindow, launchUrl) {
     let retryTimer = null;
     let settled = false;
 
     const loadVisibly = () => {
       settled = true;
       mainWindow.removeListener('show', onShow);
-      loadMainApplication(mainWindow, appUrl, { dialog });
+      loadMainApplication(mainWindow, launchUrl, { dialog });
     };
 
     function onShow() {
@@ -135,7 +139,7 @@ function createAppBootstrap({
     const attempt = () => {
       retryTimer = null;
       if (mainWindow.isDestroyed()) return;
-      mainWindow.loadURL(appUrl).then(() => {
+      mainWindow.loadURL(launchUrl).then(() => {
         settled = true;
         mainWindow.removeListener('show', onShow);
       }).catch((error) => {
@@ -191,11 +195,12 @@ function createAppBootstrap({
       return;
     }
 
+    const initialWindowState = windowState.resolveInitialState();
     const mainWindow = new BrowserWindow({
       backgroundColor: WINDOW_BACKGROUND,
-      height: 820,
-      minHeight: 620,
-      minWidth: 420,
+      ...initialWindowState.bounds,
+      minHeight: MIN_WINDOW_SIZE.height,
+      minWidth: MIN_WINDOW_SIZE.width,
       show: false,
       title: 'Voice Room',
       ...getMainWindowChromeOptions(process.platform),
@@ -206,14 +211,19 @@ function createAppBootstrap({
         nodeIntegration: false,
         preload: path.join(__dirname, '../preload.js'),
         sandbox: true
-      },
-      width: 1180
+      }
     });
-    if (!startHidden) {
+    // maximize() also shows the window, so a hidden launch defers it until the
+    // user opens the window from the tray or the Dock.
+    if (startHidden) {
+      if (initialWindowState.isMaximized) mainWindow.once('show', () => mainWindow.maximize());
+    } else {
       mainWindow.once('ready-to-show', () => {
+        if (initialWindowState.isMaximized) mainWindow.maximize();
         mainWindow.show();
       });
     }
+    windowState.track(mainWindow, { isMaximized: initialWindowState.isMaximized });
 
     installMediaDeviceFilter(mainWindow.webContents, { log });
     installNativeCaptureBridge(mainWindow.webContents, { log });
@@ -221,6 +231,7 @@ function createAppBootstrap({
     devDiagnostics.installDevDiagnosticsShortcut(mainWindow);
     windowLifecycle.attachMainWindow(mainWindow);
     windowLifecycle.installTray();
+    onMainWindowCreated(mainWindow);
 
     const appTopbarView = createAppTopbarView({ log, platform: process.platform });
     appTopbarView.attach(mainWindow);
@@ -250,10 +261,11 @@ function createAppBootstrap({
       showRendererRecovery(mainWindow, details, { log });
     });
 
+    const launchUrl = resolveLaunchUrl();
     if (startHidden) {
-      loadMainApplicationInBackground(mainWindow);
+      loadMainApplicationInBackground(mainWindow, launchUrl);
     } else {
-      loadMainApplication(mainWindow, appUrl, { dialog });
+      loadMainApplication(mainWindow, launchUrl, { dialog });
     }
   }
 

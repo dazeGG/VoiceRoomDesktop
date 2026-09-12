@@ -8,6 +8,8 @@ const MAX_DEDUPE_KEY_LENGTH = 128;
 const MAX_ROUTE_LENGTH = 256;
 const SHOW_TIMEOUT_MS = 15000;
 const activeNotifications = new Set();
+// Like the Web Notification API: a new notification replaces the one with its tag.
+const notificationsByTag = new Map();
 
 function sanitizeString(value, maxLength) {
   if (typeof value !== 'string') return undefined;
@@ -38,8 +40,14 @@ function describeNotificationError(error) {
   return String(error || 'Notification failed').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 256);
 }
 
-function showDesktopNotification({ Notification, payload, restoreMainWindow }) {
+function forget(notification, tag) {
+  activeNotifications.delete(notification);
+  if (tag && notificationsByTag.get(tag) === notification) notificationsByTag.delete(tag);
+}
+
+function showDesktopNotification({ Notification, payload, restoreMainWindow, openRoute = null }) {
   const sanitized = sanitizeNotificationPayload(payload);
+  const { tag } = sanitized;
   // Silent: the web client plays its own cues, so the OS sound would double them.
   const notification = new Notification({
     body: sanitized.body || '',
@@ -47,7 +55,17 @@ function showDesktopNotification({ Notification, payload, restoreMainWindow }) {
     title: sanitized.title || 'Voice Room'
   });
 
+  const replaced = tag ? notificationsByTag.get(tag) : null;
+  if (replaced) {
+    forget(replaced, tag);
+    try {
+      replaced.close();
+    } catch {
+      // Already dismissed by the OS.
+    }
+  }
   activeNotifications.add(notification);
+  if (tag) notificationsByTag.set(tag, notification);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -57,7 +75,7 @@ function showDesktopNotification({ Notification, payload, restoreMainWindow }) {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
-      if (!keepAlive) activeNotifications.delete(notification);
+      if (!keepAlive) forget(notification, tag);
       resolve(result);
     };
 
@@ -68,11 +86,13 @@ function showDesktopNotification({ Notification, payload, restoreMainWindow }) {
       finish({ ok: false, reason: 'failed', error: describeNotificationError(error) });
     });
     notification.on('click', () => {
-      activeNotifications.delete(notification);
-      restoreMainWindow();
+      forget(notification, tag);
+      // openRoute brings the window forward itself and falls back to just that.
+      if (sanitized.route && openRoute) openRoute(sanitized.route);
+      else restoreMainWindow();
     });
     notification.on('close', () => {
-      activeNotifications.delete(notification);
+      forget(notification, tag);
     });
 
     timeout = setTimeout(() => {
@@ -87,7 +107,7 @@ function showDesktopNotification({ Notification, payload, restoreMainWindow }) {
   });
 }
 
-function configureDesktopNotificationsIpc({ ipcMain, Notification, isTrustedFrame, restoreMainWindow }) {
+function configureDesktopNotificationsIpc({ ipcMain, Notification, isTrustedFrame, restoreMainWindow, openRoute }) {
   ipcMain.handle(CHANNEL, (event, payload = {}) => {
     if (!isTrustedFrame(event.senderFrame)) {
       throw new Error('Desktop notifications are only available for the configured Voice Room URL.');
@@ -97,13 +117,14 @@ function configureDesktopNotificationsIpc({ ipcMain, Notification, isTrustedFram
       return { ok: false, reason: 'unsupported' };
     }
 
-    return showDesktopNotification({ Notification, payload, restoreMainWindow });
+    return showDesktopNotification({ Notification, payload, restoreMainWindow, openRoute });
   });
 }
 
 module.exports = {
   CHANNEL,
   activeNotifications,
+  notificationsByTag,
   showDesktopNotification,
   sanitizeNotificationPayload,
   configureDesktopNotificationsIpc

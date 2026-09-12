@@ -37,6 +37,7 @@ const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture')
 const { createWindowLifecycleController } = require('./window/lifecycle');
 const { createWindowStateController } = require('./window/state');
 const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
+const { configureSpellChecker, installContextMenu } = require('./window/context-menu');
 const { disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
@@ -324,6 +325,8 @@ const appBootstrap = createAppBootstrap({
   onMainWindowCreated: (window) => {
     deepLinks.attachWindow(window);
     callSurfaces.attachWindow(window);
+    installContextMenu(window, { Menu, clipboard, log });
+    configureSpellChecker(window.webContents.session, { log });
   },
   resolveLaunchUrl: () => deepLinks.takeInitialUrl(),
   windowLifecycle,
@@ -442,6 +445,7 @@ if (!gotLock) {
         ipcMain,
         Notification,
         isTrustedFrame,
+        openRoute: (route) => deepLinks.openRoute(route),
         restoreMainWindow: () => windowLifecycle.restoreMainWindow()
       });
       configureDesktopAttentionIpc({

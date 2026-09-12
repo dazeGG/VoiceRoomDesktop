@@ -51,6 +51,12 @@ function parseDeepLink(rawUrl, scheme = STABLE_PROTOCOL_SCHEME) {
   return { kind: 'app', route: '/' };
 }
 
+// App routes (e.g. a notification's `/?dm=<id>`) accept the same shapes as links.
+function parseAppRoute(route) {
+  if (typeof route !== 'string' || !route.startsWith('/')) return null;
+  return parseDeepLink(`${STABLE_PROTOCOL_SCHEME}://${route.slice(1)}`, STABLE_PROTOCOL_SCHEME);
+}
+
 function findDeepLinkArgument(argv, scheme = STABLE_PROTOCOL_SCHEME) {
   if (!Array.isArray(argv)) return '';
   const prefix = `${scheme}:`;
@@ -263,6 +269,19 @@ function createDeepLinkController({
     deliver(window, link);
   }
 
+  // Opens an in-app route (a notification click) like a link; anything the
+  // link parser rejects only brings the window forward.
+  function openRoute(route) {
+    const link = parseAppRoute(route);
+    const window = getMainWindow();
+    if (!link || !window || window.isDestroyed()) {
+      restoreMainWindow();
+      return false;
+    }
+    deliver(window, link);
+    return true;
+  }
+
   function handleArgv(argv) {
     const rawUrl = findDeepLinkArgument(argv, scheme);
     if (rawUrl) handleUrl(rawUrl);
@@ -304,6 +323,7 @@ function createDeepLinkController({
     handleArgv,
     handleUrl,
     hasInitialLink,
+    openRoute,
     registerProtocol,
     takeInitialUrl
   };
@@ -318,6 +338,7 @@ module.exports = {
   UNSUBSCRIBE_CHANNEL,
   createDeepLinkController,
   findDeepLinkArgument,
+  parseAppRoute,
   parseDeepLink,
   resolveAppRouteUrl,
   resolveProtocolRegistration,

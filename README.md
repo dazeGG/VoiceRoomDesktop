@@ -84,6 +84,30 @@ const result = await window.voiceRoomDesktopAttention.requestAttention({ critica
 
 The web app owns the count: send the current value whenever it changes, including `0` once everything is read and again after a page reload. Counts are floored and capped at 9999; anything that is not a finite number clears the badge.
 
+## Notifications
+
+The hosted web app shows native notifications through `window.voiceRoomDesktopNotifications`:
+
+```js
+await window.voiceRoomDesktopNotifications.show({
+  title: 'Alice',
+  body: 'Привет!',
+  tag: 'dm:user-1',        // optional
+  route: '/?dm=user-1'     // optional
+});
+// { ok: true } | { ok: false, reason }
+```
+
+- Notifications are silent: the web app plays its own sound.
+- A notification with the same `tag` as one still shown replaces it, and the old one is also removed from the Windows Action Center / macOS Notification Center.
+- Clicking a notification with a `route` opens it like a link (see below): `/?dm=<userId>`, `/?room=<roomId>&message=<messageId>` or `/r/<roomId>`. Any other route, or none, only brings the window to the front.
+
+## Context menu and spellcheck
+
+Right-clicking where the page has no menu of its own shows a native menu: spelling suggestions and "Добавить в словарь" on a misspelled word, "Вырезать / Копировать / Вставить / Выделить всё" in text fields, "Копировать" for selected text, "Копировать ссылку" on web links and "Копировать изображение" on images. Menus that the web app opens itself take precedence.
+
+On Windows the spellchecker checks Russian and English in addition to the OS language. macOS uses the system spellchecker and its languages.
+
 ## Links (`voiceroom://`)
 
 Release builds register the `voiceroom://` scheme; development and unpackaged builds use `voiceroom-dev://`, so they never capture production links.

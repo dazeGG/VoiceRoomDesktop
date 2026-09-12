@@ -79,6 +79,7 @@ module.exports = {
     'electron/policies/windows-capture.js',
     'electron/window/app-topbar-view.js',
     'electron/window/bootstrap.js',
+    'electron/window/context-menu.js',
     'electron/window/lifecycle-policy.js',
     'electron/window/lifecycle.js',
     'electron/window/menu-policy.js',

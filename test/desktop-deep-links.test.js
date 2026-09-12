@@ -10,6 +10,7 @@ const {
   UNSUBSCRIBE_CHANNEL,
   createDeepLinkController,
   findDeepLinkArgument,
+  parseAppRoute,
   parseDeepLink,
   resolveAppRouteUrl,
   resolveProtocolRegistration,
@@ -59,6 +60,17 @@ describe('deep link parsing', () => {
       `voiceroom://r/${'a'.repeat(3000)}`
     ]) {
       assert.equal(parseDeepLink(value), null, String(value));
+    }
+  });
+
+  it('parses in-app routes with the link rules', () => {
+    assert.deepEqual(parseAppRoute('/?dm=user-1'), { dmId: 'user-1', kind: 'dm', route: '/?dm=user-1' });
+    assert.deepEqual(parseAppRoute('/?room=abc123&message=m1'), {
+      kind: 'mention', messageId: 'm1', roomId: 'abc123', route: '/?room=abc123&message=m1'
+    });
+    assert.deepEqual(parseAppRoute('/r/abc123'), { kind: 'room', roomId: 'abc123', route: '/r/abc123' });
+    for (const value of [undefined, '', '?dm=x', 'https://evil.example/?dm=x', '//evil.example/r/abc123', '/settings']) {
+      assert.equal(parseAppRoute(value), null, String(value));
     }
   });
 
@@ -350,6 +362,29 @@ describe('deep link controller', () => {
     assert.deepEqual(window.webContents.sent, []);
     assert.deepEqual(window.loaded, ['https://voiceroom.ru/r/abc123']);
     assert.throws(() => harness.unsubscribe(window.webContents, { trusted: false }), /Desktop links are only available/);
+  });
+
+  it('opens a notification route on the subscribed page', () => {
+    const window = new FakeWindow();
+    const harness = createHarness({ window });
+    harness.controller.attachWindow(window);
+    harness.ready(window.webContents);
+
+    assert.equal(harness.controller.openRoute('/?dm=user-1'), true);
+    assert.deepEqual(window.webContents.sent, [[OPEN_CHANNEL, { dmId: 'user-1', kind: 'dm', route: '/?dm=user-1' }]]);
+    assert.deepEqual(harness.restores, [true]);
+  });
+
+  it('only focuses the window for an unknown route or a missing window', () => {
+    const window = new FakeWindow();
+    const harness = createHarness({ window });
+    assert.equal(harness.controller.openRoute('/settings'), false);
+    assert.deepEqual(window.webContents.sent, []);
+
+    harness.state.window = null;
+    assert.equal(harness.controller.openRoute('/?dm=user-1'), false);
+    assert.deepEqual(harness.restores, [true, true]);
+    assert.deepEqual(harness.missing, []);
   });
 
   it('only focuses the window for an unsupported link', () => {

@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 const {
   CHANNEL,
   configureDesktopNotificationsIpc,
+  notificationsByTag,
   sanitizeNotificationPayload
 } = require('../electron/notifications');
 
@@ -12,6 +13,7 @@ function createHarness({ emitShow = true, failMessage = '', supported = true, tr
   const handlers = new Map();
   const notifications = [];
   const restoreCalls = [];
+  const routes = [];
   class FakeNotification {
     constructor(options) {
       this.handlers = new Map();
@@ -36,6 +38,10 @@ function createHarness({ emitShow = true, failMessage = '', supported = true, tr
     click() {
       this.handlers.get('click')?.();
     }
+    close() {
+      this.closed = true;
+      this.handlers.get('close')?.();
+    }
   }
 
   configureDesktopNotificationsIpc({
@@ -46,13 +52,15 @@ function createHarness({ emitShow = true, failMessage = '', supported = true, tr
       }
     },
     isTrustedFrame: () => trusted,
+    openRoute: (route) => routes.push(route),
     restoreMainWindow: () => restoreCalls.push('restore')
   });
 
   return {
     handler: handlers.get(CHANNEL),
     notifications,
-    restoreCalls
+    restoreCalls,
+    routes
   };
 }
 
@@ -145,5 +153,33 @@ describe('desktop notifications bridge', () => {
     notifications[0].click();
 
     assert.deepEqual(restoreCalls, ['restore']);
+  });
+
+  it('opens the notification route on click instead of only restoring the window', async () => {
+    const { handler, notifications, restoreCalls, routes } = createHarness();
+
+    await handler(createEvent(), { route: '/?dm=user-1', title: 'Alice' });
+    notifications[0].click();
+
+    assert.deepEqual(routes, ['/?dm=user-1']);
+    assert.deepEqual(restoreCalls, []);
+  });
+
+  it('replaces the previous notification with the same tag', async () => {
+    const { handler, notifications } = createHarness();
+
+    await handler(createEvent(), { tag: 'dm:replace-1', title: 'First' });
+    await handler(createEvent(), { tag: 'dm:replace-2', title: 'Other chat' });
+    await handler(createEvent(), { tag: 'dm:replace-1', title: 'Second' });
+
+    assert.equal(notifications[0].closed, true);
+    assert.equal(notifications[1].closed, undefined);
+    assert.equal(notifications[2].closed, undefined);
+    assert.equal(notificationsByTag.get('dm:replace-1'), notifications[2]);
+
+    notifications[2].click();
+    assert.equal(notificationsByTag.has('dm:replace-1'), false);
+    notifications[1].close();
+    assert.equal(notificationsByTag.has('dm:replace-2'), false);
   });
 });

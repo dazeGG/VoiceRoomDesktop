@@ -1,6 +1,6 @@
 {
   "name": "voice-room-desktop",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "private": true,
   "description": "Electron desktop shell for Voice Room.",
   "author": {

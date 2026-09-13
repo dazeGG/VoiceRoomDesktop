@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; style-src 'self'; script-src 'self'; img-src 'none'; font-src 'self'">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voice Room Overlay</title>
+    <link rel="stylesheet" href="../shell-tokens.css">
+    <link rel="stylesheet" href="./overlay.css">
+  </head>
+  <body>
+    <section class="overlay-card" id="overlayCard" hidden>
+      <header class="overlay-head">
+        <p class="overlay-kicker">Voice Room</p>
+        <h1 class="overlay-title" id="overlayTitle">В звонке</h1>
+      </header>
+      <ul class="overlay-people" id="overlayPeople" hidden></ul>
+      <div class="overlay-controls" id="overlayControls" hidden>
+        <button class="overlay-button" id="overlayMic" type="button">Микрофон</button>
+        <button class="overlay-button" id="overlayOutput" type="button">Звук</button>
+        <button class="overlay-button overlay-button--danger" id="overlayLeave" type="button">Выйти</button>
+      </div>
+      <p class="overlay-hint" id="overlayHint" hidden></p>
+    </section>
+    <script src="./overlay.js"></script>
+  </body>
+</html>

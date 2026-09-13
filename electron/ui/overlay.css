@@ -1,0 +1,156 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: max-content;
+  height: max-content;
+  overflow: hidden;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  user-select: none;
+}
+
+.overlay-card {
+  display: grid;
+  gap: 10px;
+  width: max-content;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 12px 12px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.38);
+}
+
+.overlay-head {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.overlay-kicker,
+.overlay-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.overlay-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-people {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.overlay-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.overlay-person[data-speaking='true'] {
+  background: color-mix(in srgb, var(--focus-ring) 16%, transparent);
+  color: var(--ink);
+}
+
+.overlay-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.overlay-person[data-speaking='true'] .overlay-dot {
+  background: var(--focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 28%, transparent);
+}
+
+.overlay-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-flags {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.overlay-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.overlay-button {
+  flex: 1;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 9px;
+  background: var(--control);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.overlay-button:hover {
+  background: var(--control-hover);
+}
+
+.overlay-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.overlay-button[aria-pressed='true'] {
+  background: var(--control-active);
+  color: var(--ink-inverse);
+}
+
+.overlay-button--danger {
+  flex: 0.9;
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--control-line));
+  color: var(--danger);
+}
+
+.overlay-hint {
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-weight: 600;
+}

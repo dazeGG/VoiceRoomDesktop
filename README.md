@@ -160,6 +160,38 @@ const removeListener = window.voiceRoomDesktopCall.onAction(({ action }) => {
 
 The glyphs in `assets/call` are rendered from lucide and the app logo by `npm run icons:call`; commit the PNGs after changing either.
 
+## In-game overlay
+
+While you are in voice, the shell can show a small always-on-top HUD over a **detected game**: room name, who is speaking, mute / deafen / leave. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
+
+It does **not** appear over exclusive fullscreen. Switch the game to borderless / fullscreen windowed. The hosted web app exposes the same note and the controls through `window.voiceRoomDesktopOverlay`:
+
+```js
+const settings = await window.voiceRoomDesktopOverlay.getSettings();
+// { enabled, opacity, anchor, showParticipants, showControls, clickThrough, interactiveBinding }
+
+await window.voiceRoomDesktopOverlay.setSettings({
+  enabled: true,
+  opacity: 0.92,
+  anchor: 'top-left', // top-left | top-right | bottom-left | bottom-right
+  showParticipants: true,
+  showControls: true,
+  clickThrough: true,
+  allowedExecutables: ['mygame.exe']
+});
+await window.voiceRoomDesktopOverlay.addGame(); // current foreground exe
+const foreground = await window.voiceRoomDesktopOverlay.getForeground();
+// { game, label, reason, exe, title }
+
+await window.voiceRoomDesktopOverlay.setSnapshot({
+  participants: [
+    { id: 'self', name: 'Вы', self: true, speaking: true, micMuted: false, outputMuted: false }
+  ]
+});
+```
+
+Clicks pass through to the game until the overlay hotkey (default `Ctrl+\``) makes the HUD interactive. The same shortcut returns click-through. Overlay preferences live in `desktop-settings.json` next to autostart.
+
 ## Window size and position
 
 The main window reopens with its last size, position and maximized state (stored in `window-state.json` in the user data folder). Fullscreen is not restored. When the saved position is no longer visible — a disconnected monitor, a smaller display — the window keeps its size (shrunk to fit if needed) and is centered on the primary display.

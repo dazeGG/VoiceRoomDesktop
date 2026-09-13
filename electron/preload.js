@@ -149,6 +149,17 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopLinks', {
   }
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopOverlay', {
+  addGame: (exe) => ipcRenderer.invoke('desktop-overlay:add-game', exe),
+  getForeground: () => ipcRenderer.invoke('desktop-overlay:get-foreground'),
+  getSettings: () => ipcRenderer.invoke('desktop-overlay:get-settings'),
+  preview: () => ipcRenderer.invoke('desktop-overlay:preview'),
+  removeGame: (exe) => ipcRenderer.invoke('desktop-overlay:remove-game', exe),
+  setSettings: (settings) => ipcRenderer.invoke('desktop-overlay:set-settings', settings),
+  setSnapshot: (snapshot) => ipcRenderer.invoke('desktop-overlay:set-snapshot', snapshot),
+  setSuspended: (suspended) => ipcRenderer.invoke('desktop-overlay:set-suspended', Boolean(suspended))
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopCall', {
   onAction: (handler) => {
     if (typeof handler !== 'function') return () => {};

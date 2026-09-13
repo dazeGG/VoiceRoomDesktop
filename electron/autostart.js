@@ -1,10 +1,10 @@
 'use strict';
 
 const { HIDDEN_LAUNCH_ARG } = require('./app/launch-mode');
+const { SETTINGS_FILE, createDesktopSettingsStore } = require('./desktop-settings');
 
 const GET_CHANNEL = 'desktop-autostart:get-settings';
 const SET_CHANNEL = 'desktop-autostart:set-settings';
-const SETTINGS_FILE = 'desktop-settings.json';
 
 function createAutostartController({
   app,
@@ -14,29 +14,18 @@ function createAutostartController({
   env = process.env,
   log = console
 }) {
+  const settingsStore = createDesktopSettingsStore({ app, fs, log, path });
+
   function isSupported() {
     return app.isPackaged === true && (platform === 'win32' || platform === 'darwin');
   }
 
-  function settingsFilePath() {
-    return path.join(app.getPath('userData'), SETTINGS_FILE);
-  }
-
   function readStoredSettings() {
-    try {
-      const stored = JSON.parse(fs.readFileSync(settingsFilePath(), 'utf8'));
-      return { startMinimized: stored?.startMinimized === true };
-    } catch {
-      return { startMinimized: false };
-    }
+    return { startMinimized: settingsStore.read().startMinimized === true };
   }
 
   function writeStoredSettings(settings) {
-    const filePath = settingsFilePath();
-    const tempPath = `${filePath}.tmp`;
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(tempPath, JSON.stringify({ startMinimized: settings.startMinimized === true }));
-    fs.renameSync(tempPath, filePath);
+    settingsStore.patch({ startMinimized: settings.startMinimized === true });
   }
 
   // The portable build runs from a temporary extraction directory; the login

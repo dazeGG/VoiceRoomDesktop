@@ -7,6 +7,7 @@ const path = require('node:path');
 const { configureDesktopAttentionIpc } = require('./attention');
 const { createAutostartController } = require('./autostart');
 const { createCallControlsController } = require('./call-controls');
+const { createOverlayController } = require('./overlay');
 const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
 const { createDiagnosticsController } = require('./diagnostics');
 const { getNativeAudioCapabilities } = require('./native/audio');
@@ -205,6 +206,21 @@ let launchInProgress = null;
 let requestLaunch = () => Promise.resolve();
 
 const callControls = createCallControlsController({ log });
+const overlay = createOverlayController({
+  BrowserWindow,
+  app,
+  callControls,
+  fs,
+  globalShortcut,
+  log,
+  path,
+  platform: process.platform,
+  screen: {
+    getCursorScreenPoint: () => require('electron').screen.getCursorScreenPoint(),
+    getDisplayNearestPoint: (point) => require('electron').screen.getDisplayNearestPoint(point),
+    getPrimaryDisplay: () => require('electron').screen.getPrimaryDisplay()
+  }
+});
 const callSurfaces = createCallSurfaces({
   app,
   Menu,
@@ -325,6 +341,7 @@ const appBootstrap = createAppBootstrap({
   onMainWindowCreated: (window) => {
     deepLinks.attachWindow(window);
     callSurfaces.attachWindow(window);
+    overlay.attachMainWindow(window);
     installContextMenu(window, { Menu, clipboard, log });
     configureSpellChecker(window.webContents.session, { log });
   },
@@ -355,6 +372,7 @@ if (!gotLock) {
   app.on('will-quit', () => {
     desktopHotkeys.dispose();
     keepAwake.dispose();
+    overlay.dispose();
     backgroundUpdates?.dispose();
   });
 
@@ -460,6 +478,7 @@ if (!gotLock) {
       keepAwake.installPowerMonitor(powerMonitor);
       autostart.configureIpc({ ipcMain, isTrustedFrame });
       callControls.configureIpc({ ipcMain, isTrustedFrame });
+      overlay.configureIpc({ ipcMain, isTrustedFrame });
       diagnostics.configureIpc({ ipcMain, isTrustedFrame });
       deepLinks.configureIpc({ ipcMain });
       if (!PICKER_PREVIEW_ENABLED) deepLinks.registerProtocol();

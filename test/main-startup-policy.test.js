@@ -164,7 +164,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 1);
-    assert.equal(handleCalls, 18);
+    assert.equal(handleCalls, 29);
     assert.deepEqual([...handledChannels].sort(), [
       'desktop-attention:request',
       'desktop-attention:set-badge-count',
@@ -181,6 +181,17 @@ test('main process installs IPC services once when macOS recreates its window', 
       'desktop-links:ready',
       'desktop-links:unsubscribe',
       'desktop-notifications:show',
+      'desktop-overlay:action',
+      'desktop-overlay:add-game',
+      'desktop-overlay:content-size',
+      'desktop-overlay:get-foreground',
+      'desktop-overlay:get-settings',
+      'desktop-overlay:preview',
+      'desktop-overlay:ready',
+      'desktop-overlay:remove-game',
+      'desktop-overlay:set-settings',
+      'desktop-overlay:set-snapshot',
+      'desktop-overlay:set-suspended',
       'window:is-fullscreen',
       'window:reload-main',
       'window:set-fullscreen'
@@ -199,7 +210,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 3);
-    assert.equal(handleCalls, 18);
+    assert.equal(handleCalls, 29);
   } finally {
     delete require.cache[require.resolve(mainPath)];
     Module._load = originalLoad;

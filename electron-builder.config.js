@@ -42,7 +42,8 @@ module.exports = {
     output: outputDir
   },
   asarUnpack: [
-    'native/bin/**/*'
+    'native/bin/**/*',
+    'native/overlay/windows/**/*'
   ],
   files: [
     'assets/call/*.png',

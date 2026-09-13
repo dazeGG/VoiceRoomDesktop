@@ -65,9 +65,14 @@ function createOverlayController({
   let foreground = null;
   let activeGame = null;
   const watcher = createWatcher({
+    appPath: typeof app.getAppPath === 'function' ? app.getAppPath() : '',
+    fs,
     log,
     onChange: handleForeground,
-    platform
+    path: pathModule,
+    platform,
+    resourcesPath: process.resourcesPath || '',
+    tempPath: typeof app.getPath === 'function' ? app.getPath('temp') : ''
   });
 
   function loadSettings() {

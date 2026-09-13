@@ -47,3 +47,28 @@ describe('overlay foreground payload', () => {
     assert.deepEqual(sanitizeAllowedExecutables(['CS2.EXE', 'cs2.exe', '', 1]).length, 1);
   });
 });
+
+describe('overlay foreground script path', () => {
+  it('refuses to run a script from inside app.asar and copies it out', () => {
+    const path = require('node:path');
+    const { isInsideAsar, resolveRunnableForegroundScript } = require('../electron/overlay-foreground');
+    const asarFile = 'C:\\app\\resources\\app.asar\\native\\overlay\\windows\\foreground.ps1';
+    const unpacked = 'C:\\app\\resources\\app.asar.unpacked\\native\\overlay\\windows\\foreground.ps1';
+    assert.equal(isInsideAsar(asarFile), true);
+    assert.equal(isInsideAsar(unpacked), false);
+
+    const copied = [];
+    const resolved = resolveRunnableForegroundScript({
+      appPath: 'C:\\app\\resources\\app.asar',
+      fs: {
+        copyFileSync(from, to) { copied.push([from, to]); },
+        existsSync(filePath) { return filePath === asarFile; }
+      },
+      path,
+      resourcesPath: 'C:\\app\\resources',
+      tempPath: 'C:\\temp'
+    });
+    assert.equal(resolved, path.join('C:\\temp', 'voice-room-foreground.ps1'));
+    assert.deepEqual(copied, [[asarFile, resolved]]);
+  });
+});

@@ -42,7 +42,8 @@ module.exports = {
     output: outputDir
   },
   asarUnpack: [
-    'native/bin/**/*'
+    'native/bin/**/*',
+    'native/overlay/windows/**/*'
   ],
   files: [
     'assets/call/*.png',
@@ -70,6 +71,15 @@ module.exports = {
     'electron/keep-awake.js',
     'electron/native/audio.js',
     'electron/notifications.js',
+    'electron/desktop-settings.js',
+    'electron/overlay.js',
+    'electron/overlay-foreground.js',
+    'electron/policies/overlay.js',
+    'electron/policies/overlay-games.js',
+    'electron/ui/overlay-preload.js',
+    'electron/ui/overlay.css',
+    'electron/ui/overlay.html',
+    'electron/ui/overlay.js',
     'electron/native-capture-contract.js',
     'electron/native/capture-contract.js',
     'electron/native/capture.js',
@@ -111,6 +121,7 @@ module.exports = {
     'electron/ui/update-splash.html',
     'electron/ui/update-splash.js',
     'native/bin/**/*',
+    'native/overlay/windows/foreground.ps1',
     'node_modules/lucide/dist/umd/lucide.min.js',
     'package.json'
   ],

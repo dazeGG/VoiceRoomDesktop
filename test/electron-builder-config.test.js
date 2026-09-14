@@ -27,7 +27,12 @@ const requiredStartupAssets = [
   'electron/ui/update-preload.js',
   'electron/ui/update-splash.css',
   'electron/ui/update-splash.html',
-  'electron/ui/update-splash.js'
+  'electron/ui/update-splash.js',
+  'electron/ui/overlay-preload.js',
+  'electron/ui/overlay.css',
+  'electron/ui/overlay.html',
+  'electron/ui/overlay.js',
+  'native/overlay/windows/foreground.ps1'
 ];
 
 function toPackagePath(filePath) {
@@ -197,7 +202,8 @@ describe('electron-builder config', () => {
     const htmlAssets = [
       'electron/ui/renderer-recovery.html',
       'electron/ui/screen-picker-preview.html',
-      'electron/ui/update-splash.html'
+      'electron/ui/update-splash.html',
+      'electron/ui/overlay.html'
     ].flatMap((filePath) => collectHtmlAssetReferences(path.join(rootDir, filePath)));
     const utilityProcessEntryPoints = collectUtilityProcessForkTargets(path.join(rootDir, 'electron/native/capture.js'));
     const requiredAssets = [...new Set([...requiredStartupAssets, ...htmlAssets, ...utilityProcessEntryPoints])].sort();

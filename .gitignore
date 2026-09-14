@@ -34,3 +34,4 @@ pnpm-debug.log*
 .omx/
 .omc/
 .codex/
+.claude/

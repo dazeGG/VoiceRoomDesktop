@@ -91,6 +91,28 @@ test('preload installs desktop markers without native capture contract modules',
   idle.getSystemIdleTime();
   assert.deepEqual(invoked.at(-1), ['desktop-idle:get-system-idle-time']);
 
+  const overlay = exposed.get('voiceRoomDesktopOverlay');
+  assert.deepEqual(Object.keys(overlay), [
+    'addGame',
+    'getForeground',
+    'getSettings',
+    'preview',
+    'removeGame',
+    'setSettings',
+    'setSnapshot',
+    'setSuspended'
+  ]);
+  overlay.getSettings();
+  assert.deepEqual(invoked.at(-1), ['desktop-overlay:get-settings']);
+  overlay.setSettings({ enabled: true });
+  assert.deepEqual(invoked.at(-1), ['desktop-overlay:set-settings', { enabled: true }]);
+  overlay.setSnapshot({ participants: [] });
+  assert.deepEqual(invoked.at(-1), ['desktop-overlay:set-snapshot', { participants: [] }]);
+  overlay.preview();
+  assert.deepEqual(invoked.at(-1), ['desktop-overlay:preview']);
+  overlay.setSuspended(true);
+  assert.deepEqual(invoked.at(-1), ['desktop-overlay:set-suspended', true]);
+
   const attention = exposed.get('voiceRoomDesktopAttention');
   assert.deepEqual(Object.keys(attention), ['requestAttention', 'setBadgeCount']);
   attention.setBadgeCount(3);

@@ -3,6 +3,7 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { requireMsvcEnv } = require('./msvc-env');
 
 const rootDir = path.join(__dirname, '..');
 const nativeDir = path.join(rootDir, 'native', 'hotkeys');
@@ -23,6 +24,7 @@ function run(command, args, options = {}) {
       process.stderr.write(result.stderr || result.stdout || '');
     }
     if (options.optional) return false;
+    if (result.error) console.error(`${command}: ${result.error.message}`);
     process.exit(result.status || 1);
   }
   return true;
@@ -165,8 +167,13 @@ function buildWindows(options = {}) {
   }
 
   const output = path.join(outputDir, 'VoiceRoomHotkeys.exe');
+  // Without /Fo cl.exe drops the .obj into the cwd, which is the repo root.
+  const objectDir = path.join(rootDir, 'native', '.cache', 'obj');
+  ensureDir(objectDir);
+
   run('cl.exe', [
     '/nologo',
+    `/Fo:${objectDir}${path.sep}`,
     '/EHsc',
     '/std:c++17',
     '/W4',
@@ -181,7 +188,7 @@ function buildWindows(options = {}) {
     '/link',
     '/SUBSYSTEM:CONSOLE',
     'User32.lib'
-  ]);
+  ], { env: requireMsvcEnv('Windows native hotkey helper') });
   smokeHelper(output);
 }
 

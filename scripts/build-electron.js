@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
+const { resolveMsvcEnv } = require('./msvc-env');
 
 const rootDir = path.join(__dirname, '..');
 const args = process.argv.slice(2);
@@ -18,7 +19,26 @@ function run(command, commandArgs, options = {}) {
     stdio: 'inherit'
   });
 
-  if (result.status !== 0) process.exit(result.status || 1);
+  if (result.status !== 0) {
+    if (result.error) console.error(`${command}: ${result.error.message}`);
+    process.exit(result.status || 1);
+  }
+}
+
+// Load MSVC once for the three native helper builds instead of once per script.
+function nativeBuildEnv() {
+  const buildsWindows = targets.length === 0
+    ? process.platform === 'win32'
+    : targets.some((target) => target === '--win' || target === 'win');
+  if (process.platform !== 'win32' || !buildsWindows) return process.env;
+
+  const msvc = resolveMsvcEnv();
+  if (!msvc.env) {
+    console.error(msvc.error);
+    process.exit(1);
+  }
+  if (msvc.source !== 'PATH') console.log(`Using MSVC from ${msvc.source}`);
+  return msvc.env;
 }
 
 function readGitHash() {
@@ -47,14 +67,15 @@ fs.writeFileSync(
 );
 
 run(process.execPath, [path.join(rootDir, 'scripts', 'create-electron-config.js')]);
-run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), ...targets]);
-run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-capture.js'), ...targets]);
+const nativeEnv = nativeBuildEnv();
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-audio.js'), ...targets], { env: nativeEnv });
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-capture.js'), ...targets], { env: nativeEnv });
 const hotkeyTargets = [...targets];
 if (
   process.platform === 'darwin'
   && (targets.length === 0 || targets.includes('--mac') || targets.includes('mac'))
 ) hotkeyTargets.push('--require-universal');
-run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-hotkeys.js'), ...hotkeyTargets]);
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-hotkeys.js'), ...hotkeyTargets], { env: nativeEnv });
 
 const env = {
   ...process.env,

@@ -3,6 +3,7 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { requireMsvcEnv } = require('./msvc-env');
 
 const rootDir = path.join(__dirname, '..');
 const nativeDir = path.join(rootDir, 'native', 'hotkeys');
@@ -23,6 +24,7 @@ function run(command, args, options = {}) {
       process.stderr.write(result.stderr || result.stdout || '');
     }
     if (options.optional) return false;
+    if (result.error) console.error(`${command}: ${result.error.message}`);
     process.exit(result.status || 1);
   }
   return true;
@@ -181,7 +183,7 @@ function buildWindows(options = {}) {
     '/link',
     '/SUBSYSTEM:CONSOLE',
     'User32.lib'
-  ]);
+  ], { env: requireMsvcEnv('Windows native hotkey helper') });
   smokeHelper(output);
 }
 

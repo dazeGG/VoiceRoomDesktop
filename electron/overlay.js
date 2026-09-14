@@ -57,6 +57,7 @@ function createOverlayController({
   callControls,
   platform = process.platform,
   processPid = process.pid,
+  appUrl = '',
   createForegroundWatcher: createWatcher = createForegroundWatcher
 }) {
   const settingsStore = createDesktopSettingsStore({ app, fs, log, path: pathModule });
@@ -404,7 +405,7 @@ function createOverlayController({
   }
 
   function setSnapshot(payload) {
-    snapshot = sanitizeOverlaySnapshot(payload);
+    snapshot = sanitizeOverlaySnapshot(payload, { baseUrl: appUrl });
     sendState();
     return snapshot;
   }

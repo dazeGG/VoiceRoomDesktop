@@ -18,6 +18,10 @@ const DEFAULT_INTERACTIVE_BINDING = Object.freeze({
 });
 const { sanitizeAllowedExecutables } = require('./overlay-games');
 
+// Bumped when a stored field changes meaning. Version 2: `opacity` is the opacity of
+// silent participants, not of the whole HUD.
+const OVERLAY_SETTINGS_VERSION = 2;
+
 const DEFAULT_OVERLAY_SETTINGS = Object.freeze({
   allowedExecutables: Object.freeze([]),
   anchor: 'top-left',
@@ -25,10 +29,11 @@ const DEFAULT_OVERLAY_SETTINGS = Object.freeze({
   enabled: true,
   interactiveBinding: DEFAULT_INTERACTIVE_BINDING,
   // Opacity of participants who are not speaking; speakers are always fully opaque.
-  opacity: 0.45,
+  opacity: 0.5,
   showControls: false,
   showNames: true,
-  showParticipants: true
+  showParticipants: true,
+  version: OVERLAY_SETTINGS_VERSION
 });
 
 function stripControlCharacters(value) {
@@ -69,17 +74,25 @@ function sanitizeOverlaySettings(payload) {
     interactiveBinding: sanitizeInteractiveBinding(
       Object.hasOwn(source, 'interactiveBinding') ? source.interactiveBinding : DEFAULT_INTERACTIVE_BINDING
     ),
-    opacity: clampOpacity(source.opacity),
+    // Older files stored the whole-HUD opacity, often 1, which hid who is speaking.
+    opacity: source.version === OVERLAY_SETTINGS_VERSION
+      ? clampOpacity(source.opacity)
+      : DEFAULT_OVERLAY_SETTINGS.opacity,
     showControls: source.showControls === true,
     showNames: source.showNames !== false,
-    showParticipants: source.showParticipants !== false
+    showParticipants: source.showParticipants !== false,
+    version: OVERLAY_SETTINGS_VERSION
   });
 }
 
-function sanitizeAvatarUrl(value) {
+function sanitizeAvatarUrl(value, baseUrl = '') {
   if (typeof value !== 'string' || !value || value.length > 512) return '';
   try {
-    const url = new URL(value);
+    // The API hands out same-origin paths such as /api/avatars/<key>. The overlay page
+    // is a file:// document, so resolve them against the Voice Room URL.
+    const relative = value.startsWith('/') && !value.startsWith('//');
+    if (relative && !baseUrl) return '';
+    const url = relative ? new URL(value, baseUrl) : new URL(value);
     if (url.protocol !== 'https:') return '';
     return url.toString();
   } catch {
@@ -100,7 +113,7 @@ function sanitizeAvatarColorKey(value) {
   return typeof value === 'string' && /^[a-z]{1,16}$/.test(value) ? value : '';
 }
 
-function sanitizeOverlayParticipant(payload) {
+function sanitizeOverlayParticipant(payload, options = {}) {
   if (!payload || typeof payload !== 'object') return null;
   if (typeof payload.id !== 'string' || !OVERLAY_ID_PATTERN.test(payload.id)) return null;
   const name = typeof payload.name === 'string'
@@ -109,7 +122,7 @@ function sanitizeOverlayParticipant(payload) {
   return Object.freeze({
     avatarAccent: sanitizeAvatarAccent(payload.avatarAccent),
     avatarColorKey: sanitizeAvatarColorKey(payload.avatarColorKey),
-    avatarUrl: sanitizeAvatarUrl(payload.avatarUrl),
+    avatarUrl: sanitizeAvatarUrl(payload.avatarUrl, options.baseUrl),
     id: payload.id,
     micMuted: payload.micMuted === true,
     name,
@@ -119,13 +132,13 @@ function sanitizeOverlayParticipant(payload) {
   });
 }
 
-function sanitizeOverlaySnapshot(payload) {
+function sanitizeOverlaySnapshot(payload, options = {}) {
   const source = payload && typeof payload === 'object' ? payload : {};
   const raw = Array.isArray(source.participants) ? source.participants : [];
   const participants = [];
   const seen = new Set();
   for (const item of raw) {
-    const participant = sanitizeOverlayParticipant(item);
+    const participant = sanitizeOverlayParticipant(item, options);
     if (!participant || seen.has(participant.id)) continue;
     seen.add(participant.id);
     participants.push(participant);
@@ -197,6 +210,7 @@ module.exports = {
   OVERLAY_ANCHORS,
   OVERLAY_MARGIN_PX,
   OVERLAY_MAX_PARTICIPANTS,
+  OVERLAY_SETTINGS_VERSION,
   describeInteractiveHotkey,
   isOverlayHtmlUrl,
   resolveOverlayBounds,

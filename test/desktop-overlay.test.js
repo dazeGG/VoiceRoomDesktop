@@ -117,6 +117,7 @@ function createHarness(t) {
       return window;
     },
     app: { getPath: () => userDataPath },
+    appUrl: 'https://voiceroom.ru',
     callControls,
     createForegroundWatcher: () => watcher,
     fs,
@@ -314,6 +315,20 @@ describe('desktop overlay controller', () => {
     assert.deepEqual(controller.addAllowedGame(CHROME.exe).allowedExecutables, []);
     assert.deepEqual(controller.addAllowedGame().allowedExecutables, ['d:\\games\\mygame\\mygame.exe']);
     assert.equal(controller.getForeground().game, true);
+  });
+
+  it('sends avatars to the overlay window as absolute Voice Room URLs', (t) => {
+    const { callControls, controller, windows } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    controller.handleForeground(CS2);
+    controller.setSnapshot({
+      participants: [{ avatarUrl: '/api/avatars/key-1', id: 'a', name: 'Ann', speaking: true }]
+    });
+    const [participant] = lastState(windows[0]).participants;
+    assert.equal(participant.avatarUrl, 'https://voiceroom.ru/api/avatars/key-1');
+    assert.equal(participant.speaking, true);
+    assert.equal(lastState(windows[0]).settings.opacity, 0.5);
   });
 
   it('previews sample participants when nobody is in a call', (t) => {

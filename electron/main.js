@@ -209,6 +209,7 @@ const callControls = createCallControlsController({ log });
 const overlay = createOverlayController({
   BrowserWindow,
   app,
+  appUrl: APP_URL,
   callControls,
   fs,
   globalShortcut,

@@ -162,7 +162,7 @@ The glyphs in `assets/call` are rendered from lucide and the app logo by `npm ru
 
 ## In-game overlay
 
-While you are in voice, the shell can show a Discord-style HUD over a **detected game**: avatars and optional names. Whoever is speaking turns fully opaque; everyone else stays faded to the `opacity` setting. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
+While you are in voice, the shell can show a Discord-style HUD over a **detected game**: avatars and optional names. Silent participants are faded to the `opacity` setting (50 % by default); whoever is speaking turns fully opaque, like Discord. Same-origin avatar paths from the web app (`/api/avatars/…`) are resolved against `VOICE_ROOM_URL`. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
 
 It does **not** appear over exclusive fullscreen. Switch the game to borderless / fullscreen windowed. The hosted web app exposes the same note and the controls through `window.voiceRoomDesktopOverlay`:
 
@@ -172,7 +172,7 @@ const settings = await window.voiceRoomDesktopOverlay.getSettings();
 
 await window.voiceRoomDesktopOverlay.setSettings({
   enabled: true,
-  opacity: 0.45, // participants who are not speaking, 0.2..1
+  opacity: 0.5, // participants who are not speaking, 0.2..1
   anchor: 'top-left', // top-left | top-right | bottom-left | bottom-right
   showNames: true,
   clickThrough: true,

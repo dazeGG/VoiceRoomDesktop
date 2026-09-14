@@ -16,13 +16,17 @@ const {
 describe('overlay settings', () => {
   it('fills defaults and keeps a valid hotkey', () => {
     assert.deepEqual({ ...sanitizeOverlaySettings(undefined) }, { ...DEFAULT_OVERLAY_SETTINGS });
-    assert.deepEqual({ ...sanitizeOverlaySettings({ enabled: false, opacity: 2, anchor: 'nope' }) }, {
+    assert.deepEqual({ ...sanitizeOverlaySettings({ enabled: false, opacity: 2, anchor: 'nope', version: 2 }) }, {
       ...DEFAULT_OVERLAY_SETTINGS,
       anchor: 'top-left',
       enabled: false,
       opacity: 1
     });
-    assert.equal(sanitizeOverlaySettings({ opacity: 0 }).opacity, 0.2);
+    assert.equal(sanitizeOverlaySettings({ opacity: 0, version: 2 }).opacity, 0.2);
+    // Files written before version 2 stored the whole-HUD opacity, often 1.
+    assert.equal(DEFAULT_OVERLAY_SETTINGS.opacity, 0.5);
+    assert.equal(sanitizeOverlaySettings({ opacity: 1 }).opacity, 0.5);
+    assert.equal(sanitizeOverlaySettings({ opacity: 1 }).version, 2);
     assert.deepEqual(sanitizeOverlaySettings({ interactiveBinding: { code: 'KeyO', ctrlKey: true } }).interactiveBinding, {
       altKey: false,
       code: 'KeyO',
@@ -58,6 +62,17 @@ describe('overlay snapshot', () => {
     assert.equal(sanitizeOverlaySnapshot({
       participants: [{ avatarUrl: 'http://evil.example/a.png', id: 'b', name: 'Bad' }]
     }).participants[0].avatarUrl, '');
+  });
+
+  it('resolves same-origin avatar paths against the Voice Room URL', () => {
+    const baseUrl = 'https://voiceroom.ru';
+    const avatarOf = (avatarUrl, options) => sanitizeOverlaySnapshot({
+      participants: [{ avatarUrl, id: 'a', name: 'Ann' }]
+    }, options).participants[0].avatarUrl;
+    assert.equal(avatarOf('/api/avatars/key%201', { baseUrl }), 'https://voiceroom.ru/api/avatars/key%201');
+    assert.equal(avatarOf('/api/avatars/key-1'), '');
+    assert.equal(avatarOf('//evil.example/a.png', { baseUrl }), '');
+    assert.equal(avatarOf('/api/avatars/key-1', { baseUrl: 'http://voiceroom.ru' }), '');
   });
 
   it('keeps a bounded unique participant list', () => {

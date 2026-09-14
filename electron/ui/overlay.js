@@ -20,7 +20,7 @@ const AVATAR_COLORS = {
   teal: 'oklch(53% 0.18 182)',
   violet: 'oklch(55% 0.25 304)'
 };
-const DEFAULT_IDLE_OPACITY = 0.45;
+const DEFAULT_IDLE_OPACITY = 0.5;
 
 // Nodes are reused per participant so avatar images do not reload on every
 // speaking change. Styles go through CSSOM: the page CSP blocks style attributes.

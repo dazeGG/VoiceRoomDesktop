@@ -167,8 +167,13 @@ function buildWindows(options = {}) {
   }
 
   const output = path.join(outputDir, 'VoiceRoomHotkeys.exe');
+  // Without /Fo cl.exe drops the .obj into the cwd, which is the repo root.
+  const objectDir = path.join(rootDir, 'native', '.cache', 'obj');
+  ensureDir(objectDir);
+
   run('cl.exe', [
     '/nologo',
+    `/Fo:${objectDir}${path.sep}`,
     '/EHsc',
     '/std:c++17',
     '/W4',

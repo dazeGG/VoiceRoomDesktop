@@ -102,8 +102,13 @@ function buildWindows(options = {}) {
     return;
   }
 
+  // Without /Fo cl.exe drops the .obj into the cwd, which is the repo root.
+  const objectDir = path.join(rootDir, 'native', '.cache', 'obj');
+  ensureDir(objectDir);
+
   run('cl.exe', [
     '/nologo',
+    `/Fo:${objectDir}${path.sep}`,
     '/EHsc',
     '/std:c++17',
     '/O2',

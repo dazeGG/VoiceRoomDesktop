@@ -1,11 +1,6 @@
 'use strict';
 
-const root = document.documentElement;
 const people = document.querySelector('#overlayPeople');
-const panel = document.querySelector('#overlayPanel');
-const panelRoom = document.querySelector('#overlayRoom');
-const panelHint = document.querySelector('#overlayHint');
-const tiles = document.querySelector('#overlayTiles');
 
 const AVATAR_COLORS = {
   amber: 'oklch(63% 0.19 70)',
@@ -27,7 +22,6 @@ const AVATAR_COLORS = {
 };
 const AVATAR_SIZES = ['small', 'medium', 'large'];
 const DEFAULT_AVATAR_SIZE = 'medium';
-const DEFAULT_IDLE_OPACITY = 0.5;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // lucide 1.24 MicOff and HeadphoneOff, inlined because the page CSP only loads its own files.
 const ICON_PATHS = {
@@ -50,9 +44,7 @@ const ICON_PATHS = {
 
 // Nodes are reused per participant so avatar images do not reload on every
 // speaking change. Styles go through CSSOM: the page CSP blocks style attributes.
-const hudNodes = new Map();
-const tileNodes = new Map();
-let mode = 'hud';
+const nodes = new Map();
 
 function element(tagName, className) {
   const node = document.createElement(tagName);
@@ -60,16 +52,17 @@ function element(tagName, className) {
   return node;
 }
 
-function icon(name, className) {
+function icon(name, label) {
   const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('class', className);
+  svg.setAttribute('class', 'overlay-icon');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('fill', 'none');
   svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-width', '2.2');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
-  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', label);
   for (const d of ICON_PATHS[name]) {
     const path = document.createElementNS(SVG_NS, 'path');
     path.setAttribute('d', d);
@@ -87,13 +80,21 @@ function avatarBackground(participant) {
   return AVATAR_COLORS[participant.avatarColorKey] || AVATAR_COLORS.blurple;
 }
 
-function createAvatar(className) {
-  const avatar = element('span', className);
+function createPerson() {
+  const item = element('li', 'overlay-person');
+  const avatar = element('span', 'overlay-avatar');
   const image = document.createElement('img');
   image.alt = '';
   const initial = element('span', 'overlay-initial');
   avatar.append(image, initial);
-  const node = { avatar, failedSrc: '', image, initial };
+  const name = element('span', 'overlay-name');
+  const micOff = icon('micOff', 'Микрофон выключен');
+  const outputOff = icon('outputOff', 'Звук выключен');
+  const stream = element('span', 'overlay-stream');
+  stream.textContent = 'Стрим';
+  item.append(avatar, name, micOff, outputOff, stream);
+
+  const node = { avatar, failedSrc: '', image, initial, item, micOff, name, outputOff, stream };
   // A broken avatar falls back to the initial, like the web app.
   image.addEventListener('error', () => {
     node.failedSrc = image.getAttribute('src') || '';
@@ -103,11 +104,14 @@ function createAvatar(className) {
   return node;
 }
 
-function updateAvatar(node, participant) {
+function updatePerson(node, participant, showNames) {
+  const label = participantLabel(participant);
   const src = typeof participant.avatarUrl === 'string' && participant.avatarUrl.startsWith('https://')
     ? participant.avatarUrl
     : '';
   const showImage = Boolean(src) && node.failedSrc !== src;
+
+  node.item.dataset.speaking = participant.speaking ? 'true' : 'false';
   node.avatar.style.background = avatarBackground(participant);
   if (showImage) {
     if (node.image.getAttribute('src') !== src) node.image.src = src;
@@ -116,103 +120,45 @@ function updateAvatar(node, participant) {
   }
   node.image.hidden = !showImage;
   node.initial.hidden = showImage;
-  node.initial.textContent = participantLabel(participant).slice(0, 1).toUpperCase() || '?';
-}
-
-function createPerson() {
-  const item = element('li', 'overlay-person');
-  const avatar = createAvatar('overlay-avatar');
-  const mute = element('span', 'overlay-mute');
-  mute.setAttribute('aria-hidden', 'true');
-  avatar.avatar.append(mute);
-  const name = element('span', 'overlay-name');
-  item.append(avatar.avatar, name);
-  return { ...avatar, item, mute, name };
-}
-
-function updatePerson(node, participant, showNames) {
-  node.item.dataset.speaking = participant.speaking ? 'true' : 'false';
-  updateAvatar(node, participant);
-  node.mute.hidden = participant.micMuted !== true;
-  node.name.textContent = participantLabel(participant);
+  node.initial.textContent = label.slice(0, 1).toUpperCase() || '?';
+  node.name.textContent = label;
   node.name.hidden = !showNames;
-}
-
-function createTile() {
-  const item = element('li', 'overlay-tile');
-  const avatar = createAvatar('overlay-tile-avatar');
-  const name = element('span', 'overlay-tile-name');
-  const status = element('span', 'overlay-tile-status');
-  const micOff = icon('micOff', 'overlay-tile-icon');
-  const outputOff = icon('outputOff', 'overlay-tile-icon');
-  status.append(micOff, outputOff);
-  item.append(status, avatar.avatar, name);
-  return { ...avatar, item, micOff, name, outputOff, status };
-}
-
-function updateTile(node, participant) {
-  const label = participantLabel(participant);
-  node.item.dataset.speaking = participant.speaking ? 'true' : 'false';
-  updateAvatar(node, participant);
-  node.name.textContent = participant.self && participant.name ? `${label} (вы)` : label;
+  // SVG elements have no `hidden` property, so toggle the attribute directly.
   node.micOff.toggleAttribute('hidden', participant.micMuted !== true);
   node.outputOff.toggleAttribute('hidden', participant.outputMuted !== true);
-  node.status.hidden = participant.micMuted !== true && participant.outputMuted !== true;
+  node.stream.hidden = participant.streaming !== true;
 }
 
-function syncList(container, nodes, participants, create, update) {
+function render(state) {
+  if (!people) return;
+  const participants = Array.isArray(state?.participants) ? state.participants : [];
+  const settings = state?.settings || {};
+  const showNames = settings.showNames !== false;
+  people.dataset.size = AVATAR_SIZES.includes(settings.avatarSize) ? settings.avatarSize : DEFAULT_AVATAR_SIZE;
+
   const seen = new Set();
   const ordered = participants.map((participant) => {
     let node = nodes.get(participant.id);
     if (!node) {
-      node = create();
+      node = createPerson();
       nodes.set(participant.id, node);
     }
     seen.add(participant.id);
-    update(node, participant);
+    updatePerson(node, participant, showNames);
     return node.item;
   });
   for (const id of nodes.keys()) {
     if (!seen.has(id)) nodes.delete(id);
   }
 
-  const current = Array.from(container.children);
+  const current = Array.from(people.children);
   const sameOrder = current.length === ordered.length && current.every((item, index) => item === ordered[index]);
-  if (!sameOrder) container.replaceChildren(...ordered);
-  return ordered.length;
-}
-
-function render(state) {
-  if (!people || !panel || !tiles) return;
-  const participants = Array.isArray(state?.participants) ? state.participants : [];
-  const settings = state?.settings || {};
-  const showNames = settings.showNames !== false;
-  const idleOpacity = Number.isFinite(settings.opacity) ? settings.opacity : DEFAULT_IDLE_OPACITY;
-  const avatarSize = AVATAR_SIZES.includes(settings.avatarSize) ? settings.avatarSize : DEFAULT_AVATAR_SIZE;
-
-  mode = state?.interactive ? 'panel' : 'hud';
-  root.dataset.mode = mode;
-  people.dataset.size = avatarSize;
-  people.style.setProperty('--overlay-idle-opacity', String(idleOpacity));
-
-  const hudCount = syncList(people, hudNodes, participants, createPerson, (node, participant) => {
-    updatePerson(node, participant, showNames);
-  });
-  people.hidden = mode !== 'hud' || hudCount === 0;
-
-  panel.hidden = mode !== 'panel';
-  if (mode !== 'panel') return;
-  panelRoom.textContent = state?.call?.roomName || (state?.previewing ? 'Предпросмотр' : 'В звонке');
-  panelHint.textContent = state?.hint ? `${state.hint} или Esc — вернуться в игру` : 'Esc — вернуться в игру';
-  syncList(tiles, tileNodes, participants, createTile, updateTile);
-}
-
-function closePanel() {
-  window.voiceRoomOverlay?.closePanel?.().catch(() => {});
+  if (!sameOrder) people.replaceChildren(...ordered);
+  people.hidden = ordered.length === 0;
 }
 
 function reportSize() {
-  if (!people || mode !== 'hud' || people.hidden) return;
+  if (!people || people.hidden) return;
   const rect = people.getBoundingClientRect();
   window.voiceRoomOverlay?.reportSize?.({
     height: Math.ceil(rect.height),
@@ -223,14 +169,6 @@ function reportSize() {
 window.voiceRoomOverlay?.onState?.((state) => {
   render(state);
   requestAnimationFrame(reportSize);
-});
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && mode === 'panel') closePanel();
-});
-
-panel?.addEventListener('click', (event) => {
-  if (event.target === panel) closePanel();
 });
 
 if (window.ResizeObserver && people) {

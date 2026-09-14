@@ -162,21 +162,19 @@ The glyphs in `assets/call` are rendered from lucide and the app logo by `npm ru
 
 ## In-game overlay
 
-While you are in voice, the shell can show a Discord-style HUD over a **detected game**: avatars and optional names. Silent participants are faded to the `opacity` setting (50 % by default); whoever is speaking turns fully opaque, like Discord. Same-origin avatar paths from the web app (`/api/avatars/…`) are resolved against `VOICE_ROOM_URL`. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
+While you are in voice, the shell can show a Discord-style HUD over a **detected game**: avatars and optional names. Silent participants are shown at 50 % opacity and whoever is speaking turns fully opaque at once, like Discord. Mic-off and sound-off icons and a «Стрим» badge follow the avatar or name. Same-origin avatar paths from the web app (`/api/avatars/…`) are resolved against `VOICE_ROOM_URL`. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
 
 It does **not** appear over exclusive fullscreen. Switch the game to borderless / fullscreen windowed. The hosted web app exposes the same note and the controls through `window.voiceRoomDesktopOverlay`:
 
 ```js
 const settings = await window.voiceRoomDesktopOverlay.getSettings();
-// { enabled, opacity, anchor, avatarSize, showNames, clickThrough, interactiveBinding }
+// { enabled, anchor, avatarSize, showNames, allowedExecutables }
 
 await window.voiceRoomDesktopOverlay.setSettings({
   enabled: true,
-  opacity: 0.5, // participants who are not speaking, 0.2..1
   anchor: 'top-left', // top-left | top-right | bottom-left | bottom-right
   avatarSize: 'medium', // small (28 px) | medium (36 px) | large (46 px)
   showNames: true,
-  clickThrough: true,
   allowedExecutables: ['mygame.exe']
 });
 const foreground = await window.voiceRoomDesktopOverlay.getForeground();
@@ -185,12 +183,12 @@ await window.voiceRoomDesktopOverlay.addGame(foreground.exe); // browsers, launc
 
 await window.voiceRoomDesktopOverlay.setSnapshot({
   participants: [
-    { id: 'self', name: 'Вы', self: true, speaking: true, micMuted: false, outputMuted: false }
+    { id: 'self', name: 'Вы', self: true, speaking: true, micMuted: false, outputMuted: false, streaming: false }
   ]
 });
 ```
 
-The overlay hotkey (default `Ctrl+\``) opens a panel like Discord's: the game window is dimmed and everyone in the call is shown as a tile, with a green outline while speaking and mic/sound-off badges. The same shortcut, Esc, a click on the dimmed area, or switching to another window closes it and returns focus to the game. The shortcut is registered only while the HUD is on screen, so other apps keep it otherwise. Game detection polls the foreground window through PowerShell only during a call or while the settings screen asks for it. Overlay preferences live in `desktop-settings.json` next to autostart.
+The HUD never takes input: every click goes to the game, and there is no overlay hotkey. Game detection polls the foreground window through PowerShell only during a call or while the settings screen asks for it. Overlay preferences live in `desktop-settings.json` next to autostart.
 
 ## Window size and position
 

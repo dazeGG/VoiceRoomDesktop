@@ -1,7 +1,6 @@
 'use strict';
 
 const path = require('node:path');
-const { bindingToAccelerator } = require('./hotkeys');
 const { createDesktopSettingsStore } = require('./desktop-settings');
 const { createForegroundWatcher } = require('./overlay-foreground');
 const {
@@ -13,7 +12,6 @@ const {
 } = require('./policies/overlay-games');
 const {
   OVERLAY_MARGIN_PX,
-  describeInteractiveHotkey,
   isOverlayHtmlUrl,
   resolveOverlayBounds,
   sanitizeOverlaySettings,
@@ -26,14 +24,12 @@ const SET_CHANNEL = 'desktop-overlay:set-settings';
 const SNAPSHOT_CHANNEL = 'desktop-overlay:set-snapshot';
 const PREVIEW_CHANNEL = 'desktop-overlay:preview';
 const STATE_CHANNEL = 'desktop-overlay:state';
-const ACTION_CHANNEL = 'desktop-overlay:action';
 const SIZE_CHANNEL = 'desktop-overlay:content-size';
 const READY_CHANNEL = 'desktop-overlay:ready';
 const SUSPEND_CHANNEL = 'desktop-overlay:set-suspended';
 const FOREGROUND_CHANNEL = 'desktop-overlay:get-foreground';
 const ADD_GAME_CHANNEL = 'desktop-overlay:add-game';
 const REMOVE_GAME_CHANNEL = 'desktop-overlay:remove-game';
-const CLOSE_PANEL_CHANNEL = 'desktop-overlay:close-panel';
 const PREVIEW_MS = 8_000;
 // Settings poll the foreground every second; keep the watcher alive a bit longer
 // than that so a throttled background tab does not flap it.
@@ -49,7 +45,6 @@ const PREVIEW_PARTICIPANTS = sanitizeOverlaySnapshot({
 
 function createOverlayController({
   BrowserWindow,
-  globalShortcut,
   screen,
   app,
   fs,
@@ -65,14 +60,10 @@ function createOverlayController({
   let overlayWindow = null;
   let mainWindow = null;
   let mainListeners = [];
-  let interactive = false;
   let previewTimer = null;
   let previewing = false;
   let snapshot = sanitizeOverlaySnapshot(null);
   let settings = loadSettings();
-  let registeredAccelerator = null;
-  let failedAccelerator = null;
-  let suspended = false;
   let contentSize = { height: 48, width: 52 };
   let disposing = false;
   let foreground = null;
@@ -112,17 +103,9 @@ function createOverlayController({
   function handleForeground(raw) {
     const payload = parseForegroundPayload(raw);
     if (!payload) return;
-    const ownWindow = payload.pid === processPid;
-    // The hotkey focuses the overlay itself; keep showing it over the game underneath.
-    if (ownWindow && interactive) return;
-    // Another window came to the front while the panel was open: fold back to the HUD.
-    if (interactive) {
-      interactive = false;
-      sendState();
-    }
     foreground = payload;
     const classification = classify(payload);
-    if (!ownWindow && isGameCandidate(classification)) lastCandidate = payload;
+    if (payload.pid !== processPid && isGameCandidate(classification)) lastCandidate = payload;
     activeGame = classification.game
       ? { ...classification, bounds: payload.bounds, title: payload.title }
       : null;
@@ -138,7 +121,6 @@ function createOverlayController({
       callActive: callControls.getState().active === true,
       enabled: settings.enabled,
       gameActive: Boolean(activeGame),
-      interactive,
       previewing
     });
   }
@@ -166,40 +148,15 @@ function createOverlayController({
     }
   }
 
-  // The panel dims the whole game window, or the whole display during a preview.
-  function panelArea() {
-    const gameArea = toDipBounds(activeGame?.bounds);
-    if (gameArea) return gameArea;
-    try {
-      const display = screen.getPrimaryDisplay?.();
-      return display?.bounds || display?.workArea || { height: 720, width: 1280, x: 0, y: 0 };
-    } catch {
-      return { height: 720, width: 1280, x: 0, y: 0 };
-    }
-  }
-
   function viewState() {
-    const call = callControls.getState();
     return {
-      call: {
-        active: call.active === true,
-        micMuted: call.micMuted === true,
-        outputMuted: call.outputMuted === true,
-        roomName: call.roomName || ''
-      },
-      hint: interactive ? describeInteractiveHotkey(settings.interactiveBinding) : '',
-      interactive,
       participants: previewing && snapshot.participants.length === 0
         ? PREVIEW_PARTICIPANTS
         : snapshot.participants,
       previewing,
       settings: {
         avatarSize: settings.avatarSize,
-        clickThrough: settings.clickThrough,
-        opacity: settings.opacity,
-        showControls: false,
-        showNames: settings.showNames !== false,
-        showParticipants: true
+        showNames: settings.showNames !== false
       }
     };
   }
@@ -209,25 +166,8 @@ function createOverlayController({
     overlayWindow.webContents?.send?.(STATE_CHANNEL, viewState());
   }
 
-  function applyClickThrough() {
-    if (!overlayWindow || overlayWindow.isDestroyed?.()) return;
-    const ignore = interactive ? false : settings.clickThrough !== false;
-    overlayWindow.setIgnoreMouseEvents?.(ignore, { forward: true });
-    overlayWindow.setFocusable?.(!ignore);
-  }
-
   function positionWindow() {
     if (!overlayWindow || overlayWindow.isDestroyed?.()) return;
-    if (interactive) {
-      const area = panelArea();
-      overlayWindow.setBounds?.({
-        height: Math.round(area.height),
-        width: Math.round(area.width),
-        x: Math.round(area.x),
-        y: Math.round(area.y)
-      });
-      return;
-    }
     const bounds = resolveOverlayBounds({
       anchor: settings.anchor,
       height: contentSize.height,
@@ -278,17 +218,13 @@ function createOverlayController({
 
     overlayWindow.setMenuBarVisibility?.(false);
     applyAlwaysOnTop();
-    applyClickThrough();
+    // The HUD never takes input: every click goes to the game underneath.
+    overlayWindow.setIgnoreMouseEvents?.(true, { forward: true });
 
     overlayWindow.on?.('close', (event) => {
       if (disposing) return;
       event.preventDefault?.();
       hideWindow();
-    });
-
-    // Alt-Tab or a click into another window closes the panel, like Discord.
-    overlayWindow.on?.('blur', () => {
-      if (interactive) setInteractive(false);
     });
 
     overlayWindow.once?.('closed', () => {
@@ -302,9 +238,7 @@ function createOverlayController({
   }
 
   function hideWindow() {
-    interactive = false;
     if (!overlayWindow || overlayWindow.isDestroyed?.()) return;
-    applyClickThrough();
     overlayWindow.hide?.();
   }
 
@@ -312,7 +246,6 @@ function createOverlayController({
     const window = ensureWindow();
     positionWindow();
     applyAlwaysOnTop();
-    applyClickThrough();
     sendState();
     if (window.isVisible?.() !== true) {
       if (typeof window.showInactive === 'function') window.showInactive();
@@ -346,7 +279,6 @@ function createOverlayController({
     syncWatcher();
     if (isVisibleNow()) showWindow();
     else hideWindow();
-    syncHotkey();
   }
 
   function setContentSize(size) {
@@ -354,75 +286,10 @@ function createOverlayController({
     const height = Math.max(MIN_OVERLAY_HEIGHT, Math.round(Number(size?.height) || 0));
     if (width === contentSize.width && height === contentSize.height) return;
     contentSize = { height, width };
-    // The panel covers the game window; the HUD size applies once it closes.
-    if (interactive) return;
     if (overlayWindow && !overlayWindow.isDestroyed?.()) {
       overlayWindow.setContentSize?.(width, height);
       positionWindow();
     }
-  }
-
-  function unregisterHotkey() {
-    if (!registeredAccelerator) return;
-    try {
-      globalShortcut.unregister(registeredAccelerator);
-    } catch (error) {
-      log.warn?.('Failed to unregister overlay hotkey:', error);
-    }
-    registeredAccelerator = null;
-  }
-
-  function wantedAccelerator() {
-    if (suspended || !settings.interactiveBinding || !isVisibleNow()) return null;
-    return bindingToAccelerator(settings.interactiveBinding).accelerator || null;
-  }
-
-  // A global shortcut steals the key from every other app, so it is held only
-  // while the overlay is actually on screen.
-  function syncHotkey() {
-    const accelerator = wantedAccelerator();
-    if (accelerator === registeredAccelerator) return;
-    unregisterHotkey();
-    if (!accelerator) {
-      failedAccelerator = null;
-      return;
-    }
-    if (accelerator === failedAccelerator) return;
-    try {
-      if (globalShortcut.register(accelerator, toggleInteractive)) {
-        registeredAccelerator = accelerator;
-        failedAccelerator = null;
-        return;
-      }
-      log.warn?.('Overlay hotkey is already taken:', accelerator);
-    } catch (error) {
-      log.warn?.('Failed to register overlay hotkey:', error);
-    }
-    failedAccelerator = accelerator;
-  }
-
-  function setInteractive(next) {
-    if (next === interactive) return;
-    if (next && !isVisibleNow()) return;
-    interactive = next;
-    const window = overlayWindow && !overlayWindow.isDestroyed?.() ? overlayWindow : null;
-    if (!window) return;
-    sendState();
-    if (interactive) {
-      applyClickThrough();
-      positionWindow();
-      window.setFocusable?.(true);
-      window.focus?.();
-      return;
-    }
-    // Hiding the focused panel hands keyboard focus back to the game before the HUD
-    // reappears as an inactive window.
-    window.hide?.();
-    syncWindow();
-  }
-
-  function toggleInteractive() {
-    setInteractive(!interactive);
   }
 
   function clearPreview() {
@@ -459,11 +326,6 @@ function createOverlayController({
     return snapshot;
   }
 
-  function setSuspended(nextSuspended) {
-    suspended = nextSuspended === true;
-    syncHotkey();
-  }
-
   function attachMainWindow(window) {
     detachMainWindow();
     mainWindow = window;
@@ -496,7 +358,6 @@ function createOverlayController({
   function disposeWindow() {
     const window = overlayWindow;
     overlayWindow = null;
-    interactive = false;
     if (!window || window.isDestroyed?.()) return;
     try {
       window.destroy?.();
@@ -557,7 +418,6 @@ function createOverlayController({
       clearTimeout(foregroundLease);
       foregroundLease = null;
     }
-    unregisterHotkey();
     watcher.stop?.();
     watcherRunning = false;
     detachMainWindow();
@@ -609,20 +469,9 @@ function createOverlayController({
       return { ok: true };
     });
 
-    ipcMain.handle(ACTION_CHANNEL, (event, action) => {
-      assertOverlaySender(event);
-      return callControls.dispatch(action);
-    });
-
-    ipcMain.handle(CLOSE_PANEL_CHANNEL, (event) => {
-      assertOverlaySender(event);
-      setInteractive(false);
-      return { ok: true };
-    });
-
-    ipcMain.handle(SUSPEND_CHANNEL, (event, nextSuspended) => {
+    // Web 2.5.10–2.5.11 still pause the removed overlay hotkey while recording one.
+    ipcMain.handle(SUSPEND_CHANNEL, (event) => {
       assertTrustedSender(event);
-      setSuspended(nextSuspended === true);
       return { ok: true };
     });
 
@@ -643,7 +492,6 @@ function createOverlayController({
   }
 
   callControls.onStateChange(() => {
-    if (!callControls.getState().active) interactive = false;
     syncWindow();
     sendState();
   });
@@ -657,19 +505,15 @@ function createOverlayController({
     getSettings,
     handleForeground,
     removeAllowedGame,
-    setInteractive,
     setSettings,
     setSnapshot,
-    setSuspended,
     startPreview,
     syncWindow
   };
 }
 
 module.exports = {
-  ACTION_CHANNEL,
   ADD_GAME_CHANNEL,
-  CLOSE_PANEL_CHANNEL,
   FOREGROUND_CHANNEL,
   GET_CHANNEL,
   PREVIEW_CHANNEL,

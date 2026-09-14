@@ -3,9 +3,7 @@
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
 const {
-  DEFAULT_INTERACTIVE_BINDING,
   DEFAULT_OVERLAY_SETTINGS,
-  describeInteractiveHotkey,
   isOverlayHtmlUrl,
   resolveOverlayBounds,
   sanitizeOverlaySettings,
@@ -14,34 +12,33 @@ const {
 } = require('../electron/policies/overlay');
 
 describe('overlay settings', () => {
-  it('fills defaults and keeps a valid hotkey', () => {
+  it('fills defaults and drops preferences the overlay no longer has', () => {
     assert.deepEqual({ ...sanitizeOverlaySettings(undefined) }, { ...DEFAULT_OVERLAY_SETTINGS });
-    assert.deepEqual({ ...sanitizeOverlaySettings({ enabled: false, opacity: 2, anchor: 'nope', version: 2 }) }, {
-      ...DEFAULT_OVERLAY_SETTINGS,
+    assert.deepEqual({ ...DEFAULT_OVERLAY_SETTINGS, allowedExecutables: [] }, {
+      allowedExecutables: [],
       anchor: 'top-left',
+      avatarSize: 'medium',
+      enabled: true,
+      showNames: true
+    });
+    assert.deepEqual({
+      ...sanitizeOverlaySettings({
+        anchor: 'nope',
+        avatarSize: 'huge',
+        clickThrough: false,
+        enabled: false,
+        interactiveBinding: { code: 'Backquote', ctrlKey: true },
+        opacity: 1,
+        showControls: true,
+        showNames: false,
+        version: 2
+      })
+    }, {
+      ...DEFAULT_OVERLAY_SETTINGS,
       enabled: false,
-      opacity: 1
+      showNames: false
     });
-    assert.equal(sanitizeOverlaySettings({ opacity: 0, version: 2 }).opacity, 0.2);
-    // Files written before version 2 stored the whole-HUD opacity, often 1.
-    assert.equal(DEFAULT_OVERLAY_SETTINGS.opacity, 0.5);
-    assert.equal(sanitizeOverlaySettings({ opacity: 1 }).opacity, 0.5);
-    assert.equal(sanitizeOverlaySettings({ opacity: 1 }).version, 2);
-    assert.equal(DEFAULT_OVERLAY_SETTINGS.avatarSize, 'medium');
     assert.equal(sanitizeOverlaySettings({ avatarSize: 'large' }).avatarSize, 'large');
-    assert.equal(sanitizeOverlaySettings({ avatarSize: 'huge' }).avatarSize, 'medium');
-    assert.deepEqual(sanitizeOverlaySettings({ interactiveBinding: { code: 'KeyO', ctrlKey: true } }).interactiveBinding, {
-      altKey: false,
-      code: 'KeyO',
-      ctrlKey: true,
-      metaKey: false,
-      shiftKey: false
-    });
-    assert.equal(sanitizeOverlaySettings({ interactiveBinding: null }).interactiveBinding, null);
-    assert.deepEqual(
-      sanitizeOverlaySettings({ interactiveBinding: { code: 'KeyA' } }).interactiveBinding,
-      DEFAULT_INTERACTIVE_BINDING
-    );
   });
 });
 
@@ -82,10 +79,10 @@ describe('overlay snapshot', () => {
     assert.deepEqual(sanitizeOverlaySnapshot(null), { participants: [] });
     const snapshot = sanitizeOverlaySnapshot({
       participants: [
-        { id: 'a', name: `  Ann${String.fromCharCode(7)}  `, speaking: true, micMuted: 1, self: true },
+        { id: 'a', name: `  Ann${String.fromCharCode(7)}  `, speaking: true, micMuted: 1, self: true, streaming: true },
         { id: 'a', name: 'dup' },
         { id: 'bad id', name: 'x' },
-        { id: 'b', name: 'Bob', outputMuted: true }
+        { id: 'b', name: 'Bob', outputMuted: true, streaming: 'yes' }
       ]
     });
     assert.deepEqual(snapshot.participants, [
@@ -98,7 +95,8 @@ describe('overlay snapshot', () => {
         name: 'Ann',
         outputMuted: false,
         self: true,
-        speaking: true
+        speaking: true,
+        streaming: true
       },
       {
         avatarAccent: '',
@@ -109,7 +107,8 @@ describe('overlay snapshot', () => {
         name: 'Bob',
         outputMuted: true,
         self: false,
-        speaking: false
+        speaking: false,
+        streaming: false
       }
     ]);
   });
@@ -121,12 +120,6 @@ describe('overlay visibility', () => {
     assert.equal(shouldShowOverlay({ callActive: true, enabled: true, gameActive: true }), true);
     assert.equal(shouldShowOverlay({ callActive: false, enabled: true, gameActive: true }), false);
     assert.equal(shouldShowOverlay({ callActive: true, enabled: false, gameActive: true }), false);
-    assert.equal(shouldShowOverlay({
-      callActive: true,
-      enabled: true,
-      gameActive: false,
-      interactive: true
-    }), true);
     assert.equal(shouldShowOverlay({
       callActive: false,
       enabled: true,
@@ -155,9 +148,8 @@ describe('overlay bounds', () => {
 });
 
 describe('overlay helpers', () => {
-  it('recognizes the overlay page and formats the hotkey', () => {
+  it('recognizes the overlay page', () => {
     assert.equal(isOverlayHtmlUrl('file:///C:/app/electron/ui/overlay.html'), true);
     assert.equal(isOverlayHtmlUrl('https://voiceroom.ru/'), false);
-    assert.match(describeInteractiveHotkey(DEFAULT_INTERACTIVE_BINDING), /Ctrl\+`/);
   });
 });

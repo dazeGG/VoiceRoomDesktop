@@ -1,41 +1,22 @@
 'use strict';
 
-const { bindingToAccelerator } = require('../hotkeys');
+const { sanitizeAllowedExecutables } = require('./overlay-games');
 
 const OVERLAY_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 const OVERLAY_AVATAR_SIZES = Object.freeze(['small', 'medium', 'large']);
 const OVERLAY_MARGIN_PX = 16;
-const OVERLAY_MIN_OPACITY = 0.2;
-const OVERLAY_MAX_OPACITY = 1;
 const OVERLAY_MAX_PARTICIPANTS = 8;
 const OVERLAY_MAX_NAME_LENGTH = 40;
 const OVERLAY_ID_PATTERN = /^[A-Za-z0-9:_-]{1,64}$/;
-const DEFAULT_INTERACTIVE_BINDING = Object.freeze({
-  altKey: false,
-  code: 'Backquote',
-  ctrlKey: true,
-  metaKey: false,
-  shiftKey: false
-});
-const { sanitizeAllowedExecutables } = require('./overlay-games');
 
-// Bumped when a stored field changes meaning. Version 2: `opacity` is the opacity of
-// silent participants, not of the whole HUD.
-const OVERLAY_SETTINGS_VERSION = 2;
-
+// The HUD always lets clicks through and always fades silent participants to 50 %,
+// so only these preferences are stored.
 const DEFAULT_OVERLAY_SETTINGS = Object.freeze({
   allowedExecutables: Object.freeze([]),
   anchor: 'top-left',
   avatarSize: 'medium',
-  clickThrough: true,
   enabled: true,
-  interactiveBinding: DEFAULT_INTERACTIVE_BINDING,
-  // Opacity of participants who are not speaking; speakers are always fully opaque.
-  opacity: 0.5,
-  showControls: false,
-  showNames: true,
-  showParticipants: true,
-  version: OVERLAY_SETTINGS_VERSION
+  showNames: true
 });
 
 function stripControlCharacters(value) {
@@ -45,48 +26,16 @@ function stripControlCharacters(value) {
   }).join('');
 }
 
-function clampOpacity(value, fallback = DEFAULT_OVERLAY_SETTINGS.opacity) {
-  const numeric = typeof value === 'number' ? value : Number.parseFloat(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.min(OVERLAY_MAX_OPACITY, Math.max(OVERLAY_MIN_OPACITY, numeric));
-}
-
-function sanitizeInteractiveBinding(value) {
-  if (value === null) return null;
-  const source = value && typeof value === 'object' ? value : DEFAULT_INTERACTIVE_BINDING;
-  const binding = {
-    altKey: source.altKey === true,
-    code: typeof source.code === 'string' ? source.code : '',
-    ctrlKey: source.ctrlKey === true,
-    metaKey: source.metaKey === true,
-    shiftKey: source.shiftKey === true
-  };
-  const { accelerator } = bindingToAccelerator(binding);
-  return accelerator ? Object.freeze(binding) : DEFAULT_INTERACTIVE_BINDING;
-}
-
 function sanitizeOverlaySettings(payload) {
   const source = payload && typeof payload === 'object' ? payload : {};
-  const anchor = OVERLAY_ANCHORS.includes(source.anchor) ? source.anchor : DEFAULT_OVERLAY_SETTINGS.anchor;
   return Object.freeze({
     allowedExecutables: sanitizeAllowedExecutables(source.allowedExecutables),
-    anchor,
+    anchor: OVERLAY_ANCHORS.includes(source.anchor) ? source.anchor : DEFAULT_OVERLAY_SETTINGS.anchor,
     avatarSize: OVERLAY_AVATAR_SIZES.includes(source.avatarSize)
       ? source.avatarSize
       : DEFAULT_OVERLAY_SETTINGS.avatarSize,
-    clickThrough: source.clickThrough !== false,
     enabled: source.enabled !== false,
-    interactiveBinding: sanitizeInteractiveBinding(
-      Object.hasOwn(source, 'interactiveBinding') ? source.interactiveBinding : DEFAULT_INTERACTIVE_BINDING
-    ),
-    // Older files stored the whole-HUD opacity, often 1, which hid who is speaking.
-    opacity: source.version === OVERLAY_SETTINGS_VERSION
-      ? clampOpacity(source.opacity)
-      : DEFAULT_OVERLAY_SETTINGS.opacity,
-    showControls: source.showControls === true,
-    showNames: source.showNames !== false,
-    showParticipants: source.showParticipants !== false,
-    version: OVERLAY_SETTINGS_VERSION
+    showNames: source.showNames !== false
   });
 }
 
@@ -133,7 +82,8 @@ function sanitizeOverlayParticipant(payload, options = {}) {
     name,
     outputMuted: payload.outputMuted === true,
     self: payload.self === true,
-    speaking: payload.speaking === true
+    speaking: payload.speaking === true,
+    streaming: payload.streaming === true
   });
 }
 
@@ -156,13 +106,11 @@ function shouldShowOverlay({
   callActive = false,
   enabled = true,
   gameActive = false,
-  interactive = false,
   previewing = false
 } = {}) {
   if (enabled !== true) return false;
   if (previewing === true) return true;
   if (callActive !== true) return false;
-  if (interactive === true) return true;
   return gameActive === true;
 }
 
@@ -194,15 +142,6 @@ function resolveOverlayBounds({
   return { height: sizeHeight, width: sizeWidth, x: originX, y: originY };
 }
 
-function describeInteractiveHotkey(binding) {
-  const { accelerator } = bindingToAccelerator(binding || DEFAULT_INTERACTIVE_BINDING);
-  if (!accelerator) return 'Ctrl+`';
-  return accelerator
-    .replaceAll('Control', 'Ctrl')
-    .replaceAll('Super', '⌘')
-    .replaceAll('Command', '⌘');
-}
-
 function isOverlayHtmlUrl(rawUrl) {
   if (typeof rawUrl !== 'string' || !rawUrl) return false;
   const normalized = rawUrl.replace(/\\/g, '/').split('?')[0];
@@ -210,14 +149,11 @@ function isOverlayHtmlUrl(rawUrl) {
 }
 
 module.exports = {
-  DEFAULT_INTERACTIVE_BINDING,
   DEFAULT_OVERLAY_SETTINGS,
   OVERLAY_ANCHORS,
   OVERLAY_AVATAR_SIZES,
   OVERLAY_MARGIN_PX,
   OVERLAY_MAX_PARTICIPANTS,
-  OVERLAY_SETTINGS_VERSION,
-  describeInteractiveHotkey,
   isOverlayHtmlUrl,
   resolveOverlayBounds,
   sanitizeOverlaySettings,

@@ -212,7 +212,6 @@ const overlay = createOverlayController({
   appUrl: APP_URL,
   callControls,
   fs,
-  globalShortcut,
   log,
   path,
   platform: process.platform,

@@ -103,7 +103,6 @@ function createHarness(t) {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-room-overlay-'));
   t.after(() => fs.rmSync(userDataPath, { force: true, recursive: true }));
   const windows = [];
-  const shortcuts = new Map();
   const watcher = {
     running: false,
     start() { this.running = true; },
@@ -121,13 +120,6 @@ function createHarness(t) {
     callControls,
     createForegroundWatcher: () => watcher,
     fs,
-    globalShortcut: {
-      register(accelerator, callback) {
-        shortcuts.set(accelerator, callback);
-        return true;
-      },
-      unregister(accelerator) { shortcuts.delete(accelerator); }
-    },
     log: { warn() {} },
     path,
     platform: 'win32',
@@ -140,7 +132,7 @@ function createHarness(t) {
     }
   });
   t.after(() => controller.dispose());
-  return { callControls, controller, shortcuts, watcher, windows };
+  return { callControls, controller, watcher, windows };
 }
 
 function lastState(window) {
@@ -199,88 +191,54 @@ describe('desktop overlay controller', () => {
     controller.handleForeground(CS2);
     assert.equal(windows.length, 1);
     assert.equal(windows[0].visible, true);
-    assert.equal(windows[0].ignoreMouse.at(-1)[0], true);
     assert.equal(windows[0].alwaysOnTop.at(-1)[1], 'screen-saver');
     assert.deepEqual(windows[0].bounds, { height: 48, width: 52, x: 16, y: 16 });
     assert.match(windows[0].loaded.replace(/\\/g, '/'), /ui\/overlay.html$/);
   });
 
-  it('passes overlay actions through to call controls', (t) => {
-    const { callControls, controller, windows } = createHarness(t);
-    const main = new FakeMainWindow();
-    controller.attachMainWindow(main);
-    const sender = new FakeSender();
-    callControls.setState(sender, { active: true, roomId: 'abc123', roomName: 'Гостиная' });
-    controller.handleForeground(CS2);
-    assert.equal(windows.length, 1);
-    assert.equal(callControls.dispatch('toggle-mic'), true);
-    assert.deepEqual(sender.sent.at(-1)[1], { action: 'toggle-mic' });
-  });
-
-  it('holds the overlay hotkey only while the overlay is on screen', (t) => {
-    const { callControls, controller, shortcuts, watcher, windows } = createHarness(t);
-    controller.attachMainWindow(new FakeMainWindow());
-    assert.equal(shortcuts.size, 0);
-
-    const sender = new FakeSender();
-    callControls.setState(sender, { active: true, roomId: 'abc123', roomName: 'Гостиная' });
-    assert.equal(shortcuts.size, 0);
-
-    controller.handleForeground(CS2);
-    assert.ok(shortcuts.has('Control+`'));
-
-    controller.handleForeground(CHROME);
-    assert.equal(windows[0].visible, false);
-    assert.equal(shortcuts.size, 0);
-
-    controller.handleForeground(CS2);
-    assert.ok(shortcuts.has('Control+`'));
-    callControls.setState(sender, { active: false });
-    assert.equal(windows[0].visible, false);
-    assert.equal(shortcuts.size, 0);
-    assert.equal(watcher.running, false);
-  });
-
-  it('toggles click-through with the overlay hotkey and survives its own focus', (t) => {
-    const { callControls, controller, shortcuts, windows } = createHarness(t);
-    const main = new FakeMainWindow();
-    controller.attachMainWindow(main);
-    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
-    controller.handleForeground(CS2);
-    const overlay = windows[0];
-    shortcuts.get('Control+`')();
-    assert.equal(overlay.ignoreMouse.at(-1)[0], false);
-    const state = lastState(overlay);
-    assert.equal(state.interactive, true);
-    assert.match(state.hint, /Ctrl\+`/);
-
-    // Focusing the overlay makes Voice Room the foreground process.
-    controller.handleForeground(VOICE_ROOM);
-    assert.equal(overlay.visible, true);
-    assert.ok(shortcuts.has('Control+`'));
-  });
-
-  it('does not pin the overlay on screen when click-through is off', (t) => {
+  it('always lets clicks through and never takes focus, whatever old settings say', (t) => {
     const { callControls, controller, windows } = createHarness(t);
     controller.attachMainWindow(new FakeMainWindow());
     callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
-    controller.setSettings({ clickThrough: false });
-    assert.equal(windows.length, 0);
+    const settings = controller.setSettings({
+      clickThrough: false,
+      interactiveBinding: { code: 'Backquote', ctrlKey: true },
+      opacity: 1
+    });
+    assert.equal(Object.hasOwn(settings, 'clickThrough'), false);
+    assert.equal(Object.hasOwn(settings, 'opacity'), false);
+    assert.equal(Object.hasOwn(settings, 'interactiveBinding'), false);
 
+    controller.handleForeground(CS2);
+    assert.equal(windows[0].options.focusable, false);
+    assert.deepEqual(windows[0].ignoreMouse, [[true, { forward: true }]]);
+    assert.equal(windows[0].focused, false);
+  });
+
+  it('hides the overlay and stops watching windows when the call ends', (t) => {
+    const { callControls, controller, watcher, windows } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    const sender = new FakeSender();
+    callControls.setState(sender, { active: true, roomId: 'abc123', roomName: 'Гостиная' });
     controller.handleForeground(CS2);
     assert.equal(windows[0].visible, true);
-    assert.equal(windows[0].ignoreMouse.at(-1)[0], false);
 
     controller.handleForeground(CHROME);
     assert.equal(windows[0].visible, false);
+
+    controller.handleForeground(CS2);
+    callControls.setState(sender, { active: false });
+    assert.equal(windows[0].visible, false);
+    assert.equal(watcher.running, false);
   });
 
   it('keeps overlay settings when autostart later writes startMinimized', (t) => {
     const { controller } = createHarness(t);
-    const settings = controller.setSettings({ enabled: false, anchor: 'bottom-right' });
+    const settings = controller.setSettings({ enabled: false, anchor: 'bottom-right', avatarSize: 'large' });
     assert.equal(settings.enabled, false);
     assert.equal(settings.anchor, 'bottom-right');
-    assert.equal(controller.getSettings().showParticipants, true);
+    assert.equal(controller.getSettings().avatarSize, 'large');
+    assert.equal(controller.getSettings().showNames, true);
   });
 
   it('lets the user allowlist a custom executable as a game', (t) => {
@@ -317,49 +275,30 @@ describe('desktop overlay controller', () => {
     assert.equal(controller.getForeground().game, true);
   });
 
-  it('opens a panel over the whole game window and folds back to the HUD', (t) => {
-    const { callControls, controller, shortcuts, windows } = createHarness(t);
-    controller.attachMainWindow(new FakeMainWindow());
-    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
-    controller.handleForeground({ ...CS2, bounds: { height: 900, width: 1600, x: 100, y: 50 } });
-    const overlay = windows[0];
-
-    shortcuts.get('Control+`')();
-    assert.deepEqual(overlay.bounds, { height: 900, width: 1600, x: 100, y: 50 });
-    assert.equal(overlay.focused, true);
-    assert.equal(overlay.ignoreMouse.at(-1)[0], false);
-    assert.equal(lastState(overlay).interactive, true);
-    assert.equal(lastState(overlay).settings.avatarSize, 'medium');
-
-    controller.setInteractive(false);
-    assert.equal(lastState(overlay).interactive, false);
-    assert.equal(overlay.visible, true);
-    assert.equal(overlay.focused, false);
-    assert.equal(overlay.ignoreMouse.at(-1)[0], true);
-    assert.deepEqual(overlay.bounds, { height: 48, width: 52, x: 116, y: 66 });
-
-    shortcuts.get('Control+`')();
-    overlay.emit('blur');
-    assert.equal(lastState(overlay).interactive, false);
-
-    shortcuts.get('Control+`')();
-    controller.handleForeground(CHROME);
-    assert.equal(lastState(overlay).interactive, false);
-    assert.equal(overlay.visible, false);
-  });
-
-  it('sends avatars to the overlay window as absolute Voice Room URLs', (t) => {
+  it('sends avatars, mute state and streams to the overlay window', (t) => {
     const { callControls, controller, windows } = createHarness(t);
     controller.attachMainWindow(new FakeMainWindow());
     callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
     controller.handleForeground(CS2);
     controller.setSnapshot({
-      participants: [{ avatarUrl: '/api/avatars/key-1', id: 'a', name: 'Ann', speaking: true }]
+      participants: [{
+        avatarUrl: '/api/avatars/key-1',
+        id: 'a',
+        micMuted: true,
+        name: 'Ann',
+        outputMuted: true,
+        speaking: true,
+        streaming: true
+      }]
     });
-    const [participant] = lastState(windows[0]).participants;
+    const state = lastState(windows[0]);
+    const [participant] = state.participants;
     assert.equal(participant.avatarUrl, 'https://voiceroom.ru/api/avatars/key-1');
     assert.equal(participant.speaking, true);
-    assert.equal(lastState(windows[0]).settings.opacity, 0.5);
+    assert.equal(participant.micMuted, true);
+    assert.equal(participant.outputMuted, true);
+    assert.equal(participant.streaming, true);
+    assert.deepEqual(state.settings, { avatarSize: 'medium', showNames: true });
   });
 
   it('previews sample participants when nobody is in a call', (t) => {

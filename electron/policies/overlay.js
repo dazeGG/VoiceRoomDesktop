@@ -142,6 +142,17 @@ function resolveOverlayBounds({
   return { height: sizeHeight, width: sizeWidth, x: originX, y: originY };
 }
 
+// A window covers the game when their rectangles overlap. The inset ignores the
+// invisible resize borders that maximized windows push past the monitor edge.
+function boundsOverlap(front, game, inset = 16) {
+  if (!front || !game) return false;
+  const left = Math.max(front.x + inset, game.x);
+  const right = Math.min(front.x + front.width - inset, game.x + game.width);
+  const top = Math.max(front.y + inset, game.y);
+  const bottom = Math.min(front.y + front.height - inset, game.y + game.height);
+  return right > left && bottom > top;
+}
+
 function isOverlayHtmlUrl(rawUrl) {
   if (typeof rawUrl !== 'string' || !rawUrl) return false;
   const normalized = rawUrl.replace(/\\/g, '/').split('?')[0];
@@ -154,6 +165,7 @@ module.exports = {
   OVERLAY_AVATAR_SIZES,
   OVERLAY_MARGIN_PX,
   OVERLAY_MAX_PARTICIPANTS,
+  boundsOverlap,
   isOverlayHtmlUrl,
   resolveOverlayBounds,
   sanitizeOverlaySettings,

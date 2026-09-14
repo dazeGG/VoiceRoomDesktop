@@ -157,25 +157,53 @@ function parseForegroundPayload(raw) {
   }
 }
 
+const MAX_TRACKED_WINDOWS = 16;
+
+function normalizeBounds(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const x = Number(source.x);
+  const y = Number(source.y);
+  const width = Number(source.width);
+  const height = Number(source.height);
+  return Object.freeze({
+    height: Number.isFinite(height) ? Math.max(0, Math.round(height)) : 0,
+    width: Number.isFinite(width) ? Math.max(0, Math.round(width)) : 0,
+    x: Number.isFinite(x) ? Math.round(x) : 0,
+    y: Number.isFinite(y) ? Math.round(y) : 0
+  });
+}
+
+function normalizeWindowHandle(value) {
+  const handle = Number(value);
+  return Number.isSafeInteger(handle) && handle > 0 ? handle : 0;
+}
+
+// Recently focused windows with their current place, so the shell can keep the
+// overlay over a game that is no longer in front. PowerShell may send one as an object.
+function normalizeTrackedWindows(value) {
+  const list = Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : [];
+  const windows = [];
+  for (const item of list.slice(0, MAX_TRACKED_WINDOWS)) {
+    if (!item || typeof item !== 'object') continue;
+    const hwnd = normalizeWindowHandle(item.hwnd);
+    if (!hwnd) continue;
+    windows.push(Object.freeze({ bounds: normalizeBounds(item.bounds), hwnd, minimized: item.minimized === true }));
+  }
+  return Object.freeze(windows);
+}
+
 function normalizeForegroundPayload(source) {
   if (!source || typeof source !== 'object') return null;
   const exe = typeof source.exe === 'string' ? source.exe.trim() : '';
   if (!exe) return null;
-  const boundsSource = source.bounds && typeof source.bounds === 'object' ? source.bounds : {};
-  const x = Number(boundsSource.x);
-  const y = Number(boundsSource.y);
-  const width = Number(boundsSource.width);
-  const height = Number(boundsSource.height);
   return Object.freeze({
-    bounds: Object.freeze({
-      height: Number.isFinite(height) ? Math.max(0, Math.round(height)) : 0,
-      width: Number.isFinite(width) ? Math.max(0, Math.round(width)) : 0,
-      x: Number.isFinite(x) ? Math.round(x) : 0,
-      y: Number.isFinite(y) ? Math.round(y) : 0
-    }),
+    bounds: normalizeBounds(source.bounds),
     exe,
+    hwnd: normalizeWindowHandle(source.hwnd),
+    minimized: source.minimized === true,
     pid: Number.isInteger(source.pid) ? source.pid : 0,
-    title: typeof source.title === 'string' ? source.title.slice(0, 200) : ''
+    title: typeof source.title === 'string' ? source.title.slice(0, 200) : '',
+    windows: normalizeTrackedWindows(source.windows)
   });
 }
 

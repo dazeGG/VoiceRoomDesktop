@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
 const {
   DEFAULT_OVERLAY_SETTINGS,
+  boundsOverlap,
   isOverlayHtmlUrl,
   resolveOverlayBounds,
   sanitizeOverlaySettings,
@@ -144,6 +145,17 @@ describe('overlay bounds', () => {
       width: 280,
       workArea
     }), { height: 120, width: 280, x: 1404, y: 904 });
+  });
+});
+
+describe('overlay coverage', () => {
+  it('treats a window as covering the game only when it overlaps it', () => {
+    const game = { height: 1080, width: 1920, x: 0, y: 0 };
+    assert.equal(boundsOverlap({ height: 700, width: 900, x: 300, y: 200 }, game), true);
+    // A maximized window on the next monitor pokes 8 px into this one.
+    assert.equal(boundsOverlap({ height: 1096, width: 1936, x: 1912, y: -8 }, game), false);
+    assert.equal(boundsOverlap({ height: 400, width: 400, x: -2000, y: 0 }, game), false);
+    assert.equal(boundsOverlap(null, game), false);
   });
 });
 

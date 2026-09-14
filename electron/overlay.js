@@ -12,6 +12,7 @@ const {
 } = require('./policies/overlay-games');
 const {
   OVERLAY_MARGIN_PX,
+  boundsOverlap,
   isOverlayHtmlUrl,
   resolveOverlayBounds,
   sanitizeOverlaySettings,
@@ -106,10 +107,39 @@ function createOverlayController({
     foreground = payload;
     const classification = classify(payload);
     if (payload.pid !== processPid && isGameCandidate(classification)) lastCandidate = payload;
-    activeGame = classification.game
-      ? { ...classification, bounds: payload.bounds, title: payload.title }
-      : null;
+    if (classification.game) {
+      activeGame = {
+        ...classification,
+        bounds: payload.bounds,
+        hwnd: payload.hwnd,
+        minimized: payload.minimized,
+        title: payload.title
+      };
+    } else {
+      activeGame = trackBackgroundGame(activeGame, payload);
+    }
     syncWindow();
+  }
+
+  // The game keeps its overlay after another window takes focus, for as long as the
+  // helper still reports the game window. Without a window handle it is dropped.
+  function trackBackgroundGame(game, payload) {
+    if (!game?.hwnd) return null;
+    const state = payload.windows.find((window) => window.hwnd === game.hwnd);
+    return state ? { ...game, bounds: state.bounds, minimized: state.minimized } : null;
+  }
+
+  function isShellSurface(payload) {
+    return fileName(payload.exe) === 'explorer.exe' && (payload.title === '' || payload.title === 'Program Manager');
+  }
+
+  // Shown over the game while it is on screen: not minimized and not covered by the
+  // window in front. Another monitor, the desktop and the taskbar do not cover it.
+  function gameOnScreen() {
+    if (!activeGame || activeGame.minimized) return false;
+    if (!foreground || classify(foreground).game) return true;
+    if (isShellSurface(foreground)) return true;
+    return !boundsOverlap(foreground.bounds, activeGame.bounds);
   }
 
   function reclassifyForeground() {
@@ -120,7 +150,7 @@ function createOverlayController({
     return shouldShowOverlay({
       callActive: callControls.getState().active === true,
       enabled: settings.enabled,
-      gameActive: Boolean(activeGame),
+      gameActive: gameOnScreen(),
       previewing
     });
   }

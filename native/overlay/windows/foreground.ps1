@@ -18,6 +18,8 @@ public static class VoiceRoomForeground {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool QueryFullProcessImageName(IntPtr handle, uint flags, StringBuilder name, ref uint size);
   [DllImport("kernel32.dll", SetLastError = true)] public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
@@ -35,6 +37,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 $PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 $SYNCHRONIZE = 0x00100000
 $WAIT_OBJECT_0 = 0
+$MAX_TRACKED_WINDOWS = 8
 
 # The foreground process rarely changes, so remember the last lookup.
 $script:lastPid = [uint32]0
@@ -60,7 +63,22 @@ function Get-ProcessExecutablePath([uint32]$processId) {
   return $exe
 }
 
-function Get-ForegroundPayload {
+function Get-WindowBounds([IntPtr]$hwnd) {
+  $rect = New-Object VoiceRoomForeground+RECT
+  [void][VoiceRoomForeground]::GetWindowRect($hwnd, [ref]$rect)
+  return @{
+    x = [int]$rect.Left
+    y = [int]$rect.Top
+    width = [int][Math]::Max(0, $rect.Right - $rect.Left)
+    height = [int][Math]::Max(0, $rect.Bottom - $rect.Top)
+  }
+}
+
+# Recently focused windows, newest first. The shell decides which one is the game and
+# keeps its overlay while another window is in front, so it needs to know where they are.
+$tracked = New-Object System.Collections.Generic.List[long]
+
+function Get-Snapshot {
   $hwnd = [VoiceRoomForeground]::GetForegroundWindow()
   if ($hwnd -eq [IntPtr]::Zero) { return $null }
   $processId = [uint32]0
@@ -68,22 +86,36 @@ function Get-ForegroundPayload {
   if ($processId -eq 0) { return $null }
   $exe = Get-ProcessExecutablePath $processId
   if (-not $exe) { return $null }
-  $rect = New-Object VoiceRoomForeground+RECT
-  [void][VoiceRoomForeground]::GetWindowRect($hwnd, [ref]$rect)
+
+  $handle = $hwnd.ToInt64()
+  [void]$tracked.Remove($handle)
+  $tracked.Insert(0, $handle)
+  while ($tracked.Count -gt $MAX_TRACKED_WINDOWS) { $tracked.RemoveAt($tracked.Count - 1) }
+
+  $windows = @()
+  foreach ($item in @($tracked)) {
+    $window = [IntPtr]$item
+    if (-not [VoiceRoomForeground]::IsWindow($window)) {
+      [void]$tracked.Remove($item)
+      continue
+    }
+    $windows += @{
+      hwnd = $item
+      bounds = (Get-WindowBounds $window)
+      minimized = [bool][VoiceRoomForeground]::IsIconic($window)
+    }
+  }
+
   $title = New-Object System.Text.StringBuilder 512
   [void][VoiceRoomForeground]::GetWindowText($hwnd, $title, $title.Capacity)
-  $width = [Math]::Max(0, $rect.Right - $rect.Left)
-  $height = [Math]::Max(0, $rect.Bottom - $rect.Top)
   return @{
     pid = [int]$processId
+    hwnd = $handle
     exe = $exe
     title = $title.ToString()
-    bounds = @{
-      x = [int]$rect.Left
-      y = [int]$rect.Top
-      width = [int]$width
-      height = [int]$height
-    }
+    minimized = [bool][VoiceRoomForeground]::IsIconic($hwnd)
+    bounds = (Get-WindowBounds $hwnd)
+    windows = $windows
   }
 }
 
@@ -92,15 +124,15 @@ if ($ParentPid -gt 0) {
   $parentHandle = [VoiceRoomForeground]::OpenProcess($SYNCHRONIZE, $false, [uint32]$ParentPid)
 }
 
-$lastKey = ''
+$lastJson = ''
 $delay = [Math]::Max(200, [Math]::Min(2000, $IntervalMs))
 while ($true) {
-  $payload = Get-ForegroundPayload
-  if ($payload) {
-    $key = '{0}|{1}|{2}|{3}|{4}|{5}' -f $payload.pid, $payload.exe, $payload.bounds.x, $payload.bounds.y, $payload.bounds.width, $payload.bounds.height
-    if ($key -ne $lastKey) {
-      $lastKey = $key
-      [Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress -Depth 5))
+  $snapshot = Get-Snapshot
+  if ($snapshot) {
+    $json = $snapshot | ConvertTo-Json -Compress -Depth 6
+    if ($json -ne $lastJson) {
+      $lastJson = $json
+      [Console]::Out.WriteLine($json)
       [Console]::Out.Flush()
     }
   }

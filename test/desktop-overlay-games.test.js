@@ -43,9 +43,27 @@ describe('overlay foreground payload', () => {
     assert.deepEqual(parseForegroundPayload('{"exe":"C:\\\\game\\\\g.exe","pid":3,"title":"G","bounds":{"x":1,"y":2,"width":800,"height":600}}'), {
       bounds: { height: 600, width: 800, x: 1, y: 2 },
       exe: 'C:\\game\\g.exe',
+      hwnd: 0,
+      minimized: false,
       pid: 3,
-      title: 'G'
+      title: 'G',
+      windows: []
     });
+    // PowerShell sends a single tracked window as an object rather than an array.
+    const tracked = parseForegroundPayload(JSON.stringify({
+      bounds: { height: 600, width: 800, x: 0, y: 0 },
+      exe: 'C:\\game\\g.exe',
+      hwnd: 66,
+      minimized: true,
+      pid: 3,
+      windows: { bounds: { height: 600, width: 800, x: 0, y: 0 }, hwnd: 66, minimized: true }
+    }));
+    assert.equal(tracked.hwnd, 66);
+    assert.equal(tracked.minimized, true);
+    assert.deepEqual(tracked.windows, [{ bounds: { height: 600, width: 800, x: 0, y: 0 }, hwnd: 66, minimized: true }]);
+    assert.deepEqual(parseForegroundPayload({ exe: 'a.exe', windows: [{ hwnd: 0 }, null, { hwnd: 'x' }, { hwnd: 7 }] }).windows, [
+      { bounds: { height: 0, width: 0, x: 0, y: 0 }, hwnd: 7, minimized: false }
+    ]);
     assert.deepEqual(sanitizeAllowedExecutables(['CS2.EXE', 'cs2.exe', '', 1]).length, 1);
   });
 });

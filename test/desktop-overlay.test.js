@@ -232,6 +232,47 @@ describe('desktop overlay controller', () => {
     assert.equal(watcher.running, false);
   });
 
+  it('keeps the overlay over a background game until it is covered, minimized or closed', (t) => {
+    const { callControls, controller, windows } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    const gameBounds = { height: 1080, width: 1920, x: 0, y: 0 };
+    const gameWindow = { bounds: gameBounds, hwnd: 101, minimized: false };
+    controller.handleForeground({ ...CS2, bounds: gameBounds, hwnd: 101, windows: [gameWindow] });
+    assert.equal(windows[0].visible, true);
+
+    const onSecondMonitor = { ...CHROME, bounds: { height: 1096, width: 1936, x: 1912, y: -8 }, hwnd: 202 };
+    controller.handleForeground({ ...onSecondMonitor, windows: [{ bounds: onSecondMonitor.bounds, hwnd: 202 }, gameWindow] });
+    assert.equal(windows[0].visible, true);
+
+    const overGame = { ...CHROME, bounds: { height: 700, width: 900, x: 300, y: 200 }, hwnd: 202 };
+    controller.handleForeground({ ...overGame, windows: [{ bounds: overGame.bounds, hwnd: 202 }, gameWindow] });
+    assert.equal(windows[0].visible, false);
+
+    const desktop = {
+      bounds: { height: 1080, width: 3840, x: 0, y: 0 },
+      exe: 'C:\\Windows\\explorer.exe',
+      hwnd: 303,
+      pid: 55,
+      title: 'Program Manager'
+    };
+    const desktopWindow = { bounds: desktop.bounds, hwnd: 303 };
+    controller.handleForeground({ ...desktop, windows: [desktopWindow, gameWindow] });
+    assert.equal(windows[0].visible, true);
+
+    controller.handleForeground({ ...desktop, windows: [desktopWindow, { ...gameWindow, minimized: true }] });
+    assert.equal(windows[0].visible, false);
+
+    controller.handleForeground({ ...desktop, windows: [desktopWindow, gameWindow] });
+    assert.equal(windows[0].visible, true);
+
+    // The game window is gone from the helper's list: the game was closed.
+    controller.handleForeground({ ...desktop, windows: [desktopWindow] });
+    assert.equal(windows[0].visible, false);
+    controller.handleForeground({ ...desktop, windows: [desktopWindow, gameWindow] });
+    assert.equal(windows[0].visible, false);
+  });
+
   it('keeps overlay settings when autostart later writes startMinimized', (t) => {
     const { controller } = createHarness(t);
     const settings = controller.setSettings({ enabled: false, anchor: 'bottom-right', avatarSize: 'large' });

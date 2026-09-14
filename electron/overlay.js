@@ -155,6 +155,7 @@ function createOverlayController({
         : snapshot.participants,
       previewing,
       settings: {
+        anchor: settings.anchor,
         avatarSize: settings.avatarSize,
         showNames: settings.showNames !== false
       }

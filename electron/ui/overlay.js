@@ -135,6 +135,8 @@ function render(state) {
   const settings = state?.settings || {};
   const showNames = settings.showNames !== false;
   people.dataset.size = AVATAR_SIZES.includes(settings.avatarSize) ? settings.avatarSize : DEFAULT_AVATAR_SIZE;
+  // Right corners mirror each row so the avatars stay glued to the edge of the game.
+  people.dataset.side = String(settings.anchor || '').endsWith('-right') ? 'right' : 'left';
 
   const seen = new Set();
   const ordered = participants.map((participant) => {

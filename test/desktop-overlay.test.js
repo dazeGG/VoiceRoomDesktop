@@ -298,7 +298,11 @@ describe('desktop overlay controller', () => {
     assert.equal(participant.micMuted, true);
     assert.equal(participant.outputMuted, true);
     assert.equal(participant.streaming, true);
-    assert.deepEqual(state.settings, { avatarSize: 'medium', showNames: true });
+    assert.deepEqual(state.settings, { anchor: 'top-left', avatarSize: 'medium', showNames: true });
+
+    // The overlay page mirrors rows in the right corners, so it needs the anchor.
+    controller.setSettings({ anchor: 'bottom-right' });
+    assert.equal(lastState(windows[0]).settings.anchor, 'bottom-right');
   });
 
   it('previews sample participants when nobody is in a call', (t) => {

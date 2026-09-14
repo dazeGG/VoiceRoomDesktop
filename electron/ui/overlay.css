@@ -56,6 +56,16 @@ body {
   opacity: 1;
 }
 
+/* In the right corners the row runs from the edge inwards: avatar, name, icons, badge. */
+.overlay-people[data-side='right'] .overlay-person {
+  flex-direction: row-reverse;
+}
+
+.overlay-people[data-side='right'] .overlay-avatar {
+  margin-right: 0;
+  margin-left: calc(var(--avatar-size) * 0.08);
+}
+
 .overlay-avatar {
   position: relative;
   flex: none;

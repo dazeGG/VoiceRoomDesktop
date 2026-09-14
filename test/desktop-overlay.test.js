@@ -97,11 +97,18 @@ class FakeMainWindow extends EventEmitter {
   }
 }
 
+const VOICE_ROOM_PID = 1;
+
 function createHarness(t) {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-room-overlay-'));
   t.after(() => fs.rmSync(userDataPath, { force: true, recursive: true }));
   const windows = [];
   const shortcuts = new Map();
+  const watcher = {
+    running: false,
+    start() { this.running = true; },
+    stop() { this.running = false; }
+  };
   const callControls = createCallControlsController({ log: { warn() {} } });
   const controller = createOverlayController({
     BrowserWindow: function BrowserWindow(options) {
@@ -111,7 +118,7 @@ function createHarness(t) {
     },
     app: { getPath: () => userDataPath },
     callControls,
-    createForegroundWatcher: () => ({ start() {}, stop() {} }),
+    createForegroundWatcher: () => watcher,
     fs,
     globalShortcut: {
       register(accelerator, callback) {
@@ -123,6 +130,7 @@ function createHarness(t) {
     log: { warn() {} },
     path,
     platform: 'win32',
+    processPid: VOICE_ROOM_PID,
     screen: {
       getCursorScreenPoint: () => ({ x: 10, y: 10 }),
       getDisplayMatching: () => ({ scaleFactor: 1, workArea: { height: 1080, width: 1920, x: 0, y: 0 } }),
@@ -131,7 +139,11 @@ function createHarness(t) {
     }
   });
   t.after(() => controller.dispose());
-  return { callControls, controller, shortcuts, windows };
+  return { callControls, controller, shortcuts, watcher, windows };
+}
+
+function lastState(window) {
+  return window.webContents.sent.filter(([channel]) => channel === STATE_CHANNEL).at(-1)[1];
 }
 
 const CS2 = {
@@ -141,27 +153,46 @@ const CS2 = {
   title: 'Counter-Strike 2'
 };
 
+const CHROME = {
+  bounds: { height: 1080, width: 1920, x: 0, y: 0 },
+  exe: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  pid: 7,
+  title: 'Gmail'
+};
+
+const VOICE_ROOM = {
+  bounds: { height: 900, width: 1400, x: 100, y: 100 },
+  exe: 'C:\\Users\\me\\AppData\\Local\\Programs\\voice-room-desktop\\Voice Room.exe',
+  pid: VOICE_ROOM_PID,
+  title: 'Voice Room'
+};
+
+const CUSTOM_GAME = {
+  bounds: { height: 1080, width: 1920, x: 0, y: 0 },
+  exe: 'D:\\Games\\MyGame\\mygame.exe',
+  pid: 9,
+  title: 'My Game'
+};
+
 describe('desktop overlay controller', () => {
   it('stays hidden until a game is in the foreground during a call', (t) => {
-    const { callControls, controller, windows } = createHarness(t);
+    const { callControls, controller, watcher, windows } = createHarness(t);
     const main = new FakeMainWindow();
     controller.attachMainWindow(main);
+    assert.equal(watcher.running, false);
+
     callControls.setState(new FakeSender(), {
       active: true,
       roomId: 'abc123',
       roomName: 'Гостиная'
     });
+    assert.equal(watcher.running, true);
     assert.equal(windows.length, 0);
 
     main.blur();
     assert.equal(windows.length, 0);
 
-    controller.handleForeground({
-      bounds: { height: 1080, width: 1920, x: 0, y: 0 },
-      exe: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      pid: 7,
-      title: 'Gmail'
-    });
+    controller.handleForeground(CHROME);
     assert.equal(windows.length, 0);
 
     controller.handleForeground(CS2);
@@ -169,7 +200,7 @@ describe('desktop overlay controller', () => {
     assert.equal(windows[0].visible, true);
     assert.equal(windows[0].ignoreMouse.at(-1)[0], true);
     assert.equal(windows[0].alwaysOnTop.at(-1)[1], 'screen-saver');
-    assert.deepEqual(windows[0].bounds, { height: 132, width: 280, x: 16, y: 16 });
+    assert.deepEqual(windows[0].bounds, { height: 48, width: 52, x: 16, y: 16 });
     assert.match(windows[0].loaded.replace(/\\/g, '/'), /ui\/overlay.html$/);
   });
 
@@ -185,19 +216,62 @@ describe('desktop overlay controller', () => {
     assert.deepEqual(sender.sent.at(-1)[1], { action: 'toggle-mic' });
   });
 
-  it('toggles click-through with the overlay hotkey', (t) => {
+  it('holds the overlay hotkey only while the overlay is on screen', (t) => {
+    const { callControls, controller, shortcuts, watcher, windows } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    assert.equal(shortcuts.size, 0);
+
+    const sender = new FakeSender();
+    callControls.setState(sender, { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    assert.equal(shortcuts.size, 0);
+
+    controller.handleForeground(CS2);
+    assert.ok(shortcuts.has('Control+`'));
+
+    controller.handleForeground(CHROME);
+    assert.equal(windows[0].visible, false);
+    assert.equal(shortcuts.size, 0);
+
+    controller.handleForeground(CS2);
+    assert.ok(shortcuts.has('Control+`'));
+    callControls.setState(sender, { active: false });
+    assert.equal(windows[0].visible, false);
+    assert.equal(shortcuts.size, 0);
+    assert.equal(watcher.running, false);
+  });
+
+  it('toggles click-through with the overlay hotkey and survives its own focus', (t) => {
     const { callControls, controller, shortcuts, windows } = createHarness(t);
     const main = new FakeMainWindow();
     controller.attachMainWindow(main);
     callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
     controller.handleForeground(CS2);
     const overlay = windows[0];
-    assert.ok(shortcuts.has('Control+`'));
     shortcuts.get('Control+`')();
     assert.equal(overlay.ignoreMouse.at(-1)[0], false);
-    const state = overlay.webContents.sent.filter(([channel]) => channel === STATE_CHANNEL).at(-1)[1];
+    const state = lastState(overlay);
     assert.equal(state.interactive, true);
     assert.match(state.hint, /Ctrl\+`/);
+
+    // Focusing the overlay makes Voice Room the foreground process.
+    controller.handleForeground(VOICE_ROOM);
+    assert.equal(overlay.visible, true);
+    assert.ok(shortcuts.has('Control+`'));
+  });
+
+  it('does not pin the overlay on screen when click-through is off', (t) => {
+    const { callControls, controller, windows } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    controller.setSettings({ clickThrough: false });
+    assert.equal(windows.length, 0);
+
+    controller.handleForeground(CS2);
+    assert.equal(windows[0].visible, true);
+    assert.equal(windows[0].ignoreMouse.at(-1)[0], false);
+
+    controller.handleForeground(CHROME);
+    assert.equal(windows[0].visible, false);
   });
 
   it('keeps overlay settings when autostart later writes startMinimized', (t) => {
@@ -212,17 +286,43 @@ describe('desktop overlay controller', () => {
     const { callControls, controller, windows } = createHarness(t);
     controller.attachMainWindow(new FakeMainWindow());
     callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
-    const custom = {
-      bounds: { height: 1080, width: 1920, x: 0, y: 0 },
-      exe: 'D:\\Games\\MyGame\\mygame.exe',
-      pid: 9,
-      title: 'My Game'
-    };
-    controller.handleForeground(custom);
+    controller.handleForeground(CUSTOM_GAME);
     assert.equal(windows.length, 0);
     controller.setSettings({ allowedExecutables: ['mygame.exe'] });
-    controller.handleForeground(custom);
+    controller.handleForeground(CUSTOM_GAME);
     assert.equal(windows.length, 1);
     assert.equal(windows[0].visible, true);
+  });
+
+  it('offers the last window before Voice Room for the allowlist, outside a call too', (t) => {
+    const { controller, watcher } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    assert.equal(watcher.running, false);
+
+    assert.deepEqual(controller.getForeground(), { exe: '', game: false, label: '', reason: 'unknown', title: '' });
+    assert.equal(watcher.running, true);
+
+    controller.handleForeground(CUSTOM_GAME);
+    controller.handleForeground(CHROME);
+    controller.handleForeground(VOICE_ROOM);
+    const offered = controller.getForeground();
+    assert.equal(offered.exe, 'd:\\games\\mygame\\mygame.exe');
+    assert.equal(offered.game, false);
+    assert.equal(offered.title, 'My Game');
+
+    assert.deepEqual(controller.addAllowedGame(VOICE_ROOM.exe).allowedExecutables, []);
+    assert.deepEqual(controller.addAllowedGame(CHROME.exe).allowedExecutables, []);
+    assert.deepEqual(controller.addAllowedGame().allowedExecutables, ['d:\\games\\mygame\\mygame.exe']);
+    assert.equal(controller.getForeground().game, true);
+  });
+
+  it('previews sample participants when nobody is in a call', (t) => {
+    const { controller, windows } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    controller.startPreview();
+    assert.equal(windows[0].visible, true);
+    const state = lastState(windows[0]);
+    assert.equal(state.participants.length, 2);
+    assert.deepEqual(state.participants.map((participant) => participant.speaking), [true, false]);
   });
 });

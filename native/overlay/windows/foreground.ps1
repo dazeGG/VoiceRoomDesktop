@@ -3,11 +3,13 @@ param(
   [int]$IntervalMs = 400
 )
 
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 $OutputEncoding = [Console]::OutputEncoding
 
-Add-Type -TypeDefinition @"
+# Fail loudly: without these bindings the loop below would run forever and report nothing.
+try {
+  Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -18,26 +20,44 @@ public static class VoiceRoomForeground {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
   [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool QueryFullProcessImageName(IntPtr handle, uint flags, StringBuilder name, ref uint size);
+  [DllImport("kernel32.dll", SetLastError = true)] public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
   [DllImport("kernel32.dll", SetLastError = true)] public static extern bool CloseHandle(IntPtr handle);
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 }
 "@
+} catch {
+  [Console]::Error.WriteLine("foreground.ps1: native bindings failed to load: $($_.Exception.Message)")
+  exit 3
+}
+
+$ErrorActionPreference = 'SilentlyContinue'
+
+$PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+$SYNCHRONIZE = 0x00100000
+$WAIT_OBJECT_0 = 0
+
+# The foreground process rarely changes, so remember the last lookup.
+$script:lastPid = [uint32]0
+$script:lastExe = ''
 
 function Get-ProcessExecutablePath([uint32]$processId) {
-  $process = Get-Process -Id $processId
-  if ($process -and $process.Path) { return [string]$process.Path }
-  $handle = [VoiceRoomForeground]::OpenProcess(0x1000, $false, $processId)
-  if ($handle -eq [IntPtr]::Zero) { return '' }
-  try {
-    $size = [uint32]1024
-    $name = New-Object System.Text.StringBuilder 1024
-    if ([VoiceRoomForeground]::QueryFullProcessImageName($handle, 0, $name, [ref]$size)) {
-      return $name.ToString()
+  if ($processId -eq $script:lastPid -and $script:lastExe) { return $script:lastExe }
+  $exe = ''
+  $handle = [VoiceRoomForeground]::OpenProcess($PROCESS_QUERY_LIMITED_INFORMATION, $false, $processId)
+  if ($handle -ne [IntPtr]::Zero) {
+    try {
+      $size = [uint32]1024
+      $name = New-Object System.Text.StringBuilder 1024
+      if ([VoiceRoomForeground]::QueryFullProcessImageName($handle, 0, $name, [ref]$size)) {
+        $exe = $name.ToString()
+      }
+    } finally {
+      [void][VoiceRoomForeground]::CloseHandle($handle)
     }
-  } finally {
-    [void][VoiceRoomForeground]::CloseHandle($handle)
   }
-  return ''
+  $script:lastPid = $processId
+  $script:lastExe = $exe
+  return $exe
 }
 
 function Get-ForegroundPayload {
@@ -67,13 +87,14 @@ function Get-ForegroundPayload {
   }
 }
 
+$parentHandle = [IntPtr]::Zero
+if ($ParentPid -gt 0) {
+  $parentHandle = [VoiceRoomForeground]::OpenProcess($SYNCHRONIZE, $false, [uint32]$ParentPid)
+}
+
 $lastKey = ''
 $delay = [Math]::Max(200, [Math]::Min(2000, $IntervalMs))
 while ($true) {
-  if ($ParentPid -gt 0) {
-    $parent = Get-Process -Id $ParentPid
-    if (-not $parent) { break }
-  }
   $payload = Get-ForegroundPayload
   if ($payload) {
     $key = '{0}|{1}|{2}|{3}|{4}|{5}' -f $payload.pid, $payload.exe, $payload.bounds.x, $payload.bounds.y, $payload.bounds.width, $payload.bounds.height
@@ -83,5 +104,11 @@ while ($true) {
       [Console]::Out.Flush()
     }
   }
-  Start-Sleep -Milliseconds $delay
+  if ($parentHandle -ne [IntPtr]::Zero) {
+    # Doubles as the poll delay: returns early only when Voice Room exits.
+    if ([VoiceRoomForeground]::WaitForSingleObject($parentHandle, [uint32]$delay) -eq $WAIT_OBJECT_0) { break }
+  } else {
+    if ($ParentPid -gt 0 -and -not (Get-Process -Id $ParentPid)) { break }
+    Start-Sleep -Milliseconds $delay
+  }
 }

@@ -179,8 +179,16 @@ function normalizeForegroundPayload(source) {
   });
 }
 
+const CANDIDATE_REASONS = new Set(['allowlist', 'install-path', 'not-a-game']);
+
+// Windows worth offering in settings: games and unknown apps, never Voice Room,
+// browsers or launchers.
+function isGameCandidate(classification) {
+  return CANDIDATE_REASONS.has(classification?.reason);
+}
+
 function describeForeground(classification) {
-  if (!classification?.name) return { game: false, label: 'Нет активного окна', reason: 'unknown' };
+  if (!classification?.name) return { exe: '', game: false, label: '', reason: 'unknown' };
   return {
     exe: classification.exe,
     game: classification.game === true,
@@ -194,6 +202,7 @@ module.exports = {
   classifyForegroundApp,
   describeForeground,
   fileName,
+  isGameCandidate,
   normalizePath,
   parseForegroundPayload,
   sanitizeAllowedExecutables

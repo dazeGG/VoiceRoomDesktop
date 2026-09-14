@@ -8,10 +8,10 @@ const {
   classifyForegroundApp,
   describeForeground,
   fileName,
+  isGameCandidate,
   parseForegroundPayload
 } = require('./policies/overlay-games');
 const {
-  DEFAULT_OVERLAY_SETTINGS,
   OVERLAY_MARGIN_PX,
   describeInteractiveHotkey,
   isOverlayHtmlUrl,
@@ -34,8 +34,17 @@ const FOREGROUND_CHANNEL = 'desktop-overlay:get-foreground';
 const ADD_GAME_CHANNEL = 'desktop-overlay:add-game';
 const REMOVE_GAME_CHANNEL = 'desktop-overlay:remove-game';
 const PREVIEW_MS = 8_000;
-const MIN_OVERLAY_WIDTH = 220;
-const MIN_OVERLAY_HEIGHT = 72;
+// Settings poll the foreground every second; keep the watcher alive a bit longer
+// than that so a throttled background tab does not flap it.
+const FOREGROUND_LEASE_MS = 15_000;
+const MIN_OVERLAY_WIDTH = 48;
+const MIN_OVERLAY_HEIGHT = 40;
+const PREVIEW_PARTICIPANTS = sanitizeOverlaySnapshot({
+  participants: [
+    { id: 'preview-self', name: 'Вы', self: true, speaking: true },
+    { id: 'preview-friend', name: 'Участник', speaking: false }
+  ]
+}).participants;
 
 function createOverlayController({
   BrowserWindow,
@@ -47,6 +56,7 @@ function createOverlayController({
   log = console,
   callControls,
   platform = process.platform,
+  processPid = process.pid,
   createForegroundWatcher: createWatcher = createForegroundWatcher
 }) {
   const settingsStore = createDesktopSettingsStore({ app, fs, log, path: pathModule });
@@ -59,11 +69,15 @@ function createOverlayController({
   let snapshot = sanitizeOverlaySnapshot(null);
   let settings = loadSettings();
   let registeredAccelerator = null;
+  let failedAccelerator = null;
   let suspended = false;
-  let contentSize = { height: 132, width: 280 };
+  let contentSize = { height: 48, width: 52 };
   let disposing = false;
   let foreground = null;
+  let lastCandidate = null;
   let activeGame = null;
+  let watcherRunning = false;
+  let foregroundLease = null;
   const watcher = createWatcher({
     appPath: typeof app.getAppPath === 'function' ? app.getAppPath() : '',
     fs,
@@ -89,20 +103,27 @@ function createOverlayController({
     return { ...settings, allowedExecutables: [...settings.allowedExecutables] };
   }
 
-  function classifyCurrent(payload = foreground) {
-    if (!payload) return classifyForegroundApp(null, { allowedExecutables: settings.allowedExecutables });
+  function classify(payload) {
     return classifyForegroundApp(payload, { allowedExecutables: settings.allowedExecutables });
   }
 
   function handleForeground(raw) {
-    const payload = parseForegroundPayload(raw) || raw;
-    if (!payload?.exe) return;
+    const payload = parseForegroundPayload(raw);
+    if (!payload) return;
+    const ownWindow = payload.pid === processPid;
+    // The hotkey focuses the overlay itself; keep showing it over the game underneath.
+    if (ownWindow && interactive) return;
     foreground = payload;
-    const classification = classifyCurrent(payload);
+    const classification = classify(payload);
+    if (!ownWindow && isGameCandidate(classification)) lastCandidate = payload;
     activeGame = classification.game
       ? { ...classification, bounds: payload.bounds, title: payload.title }
       : null;
     syncWindow();
+  }
+
+  function reclassifyForeground() {
+    if (foreground) handleForeground(foreground);
   }
 
   function isVisibleNow() {
@@ -149,13 +170,16 @@ function createOverlayController({
       },
       hint: interactive ? describeInteractiveHotkey(settings.interactiveBinding) : '',
       interactive,
-      participants: settings.showParticipants ? snapshot.participants : [],
+      participants: previewing && snapshot.participants.length === 0
+        ? PREVIEW_PARTICIPANTS
+        : snapshot.participants,
       previewing,
       settings: {
         clickThrough: settings.clickThrough,
         opacity: settings.opacity,
-        showControls: settings.showControls,
-        showParticipants: settings.showParticipants
+        showControls: false,
+        showNames: settings.showNames !== false,
+        showParticipants: true
       }
     };
   }
@@ -261,13 +285,33 @@ function createOverlayController({
     }
   }
 
-  function syncWindow() {
-    if (disposing) return;
-    if (!isVisibleNow()) {
-      hideWindow();
+  // PowerShell polling is not free, so the watcher only runs during a call or
+  // while the settings screen is asking which window is in front.
+  function watcherWanted() {
+    if (disposing) return false;
+    if (foregroundLease) return true;
+    return settings.enabled === true && callControls.getState().active === true;
+  }
+
+  function syncWatcher() {
+    const wanted = watcherWanted();
+    if (wanted === watcherRunning) return;
+    watcherRunning = wanted;
+    if (wanted) {
+      watcher.start?.();
       return;
     }
-    showWindow();
+    watcher.stop?.();
+    foreground = null;
+    activeGame = null;
+  }
+
+  function syncWindow() {
+    if (disposing) return;
+    syncWatcher();
+    if (isVisibleNow()) showWindow();
+    else hideWindow();
+    syncHotkey();
   }
 
   function setContentSize(size) {
@@ -291,22 +335,33 @@ function createOverlayController({
     registeredAccelerator = null;
   }
 
-  function registerHotkey() {
+  function wantedAccelerator() {
+    if (suspended || !settings.interactiveBinding || !isVisibleNow()) return null;
+    return bindingToAccelerator(settings.interactiveBinding).accelerator || null;
+  }
+
+  // A global shortcut steals the key from every other app, so it is held only
+  // while the overlay is actually on screen.
+  function syncHotkey() {
+    const accelerator = wantedAccelerator();
+    if (accelerator === registeredAccelerator) return;
     unregisterHotkey();
-    if (suspended || settings.enabled !== true) return { ok: true, reason: 'idle' };
-    const binding = settings.interactiveBinding;
-    if (!binding) return { ok: true, reason: 'unassigned' };
-    const { accelerator, reason } = bindingToAccelerator(binding);
-    if (!accelerator) return { ok: false, reason: reason || 'unsupported-key' };
+    if (!accelerator) {
+      failedAccelerator = null;
+      return;
+    }
+    if (accelerator === failedAccelerator) return;
     try {
-      const registered = globalShortcut.register(accelerator, toggleInteractive);
-      if (!registered) return { ok: false, reason: 'register-failed' };
-      registeredAccelerator = accelerator;
-      return { ok: true, accelerator };
+      if (globalShortcut.register(accelerator, toggleInteractive)) {
+        registeredAccelerator = accelerator;
+        failedAccelerator = null;
+        return;
+      }
+      log.warn?.('Overlay hotkey is already taken:', accelerator);
     } catch (error) {
       log.warn?.('Failed to register overlay hotkey:', error);
-      return { ok: false, reason: 'register-failed' };
     }
+    failedAccelerator = accelerator;
   }
 
   function toggleInteractive() {
@@ -331,13 +386,10 @@ function createOverlayController({
   function startPreview() {
     clearPreview();
     previewing = true;
-    interactive = true;
     syncWindow();
-    registerHotkey();
     previewTimer = setTimeout(() => {
       previewTimer = null;
       previewing = false;
-      interactive = false;
       syncWindow();
     }, PREVIEW_MS);
     return { ok: true, previewMs: PREVIEW_MS, settings: getSettings() };
@@ -346,8 +398,6 @@ function createOverlayController({
   function setSettings(patch) {
     const source = patch && typeof patch === 'object' ? patch : {};
     const next = persistSettings({ ...settings, ...source });
-    if (!next.clickThrough) interactive = true;
-    registerHotkey();
     syncWindow();
     sendState();
     return next;
@@ -361,8 +411,7 @@ function createOverlayController({
 
   function setSuspended(nextSuspended) {
     suspended = nextSuspended === true;
-    if (suspended) unregisterHotkey();
-    else registerHotkey();
+    syncHotkey();
   }
 
   function attachMainWindow(window) {
@@ -381,8 +430,6 @@ function createOverlayController({
       }]
     ];
     for (const [eventName, listener] of mainListeners) window.on?.(eventName, listener);
-    watcher.start?.();
-    registerHotkey();
     syncWindow();
   }
 
@@ -409,13 +456,12 @@ function createOverlayController({
   }
 
   function addAllowedGame(exe) {
-    const value = typeof exe === 'string' && exe.trim() ? exe.trim() : foreground?.exe;
-    if (!value) return getSettings();
-    const allowed = [...settings.allowedExecutables];
-    const key = value.replace(/\//g, '\\').trim().toLowerCase();
-    if (!allowed.includes(key) && !allowed.includes(fileName(key))) allowed.push(key);
-    const next = setSettings({ allowedExecutables: allowed });
-    if (foreground) handleForeground(foreground);
+    const source = typeof exe === 'string' && exe.trim() ? { exe: exe.trim() } : lastCandidate;
+    const classification = classify(source);
+    // Only unknown apps need the allowlist; Voice Room, browsers and launchers stay out.
+    if (classification.reason !== 'not-a-game') return getSettings();
+    const next = setSettings({ allowedExecutables: [...settings.allowedExecutables, classification.exe] });
+    reclassifyForeground();
     return next;
   }
 
@@ -424,24 +470,46 @@ function createOverlayController({
     if (!key) return getSettings();
     const allowed = settings.allowedExecutables.filter((item) => item !== key && fileName(item) !== fileName(key));
     const next = setSettings({ allowedExecutables: allowed });
-    if (foreground) handleForeground(foreground);
+    reclassifyForeground();
     return next;
   }
 
+  function leaseForeground() {
+    if (foregroundLease) clearTimeout(foregroundLease);
+    foregroundLease = setTimeout(() => {
+      foregroundLease = null;
+      syncWindow();
+    }, FOREGROUND_LEASE_MS);
+    foregroundLease.unref?.();
+    syncWindow();
+  }
+
+  // While settings are open Voice Room itself is in front, so report the last
+  // other window the user was in: that is the game they want to add.
   function getForeground() {
-    const classification = classifyCurrent();
+    leaseForeground();
+    const current = foreground && foreground.pid !== processPid && isGameCandidate(classify(foreground))
+      ? foreground
+      : null;
+    const source = current || lastCandidate;
+    const classification = classify(source);
     return {
       ...describeForeground(classification),
-      title: foreground?.title || '',
-      exe: classification.exe || foreground?.exe || ''
+      exe: classification.exe || '',
+      title: source?.title || ''
     };
   }
 
   function dispose() {
     disposing = true;
     clearPreview();
+    if (foregroundLease) {
+      clearTimeout(foregroundLease);
+      foregroundLease = null;
+    }
     unregisterHotkey();
     watcher.stop?.();
+    watcherRunning = false;
     detachMainWindow();
     disposeWindow();
   }
@@ -519,25 +587,25 @@ function createOverlayController({
   }
 
   callControls.onStateChange(() => {
-    if (!callControls.getState().active) {
-      interactive = false;
-      clearPreview();
-    }
+    if (!callControls.getState().active) interactive = false;
     syncWindow();
     sendState();
   });
 
   return {
+    addAllowedGame,
     attachMainWindow,
     configureIpc,
     dispose,
+    getForeground,
     getSettings,
+    handleForeground,
+    removeAllowedGame,
     setSettings,
     setSnapshot,
     setSuspended,
     startPreview,
-    syncWindow,
-    handleForeground
+    syncWindow
   };
 }
 

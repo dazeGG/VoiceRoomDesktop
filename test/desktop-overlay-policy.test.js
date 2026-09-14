@@ -22,6 +22,7 @@ describe('overlay settings', () => {
       enabled: false,
       opacity: 1
     });
+    assert.equal(sanitizeOverlaySettings({ opacity: 0 }).opacity, 0.2);
     assert.deepEqual(sanitizeOverlaySettings({ interactiveBinding: { code: 'KeyO', ctrlKey: true } }).interactiveBinding, {
       altKey: false,
       code: 'KeyO',
@@ -38,6 +39,27 @@ describe('overlay settings', () => {
 });
 
 describe('overlay snapshot', () => {
+  it('keeps https avatars and drops anything else', () => {
+    const [participant] = sanitizeOverlaySnapshot({
+      participants: [{
+        avatarAccent: 'oklch(58% 0.26 278)',
+        avatarColorKey: 'blurple',
+        avatarUrl: 'https://voiceroom.ru/avatars/a.png',
+        id: 'a',
+        name: 'Ann'
+      }, {
+        avatarUrl: 'javascript:alert(1)',
+        id: 'b',
+        name: 'Bad'
+      }]
+    }).participants;
+    assert.equal(participant.avatarUrl, 'https://voiceroom.ru/avatars/a.png');
+    assert.equal(participant.avatarColorKey, 'blurple');
+    assert.equal(sanitizeOverlaySnapshot({
+      participants: [{ avatarUrl: 'http://evil.example/a.png', id: 'b', name: 'Bad' }]
+    }).participants[0].avatarUrl, '');
+  });
+
   it('keeps a bounded unique participant list', () => {
     assert.deepEqual(sanitizeOverlaySnapshot(null), { participants: [] });
     const snapshot = sanitizeOverlaySnapshot({
@@ -49,8 +71,28 @@ describe('overlay snapshot', () => {
       ]
     });
     assert.deepEqual(snapshot.participants, [
-      { id: 'a', micMuted: false, name: 'Ann', outputMuted: false, self: true, speaking: true },
-      { id: 'b', micMuted: false, name: 'Bob', outputMuted: true, self: false, speaking: false }
+      {
+        avatarAccent: '',
+        avatarColorKey: '',
+        avatarUrl: '',
+        id: 'a',
+        micMuted: false,
+        name: 'Ann',
+        outputMuted: false,
+        self: true,
+        speaking: true
+      },
+      {
+        avatarAccent: '',
+        avatarColorKey: '',
+        avatarUrl: '',
+        id: 'b',
+        micMuted: false,
+        name: 'Bob',
+        outputMuted: true,
+        self: false,
+        speaking: false
+      }
     ]);
   });
 });

@@ -1,9 +1,11 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const { describe, it } = require('node:test');
 const {
   classifyForegroundApp,
+  isGameCandidate,
   parseForegroundPayload,
   sanitizeAllowedExecutables
 } = require('../electron/policies/overlay-games');
@@ -70,5 +72,64 @@ describe('overlay foreground script path', () => {
     });
     assert.equal(resolved, path.join('C:\\temp', 'voice-room-foreground.ps1'));
     assert.deepEqual(copied, [[asarFile, resolved]]);
+  });
+});
+
+describe('overlay game candidates', () => {
+  it('offers games and unknown apps, never Voice Room, browsers or launchers', () => {
+    assert.equal(isGameCandidate(classifyForegroundApp({ exe: 'D:\\Games\\WeirdTitle\\weirdtitle.exe' })), true);
+    assert.equal(isGameCandidate(classifyForegroundApp({
+      exe: 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Dota 2\\game\\bin\\win64\\dota2.exe'
+    })), true);
+    assert.equal(isGameCandidate(classifyForegroundApp({
+      exe: 'C:\\Users\\me\\AppData\\Local\\Programs\\voice-room-desktop\\Voice Room.exe'
+    })), false);
+    assert.equal(isGameCandidate(classifyForegroundApp({
+      exe: 'C:\\Program Files (x86)\\Battle.net\\Battle.net Launcher.exe'
+    })), false);
+    assert.equal(isGameCandidate(classifyForegroundApp(null)), false);
+  });
+});
+
+describe('overlay foreground watcher', () => {
+  it('restarts a dead helper with backoff and stays down after stop', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { createForegroundWatcher } = require('../electron/overlay-foreground');
+    const children = [];
+    const watcher = createForegroundWatcher({
+      log: { warn() {} },
+      onChange() {},
+      platform: 'win32',
+      scriptPath: 'C:\\watcher\\foreground.ps1',
+      spawn() {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => { child.killed = true; };
+        children.push(child);
+        return child;
+      }
+    });
+
+    watcher.start();
+    watcher.start();
+    assert.equal(children.length, 1);
+
+    children[0].emit('exit', 3, null);
+    t.mock.timers.tick(1_999);
+    assert.equal(children.length, 1);
+    t.mock.timers.tick(1);
+    assert.equal(children.length, 2);
+
+    // A late exit from the replaced helper must not orphan the current one.
+    children[0].emit('exit', 3, null);
+    t.mock.timers.tick(60_000);
+    assert.equal(children.length, 2);
+
+    watcher.stop();
+    assert.equal(children[1].killed, true);
+    children[1].emit('exit', null, 'SIGTERM');
+    t.mock.timers.tick(60_000);
+    assert.equal(children.length, 2);
   });
 });

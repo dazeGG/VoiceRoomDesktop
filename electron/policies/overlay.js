@@ -4,7 +4,7 @@ const { bindingToAccelerator } = require('../hotkeys');
 
 const OVERLAY_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 const OVERLAY_MARGIN_PX = 16;
-const OVERLAY_MIN_OPACITY = 0.4;
+const OVERLAY_MIN_OPACITY = 0.2;
 const OVERLAY_MAX_OPACITY = 1;
 const OVERLAY_MAX_PARTICIPANTS = 8;
 const OVERLAY_MAX_NAME_LENGTH = 40;
@@ -24,8 +24,10 @@ const DEFAULT_OVERLAY_SETTINGS = Object.freeze({
   clickThrough: true,
   enabled: true,
   interactiveBinding: DEFAULT_INTERACTIVE_BINDING,
-  opacity: 0.92,
-  showControls: true,
+  // Opacity of participants who are not speaking; speakers are always fully opaque.
+  opacity: 0.45,
+  showControls: false,
+  showNames: true,
   showParticipants: true
 });
 
@@ -68,9 +70,34 @@ function sanitizeOverlaySettings(payload) {
       Object.hasOwn(source, 'interactiveBinding') ? source.interactiveBinding : DEFAULT_INTERACTIVE_BINDING
     ),
     opacity: clampOpacity(source.opacity),
-    showControls: source.showControls !== false,
+    showControls: source.showControls === true,
+    showNames: source.showNames !== false,
     showParticipants: source.showParticipants !== false
   });
+}
+
+function sanitizeAvatarUrl(value) {
+  if (typeof value !== 'string' || !value || value.length > 512) return '';
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+function sanitizeAvatarAccent(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim().slice(0, 80);
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(trimmed)) return trimmed;
+  if (/^oklch\([^)<>]{4,72}\)$/i.test(trimmed)) return trimmed;
+  if (/^rgba?\([^)<>]{4,64}\)$/i.test(trimmed)) return trimmed;
+  return '';
+}
+
+function sanitizeAvatarColorKey(value) {
+  return typeof value === 'string' && /^[a-z]{1,16}$/.test(value) ? value : '';
 }
 
 function sanitizeOverlayParticipant(payload) {
@@ -80,6 +107,9 @@ function sanitizeOverlayParticipant(payload) {
     ? stripControlCharacters(payload.name).trim().slice(0, OVERLAY_MAX_NAME_LENGTH)
     : '';
   return Object.freeze({
+    avatarAccent: sanitizeAvatarAccent(payload.avatarAccent),
+    avatarColorKey: sanitizeAvatarColorKey(payload.avatarColorKey),
+    avatarUrl: sanitizeAvatarUrl(payload.avatarUrl),
     id: payload.id,
     micMuted: payload.micMuted === true,
     name,

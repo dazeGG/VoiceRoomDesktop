@@ -7,6 +7,7 @@ const path = require('node:path');
 const { parseForegroundPayload } = require('./policies/overlay-games');
 
 const SCRIPT_RELATIVE = path.join('native', 'overlay', 'windows', 'foreground.ps1');
+const RESTART_DELAYS_MS = Object.freeze([2_000, 5_000, 15_000, 60_000]);
 
 function isInsideAsar(filePath, pathModule = path) {
   const needle = `${pathModule.sep}app.asar${pathModule.sep}`;
@@ -66,6 +67,9 @@ function createForegroundWatcher({
 } = {}) {
   let child = null;
   let buffer = '';
+  let running = false;
+  let failures = 0;
+  let restartTimer = null;
 
   function emit(payload) {
     if (typeof onChange !== 'function') return;
@@ -83,62 +87,115 @@ function createForegroundWatcher({
     for (const raw of lines) {
       const line = raw.replace(/^\uFEFF/, '').trim();
       const payload = parseForegroundPayload(line);
-      if (payload) emit(payload);
+      if (!payload) continue;
+      failures = 0;
+      emit(payload);
     }
   }
 
-  function start() {
-    if (platform !== 'win32' || child) return;
-    const file = scriptPath || resolveRunnableForegroundScript({
-      appPath,
-      fs: fsModule,
-      path: pathModule,
-      resourcesPath,
-      tempPath: tempPath || os.tmpdir()
-    });
+  function resolveScript() {
+    if (scriptPath) return scriptPath;
+    try {
+      return resolveRunnableForegroundScript({
+        appPath,
+        fs: fsModule,
+        path: pathModule,
+        resourcesPath,
+        tempPath: tempPath || os.tmpdir()
+      });
+    } catch (error) {
+      log.warn?.('Foreground watcher script could not be prepared:', error);
+      return '';
+    }
+  }
+
+  function scheduleRestart(reason) {
+    if (!running || restartTimer) return;
+    const delay = RESTART_DELAYS_MS[Math.min(failures, RESTART_DELAYS_MS.length - 1)];
+    failures += 1;
+    log.warn?.(`Foreground watcher stopped (${reason}); restarting in ${delay} ms.`);
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      if (running && !child) spawnWatcher();
+    }, delay);
+    restartTimer.unref?.();
+  }
+
+  function spawnWatcher() {
+    const file = resolveScript();
     if (!file) {
       log.warn?.('Foreground watcher script is missing; overlay will not detect games.');
+      running = false;
       return;
     }
     if (isInsideAsar(file, pathModule)) {
       log.warn?.('Foreground watcher script is inside asar and cannot be executed:', file);
+      running = false;
       return;
     }
 
-    child = spawn(powershellExecutable(), [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy', 'Bypass',
-      '-File', file,
-      '-ParentPid', String(parentPid),
-      '-IntervalMs', String(intervalMs)
-    ], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
+    let proc;
+    try {
+      proc = spawn(powershellExecutable(), [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', file,
+        '-ParentPid', String(parentPid),
+        '-IntervalMs', String(intervalMs)
+      ], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+    } catch (error) {
+      log.warn?.('Foreground watcher failed to start:', error);
+      scheduleRestart('spawn failed');
+      return;
+    }
+
+    child = proc;
+    buffer = '';
+    // A late event from a replaced helper must not clear the current one.
+    const finish = (reason) => {
+      if (child !== proc) return;
+      child = null;
+      scheduleRestart(reason);
+    };
+    proc.stdout?.on?.('data', (chunk) => {
+      if (child === proc) handleChunk(chunk);
     });
-    child.stdout?.on?.('data', handleChunk);
-    child.stderr?.on?.('data', (chunk) => {
+    proc.stderr?.on?.('data', (chunk) => {
       const text = String(chunk).trim();
       if (text) log.warn?.('Foreground watcher:', text);
     });
-    child.on?.('error', (error) => {
-      log.warn?.('Foreground watcher failed to start:', error);
+    proc.on?.('error', (error) => {
+      log.warn?.('Foreground watcher failed:', error);
+      finish('error');
     });
-    child.on?.('exit', (code, signal) => {
-      if (code) log.warn?.(`Foreground watcher exited (${code}${signal ? `/${signal}` : ''}).`);
-      child = null;
-    });
+    proc.on?.('exit', (code, signal) => finish(`exit ${code ?? signal ?? 'unknown'}`));
+  }
+
+  function start() {
+    if (platform !== 'win32' || running) return;
+    running = true;
+    failures = 0;
+    spawnWatcher();
   }
 
   function stop() {
-    const running = child;
+    running = false;
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
+    const proc = child;
     child = null;
     buffer = '';
-    if (!running) return;
+    if (!proc) return;
     try {
-      running.kill();
+      proc.kill();
     } catch {
-      // The watcher is best-effort; a leftover PowerShell process dies with the app.
+      // The watcher is best-effort; the script also exits once Voice Room is gone.
     }
   }
 
@@ -146,6 +203,7 @@ function createForegroundWatcher({
 }
 
 module.exports = {
+  RESTART_DELAYS_MS,
   createForegroundWatcher,
   isInsideAsar,
   resolveForegroundScript,

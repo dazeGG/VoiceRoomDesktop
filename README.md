@@ -162,26 +162,25 @@ The glyphs in `assets/call` are rendered from lucide and the app logo by `npm ru
 
 ## In-game overlay
 
-While you are in voice, the shell can show a small always-on-top HUD over a **detected game**: room name, who is speaking, mute / deafen / leave. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
+While you are in voice, the shell can show a Discord-style HUD over a **detected game**: avatars and optional names. Whoever is speaking turns fully opaque; everyone else stays faded to the `opacity` setting. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
 
 It does **not** appear over exclusive fullscreen. Switch the game to borderless / fullscreen windowed. The hosted web app exposes the same note and the controls through `window.voiceRoomDesktopOverlay`:
 
 ```js
 const settings = await window.voiceRoomDesktopOverlay.getSettings();
-// { enabled, opacity, anchor, showParticipants, showControls, clickThrough, interactiveBinding }
+// { enabled, opacity, anchor, showNames, clickThrough, interactiveBinding }
 
 await window.voiceRoomDesktopOverlay.setSettings({
   enabled: true,
-  opacity: 0.92,
+  opacity: 0.45, // participants who are not speaking, 0.2..1
   anchor: 'top-left', // top-left | top-right | bottom-left | bottom-right
-  showParticipants: true,
-  showControls: true,
+  showNames: true,
   clickThrough: true,
   allowedExecutables: ['mygame.exe']
 });
-await window.voiceRoomDesktopOverlay.addGame(); // current foreground exe
 const foreground = await window.voiceRoomDesktopOverlay.getForeground();
-// { game, label, reason, exe, title }
+// { game, label, reason, exe, title } — the last window before Voice Room, not Voice Room itself
+await window.voiceRoomDesktopOverlay.addGame(foreground.exe); // browsers, launchers and Voice Room are refused
 
 await window.voiceRoomDesktopOverlay.setSnapshot({
   participants: [
@@ -190,7 +189,7 @@ await window.voiceRoomDesktopOverlay.setSnapshot({
 });
 ```
 
-Clicks pass through to the game until the overlay hotkey (default `Ctrl+\``) makes the HUD interactive. The same shortcut returns click-through. Overlay preferences live in `desktop-settings.json` next to autostart.
+Clicks pass through to the game until the overlay hotkey (default `Ctrl+\``) makes the HUD interactive. The same shortcut returns click-through. The shortcut is registered only while the HUD is on screen, so other apps keep it otherwise. Game detection polls the foreground window through PowerShell only during a call or while the settings screen asks for it. Overlay preferences live in `desktop-settings.json` next to autostart.
 
 ## Window size and position
 

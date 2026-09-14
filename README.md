@@ -160,6 +160,36 @@ const removeListener = window.voiceRoomDesktopCall.onAction(({ action }) => {
 
 The glyphs in `assets/call` are rendered from lucide and the app logo by `npm run icons:call`; commit the PNGs after changing either.
 
+## In-game overlay
+
+While you are in voice, the shell can show a Discord-style HUD over a **detected game**: avatars and optional names. Silent participants are shown at 50 % opacity and whoever is speaking turns fully opaque at once, like Discord. Mic-off and sound-off icons and a «Стрим» badge follow the avatar or name. In the right corners each row is mirrored so the avatars stay against the edge of the game. The overlay stays over the game when another window takes focus, as long as the game is not minimized and the focused window does not cover it; a window on another monitor, the desktop and the taskbar do not count. Same-origin avatar paths from the web app (`/api/avatars/…`) are resolved against `VOICE_ROOM_URL`. It is a separate window glued to the game's window, not an in-process DirectX hook. Browsers, Explorer, Discord and launchers are ignored. Steam / Epic / Riot / Xbox install folders count as games; anything else can be added from settings.
+
+It does **not** appear over exclusive fullscreen. Switch the game to borderless / fullscreen windowed. The hosted web app exposes the same note and the controls through `window.voiceRoomDesktopOverlay`:
+
+```js
+const settings = await window.voiceRoomDesktopOverlay.getSettings();
+// { enabled, anchor, avatarSize, showNames, allowedExecutables }
+
+await window.voiceRoomDesktopOverlay.setSettings({
+  enabled: true,
+  anchor: 'top-left', // top-left | top-right | bottom-left | bottom-right
+  avatarSize: 'medium', // small (28 px) | medium (36 px) | large (46 px)
+  showNames: true,
+  allowedExecutables: ['mygame.exe']
+});
+const foreground = await window.voiceRoomDesktopOverlay.getForeground();
+// { game, label, reason, exe, title } — the last window before Voice Room, not Voice Room itself
+await window.voiceRoomDesktopOverlay.addGame(foreground.exe); // browsers, launchers and Voice Room are refused
+
+await window.voiceRoomDesktopOverlay.setSnapshot({
+  participants: [
+    { id: 'self', name: 'Вы', self: true, speaking: true, micMuted: false, outputMuted: false, streaming: false }
+  ]
+});
+```
+
+The HUD never takes input: every click goes to the game, and there is no overlay hotkey. Game detection polls the foreground window through PowerShell only during a call or while the settings screen asks for it. Overlay preferences live in `desktop-settings.json` next to autostart.
+
 ## Window size and position
 
 The main window reopens with its last size, position and maximized state (stored in `window-state.json` in the user data folder). Fullscreen is not restored. When the saved position is no longer visible — a disconnected monitor, a smaller display — the window keeps its size (shrunk to fit if needed) and is centered on the primary display.

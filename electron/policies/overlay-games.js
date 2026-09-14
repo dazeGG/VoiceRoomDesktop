@@ -1,0 +1,237 @@
+'use strict';
+
+const BLACKLIST_NAMES = new Set([
+  'applicationframehost.exe',
+  'brave.exe',
+  'chrome.exe',
+  'code - insiders.exe',
+  'code.exe',
+  'cmd.exe',
+  'devenv.exe',
+  'discord.exe',
+  'discordcanary.exe',
+  'discordptb.exe',
+  'dwm.exe',
+  'eadesktop.exe',
+  'electron.exe',
+  'epicgameslauncher.exe',
+  'epicwebhelper.exe',
+  'explorer.exe',
+  'firefox.exe',
+  'galaxyclient.exe',
+  'grok.exe',
+  'leagueclient.exe',
+  'leagueclientux.exe',
+  'lockapp.exe',
+  'msedge.exe',
+  'notepad.exe',
+  'obs32.exe',
+  'obs64.exe',
+  'opera.exe',
+  'origin.exe',
+  'powershell.exe',
+  'pwsh.exe',
+  'riotclientservices.exe',
+  'riotclientux.exe',
+  'runtimebroker.exe',
+  'searchhost.exe',
+  'shellexperiencehost.exe',
+  'slack.exe',
+  'spotify.exe',
+  'startmenuexperiencehost.exe',
+  'steam.exe',
+  'steamwebhelper.exe',
+  'systemsettings.exe',
+  'taskmgr.exe',
+  'telegram.exe',
+  'textinputhost.exe',
+  'ubisoftconnect.exe',
+  'upc.exe',
+  'vivaldi.exe',
+  'voice room.exe',
+  'windowsterminal.exe',
+  'zoom.exe'
+]);
+
+const LAUNCHER_PATH_MARKERS = [
+  '\\battle.net\\',
+  '\\ea desktop\\',
+  '\\epic games\\launcher\\',
+  '\\gog galaxy\\',
+  '\\origin\\',
+  '\\riot games\\riot client\\',
+  '\\steam\\steam.exe',
+  '\\ubisoft connect\\'
+];
+
+const GAME_PATH_MARKERS = [
+  '\\ea games\\',
+  '\\epic games\\',
+  '\\gog galaxy\\games\\',
+  '\\origin games\\',
+  '\\program files\\oculus\\software\\',
+  '\\riot games\\',
+  '\\steamapps\\common\\',
+  '\\steamapps\\sourcemods\\',
+  '\\ubisoft\\ubisoft game launcher\\games\\',
+  '\\xboxgames\\'
+];
+
+const MAX_ALLOWED_EXECUTABLES = 32;
+const MAX_EXECUTABLE_LENGTH = 260;
+
+function normalizePath(value) {
+  return String(value || '').replace(/\//g, '\\').trim().toLowerCase();
+}
+
+function fileName(value) {
+  const normalized = normalizePath(value);
+  const slash = normalized.lastIndexOf('\\');
+  return slash >= 0 ? normalized.slice(slash + 1) : normalized;
+}
+
+function sanitizeAllowedExecutables(value) {
+  if (!Array.isArray(value)) return Object.freeze([]);
+  const seen = new Set();
+  const result = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const normalized = normalizePath(item).slice(0, MAX_EXECUTABLE_LENGTH);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length >= MAX_ALLOWED_EXECUTABLES) break;
+  }
+  return Object.freeze(result);
+}
+
+function isAllowedExecutable(exe, allowedExecutables) {
+  const pathNorm = normalizePath(exe);
+  const name = fileName(pathNorm);
+  for (const allowed of allowedExecutables) {
+    if (allowed === pathNorm || allowed === name) return true;
+  }
+  return false;
+}
+
+function classifyForegroundApp(payload, options = {}) {
+  const exe = typeof payload?.exe === 'string' ? payload.exe : '';
+  const pathNorm = normalizePath(exe);
+  const name = fileName(pathNorm);
+  const allowedExecutables = sanitizeAllowedExecutables(options.allowedExecutables);
+
+  if (!name) return Object.freeze({ exe: pathNorm, game: false, name: '', reason: 'unknown' });
+  if (BLACKLIST_NAMES.has(name)) {
+    return Object.freeze({ exe: pathNorm, game: false, name, reason: 'blacklist' });
+  }
+  if (isAllowedExecutable(pathNorm, allowedExecutables)) {
+    return Object.freeze({ exe: pathNorm, game: true, name, reason: 'allowlist' });
+  }
+  if (LAUNCHER_PATH_MARKERS.some((marker) => pathNorm.includes(marker))) {
+    return Object.freeze({ exe: pathNorm, game: false, name, reason: 'launcher' });
+  }
+  if (name === 'riotclientservices.exe' || name === 'leagueclientux.exe' || name === 'leagueclient.exe') {
+    return Object.freeze({ exe: pathNorm, game: false, name, reason: 'launcher' });
+  }
+  if (GAME_PATH_MARKERS.some((marker) => pathNorm.includes(marker))) {
+    if (pathNorm.includes('\\epic games\\launcher\\')) {
+      return Object.freeze({ exe: pathNorm, game: false, name, reason: 'launcher' });
+    }
+    if (pathNorm.includes('\\riot games\\riot client\\')) {
+      return Object.freeze({ exe: pathNorm, game: false, name, reason: 'launcher' });
+    }
+    return Object.freeze({ exe: pathNorm, game: true, name, reason: 'install-path' });
+  }
+  return Object.freeze({ exe: pathNorm, game: false, name, reason: 'not-a-game' });
+}
+
+function parseForegroundPayload(raw) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return normalizeForegroundPayload(raw);
+  }
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    return normalizeForegroundPayload(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+const MAX_TRACKED_WINDOWS = 16;
+
+function normalizeBounds(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const x = Number(source.x);
+  const y = Number(source.y);
+  const width = Number(source.width);
+  const height = Number(source.height);
+  return Object.freeze({
+    height: Number.isFinite(height) ? Math.max(0, Math.round(height)) : 0,
+    width: Number.isFinite(width) ? Math.max(0, Math.round(width)) : 0,
+    x: Number.isFinite(x) ? Math.round(x) : 0,
+    y: Number.isFinite(y) ? Math.round(y) : 0
+  });
+}
+
+function normalizeWindowHandle(value) {
+  const handle = Number(value);
+  return Number.isSafeInteger(handle) && handle > 0 ? handle : 0;
+}
+
+// Recently focused windows with their current place, so the shell can keep the
+// overlay over a game that is no longer in front. PowerShell may send one as an object.
+function normalizeTrackedWindows(value) {
+  const list = Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : [];
+  const windows = [];
+  for (const item of list.slice(0, MAX_TRACKED_WINDOWS)) {
+    if (!item || typeof item !== 'object') continue;
+    const hwnd = normalizeWindowHandle(item.hwnd);
+    if (!hwnd) continue;
+    windows.push(Object.freeze({ bounds: normalizeBounds(item.bounds), hwnd, minimized: item.minimized === true }));
+  }
+  return Object.freeze(windows);
+}
+
+function normalizeForegroundPayload(source) {
+  if (!source || typeof source !== 'object') return null;
+  const exe = typeof source.exe === 'string' ? source.exe.trim() : '';
+  if (!exe) return null;
+  return Object.freeze({
+    bounds: normalizeBounds(source.bounds),
+    exe,
+    hwnd: normalizeWindowHandle(source.hwnd),
+    minimized: source.minimized === true,
+    pid: Number.isInteger(source.pid) ? source.pid : 0,
+    title: typeof source.title === 'string' ? source.title.slice(0, 200) : '',
+    windows: normalizeTrackedWindows(source.windows)
+  });
+}
+
+const CANDIDATE_REASONS = new Set(['allowlist', 'install-path', 'not-a-game']);
+
+// Windows worth offering in settings: games and unknown apps, never Voice Room,
+// browsers or launchers.
+function isGameCandidate(classification) {
+  return CANDIDATE_REASONS.has(classification?.reason);
+}
+
+function describeForeground(classification) {
+  if (!classification?.name) return { exe: '', game: false, label: '', reason: 'unknown' };
+  return {
+    exe: classification.exe,
+    game: classification.game === true,
+    label: classification.name,
+    reason: classification.reason
+  };
+}
+
+module.exports = {
+  BLACKLIST_NAMES,
+  classifyForegroundApp,
+  describeForeground,
+  fileName,
+  isGameCandidate,
+  normalizePath,
+  parseForegroundPayload,
+  sanitizeAllowedExecutables
+};

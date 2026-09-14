@@ -1,0 +1,138 @@
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  width: max-content;
+  height: max-content;
+  overflow: hidden;
+  background: transparent;
+  color: #fff;
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+}
+
+/* A column of avatars glued to a corner of the game, like Discord's overlay. */
+.overlay-people {
+  --avatar-size: 36px;
+  --name-size: 13px;
+  --row-gap: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--row-gap);
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+}
+
+.overlay-people[data-size='small'] {
+  --avatar-size: 28px;
+  --name-size: 12px;
+  --row-gap: 5px;
+}
+
+.overlay-people[data-size='large'] {
+  --avatar-size: 46px;
+  --name-size: 15px;
+  --row-gap: 9px;
+}
+
+/* Speaking flips the whole row to full opacity at once, like the green ring in the app. */
+.overlay-person {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  opacity: 0.5;
+}
+
+.overlay-person[data-speaking='true'] {
+  opacity: 1;
+}
+
+/* In the right corners the row runs from the edge inwards: avatar, name, icons, badge. */
+.overlay-people[data-side='right'] .overlay-person {
+  flex-direction: row-reverse;
+}
+
+.overlay-people[data-side='right'] .overlay-avatar {
+  margin-right: 0;
+  margin-left: calc(var(--avatar-size) * 0.08);
+}
+
+.overlay-avatar {
+  position: relative;
+  flex: none;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  margin-right: calc(var(--avatar-size) * 0.08);
+  border-radius: 50%;
+  background: #5865f2;
+}
+
+.overlay-avatar img,
+.overlay-initial {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.overlay-avatar img {
+  display: block;
+  object-fit: cover;
+}
+
+.overlay-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: calc(var(--avatar-size) * 0.42);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.overlay-name {
+  min-width: 0;
+  max-width: calc(var(--avatar-size) * 4.4);
+  overflow: hidden;
+  color: #fff;
+  font-size: var(--name-size);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-shadow:
+    0 0 4px rgb(0 0 0 / 0.9),
+    0 1px 2px rgb(0 0 0 / 0.95),
+    0 0 12px rgb(0 0 0 / 0.7);
+  white-space: nowrap;
+}
+
+.overlay-icon {
+  flex: none;
+  width: calc(var(--name-size) + 3px);
+  height: calc(var(--name-size) + 3px);
+  color: #f23f43;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.9));
+}
+
+.overlay-stream {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #ed4245;
+  color: #fff;
+  font-size: calc(var(--name-size) - 3px);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+  text-transform: uppercase;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.55);
+}

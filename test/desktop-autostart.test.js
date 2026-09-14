@@ -108,9 +108,9 @@ describe('desktop autostart controller', () => {
       supported: true
     });
     assert.deepEqual(app.runEntry, { approved: undefined, args: ['--hidden'], path: exePath });
-    assert.deepEqual(
-      JSON.parse(fs.readFileSync(path.join(userDataPath, SETTINGS_FILE), 'utf8')),
-      { startMinimized: true }
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(userDataPath, SETTINGS_FILE), 'utf8')).startMinimized,
+      true
     );
 
     assert.deepEqual(controller.setSettings({ openAtLogin: false }), {
@@ -220,5 +220,18 @@ describe('desktop autostart controller', () => {
 
     assert.equal(handlers.get(SET_CHANNEL)(trusted, { openAtLogin: true }).openAtLogin, true);
     assert.equal(handlers.get(GET_CHANNEL)(trusted).openAtLogin, true);
+  });
+
+  it('does not wipe overlay settings when startMinimized changes', (t) => {
+    const { controller, userDataPath } = createHarness(t);
+    fs.writeFileSync(
+      path.join(userDataPath, SETTINGS_FILE),
+      JSON.stringify({ overlay: { enabled: false }, startMinimized: false })
+    );
+    controller.setSettings({ startMinimized: true });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userDataPath, SETTINGS_FILE), 'utf8')), {
+      overlay: { enabled: false },
+      startMinimized: true
+    });
   });
 });

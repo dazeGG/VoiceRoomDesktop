@@ -168,12 +168,13 @@ It does **not** appear over exclusive fullscreen. Switch the game to borderless 
 
 ```js
 const settings = await window.voiceRoomDesktopOverlay.getSettings();
-// { enabled, opacity, anchor, showNames, clickThrough, interactiveBinding }
+// { enabled, opacity, anchor, avatarSize, showNames, clickThrough, interactiveBinding }
 
 await window.voiceRoomDesktopOverlay.setSettings({
   enabled: true,
   opacity: 0.5, // participants who are not speaking, 0.2..1
   anchor: 'top-left', // top-left | top-right | bottom-left | bottom-right
+  avatarSize: 'medium', // small (28 px) | medium (36 px) | large (46 px)
   showNames: true,
   clickThrough: true,
   allowedExecutables: ['mygame.exe']
@@ -189,7 +190,7 @@ await window.voiceRoomDesktopOverlay.setSnapshot({
 });
 ```
 
-Clicks pass through to the game until the overlay hotkey (default `Ctrl+\``) makes the HUD interactive. The same shortcut returns click-through. The shortcut is registered only while the HUD is on screen, so other apps keep it otherwise. Game detection polls the foreground window through PowerShell only during a call or while the settings screen asks for it. Overlay preferences live in `desktop-settings.json` next to autostart.
+The overlay hotkey (default `Ctrl+\``) opens a panel like Discord's: the game window is dimmed and everyone in the call is shown as a tile, with a green outline while speaking and mic/sound-off badges. The same shortcut, Esc, a click on the dimmed area, or switching to another window closes it and returns focus to the game. The shortcut is registered only while the HUD is on screen, so other apps keep it otherwise. Game detection polls the foreground window through PowerShell only during a call or while the settings screen asks for it. Overlay preferences live in `desktop-settings.json` next to autostart.
 
 ## Window size and position
 

@@ -33,6 +33,7 @@ const SUSPEND_CHANNEL = 'desktop-overlay:set-suspended';
 const FOREGROUND_CHANNEL = 'desktop-overlay:get-foreground';
 const ADD_GAME_CHANNEL = 'desktop-overlay:add-game';
 const REMOVE_GAME_CHANNEL = 'desktop-overlay:remove-game';
+const CLOSE_PANEL_CHANNEL = 'desktop-overlay:close-panel';
 const PREVIEW_MS = 8_000;
 // Settings poll the foreground every second; keep the watcher alive a bit longer
 // than that so a throttled background tab does not flap it.
@@ -114,6 +115,11 @@ function createOverlayController({
     const ownWindow = payload.pid === processPid;
     // The hotkey focuses the overlay itself; keep showing it over the game underneath.
     if (ownWindow && interactive) return;
+    // Another window came to the front while the panel was open: fold back to the HUD.
+    if (interactive) {
+      interactive = false;
+      sendState();
+    }
     foreground = payload;
     const classification = classify(payload);
     if (!ownWindow && isGameCandidate(classification)) lastCandidate = payload;
@@ -160,6 +166,18 @@ function createOverlayController({
     }
   }
 
+  // The panel dims the whole game window, or the whole display during a preview.
+  function panelArea() {
+    const gameArea = toDipBounds(activeGame?.bounds);
+    if (gameArea) return gameArea;
+    try {
+      const display = screen.getPrimaryDisplay?.();
+      return display?.bounds || display?.workArea || { height: 720, width: 1280, x: 0, y: 0 };
+    } catch {
+      return { height: 720, width: 1280, x: 0, y: 0 };
+    }
+  }
+
   function viewState() {
     const call = callControls.getState();
     return {
@@ -176,6 +194,7 @@ function createOverlayController({
         : snapshot.participants,
       previewing,
       settings: {
+        avatarSize: settings.avatarSize,
         clickThrough: settings.clickThrough,
         opacity: settings.opacity,
         showControls: false,
@@ -199,6 +218,16 @@ function createOverlayController({
 
   function positionWindow() {
     if (!overlayWindow || overlayWindow.isDestroyed?.()) return;
+    if (interactive) {
+      const area = panelArea();
+      overlayWindow.setBounds?.({
+        height: Math.round(area.height),
+        width: Math.round(area.width),
+        x: Math.round(area.x),
+        y: Math.round(area.y)
+      });
+      return;
+    }
     const bounds = resolveOverlayBounds({
       anchor: settings.anchor,
       height: contentSize.height,
@@ -255,6 +284,11 @@ function createOverlayController({
       if (disposing) return;
       event.preventDefault?.();
       hideWindow();
+    });
+
+    // Alt-Tab or a click into another window closes the panel, like Discord.
+    overlayWindow.on?.('blur', () => {
+      if (interactive) setInteractive(false);
     });
 
     overlayWindow.once?.('closed', () => {
@@ -320,6 +354,8 @@ function createOverlayController({
     const height = Math.max(MIN_OVERLAY_HEIGHT, Math.round(Number(size?.height) || 0));
     if (width === contentSize.width && height === contentSize.height) return;
     contentSize = { height, width };
+    // The panel covers the game window; the HUD size applies once it closes.
+    if (interactive) return;
     if (overlayWindow && !overlayWindow.isDestroyed?.()) {
       overlayWindow.setContentSize?.(width, height);
       positionWindow();
@@ -365,15 +401,28 @@ function createOverlayController({
     failedAccelerator = accelerator;
   }
 
-  function toggleInteractive() {
-    if (!isVisibleNow()) return;
-    interactive = !interactive;
-    if (interactive && overlayWindow && !overlayWindow.isDestroyed?.()) {
-      overlayWindow.setFocusable?.(true);
-      overlayWindow.focus?.();
-    }
-    applyClickThrough();
+  function setInteractive(next) {
+    if (next === interactive) return;
+    if (next && !isVisibleNow()) return;
+    interactive = next;
+    const window = overlayWindow && !overlayWindow.isDestroyed?.() ? overlayWindow : null;
+    if (!window) return;
     sendState();
+    if (interactive) {
+      applyClickThrough();
+      positionWindow();
+      window.setFocusable?.(true);
+      window.focus?.();
+      return;
+    }
+    // Hiding the focused panel hands keyboard focus back to the game before the HUD
+    // reappears as an inactive window.
+    window.hide?.();
+    syncWindow();
+  }
+
+  function toggleInteractive() {
+    setInteractive(!interactive);
   }
 
   function clearPreview() {
@@ -565,6 +614,12 @@ function createOverlayController({
       return callControls.dispatch(action);
     });
 
+    ipcMain.handle(CLOSE_PANEL_CHANNEL, (event) => {
+      assertOverlaySender(event);
+      setInteractive(false);
+      return { ok: true };
+    });
+
     ipcMain.handle(SUSPEND_CHANNEL, (event, nextSuspended) => {
       assertTrustedSender(event);
       setSuspended(nextSuspended === true);
@@ -602,6 +657,7 @@ function createOverlayController({
     getSettings,
     handleForeground,
     removeAllowedGame,
+    setInteractive,
     setSettings,
     setSnapshot,
     setSuspended,
@@ -613,6 +669,7 @@ function createOverlayController({
 module.exports = {
   ACTION_CHANNEL,
   ADD_GAME_CHANNEL,
+  CLOSE_PANEL_CHANNEL,
   FOREGROUND_CHANNEL,
   GET_CHANNEL,
   PREVIEW_CHANNEL,

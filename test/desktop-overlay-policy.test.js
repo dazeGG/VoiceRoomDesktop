@@ -27,6 +27,9 @@ describe('overlay settings', () => {
     assert.equal(DEFAULT_OVERLAY_SETTINGS.opacity, 0.5);
     assert.equal(sanitizeOverlaySettings({ opacity: 1 }).opacity, 0.5);
     assert.equal(sanitizeOverlaySettings({ opacity: 1 }).version, 2);
+    assert.equal(DEFAULT_OVERLAY_SETTINGS.avatarSize, 'medium');
+    assert.equal(sanitizeOverlaySettings({ avatarSize: 'large' }).avatarSize, 'large');
+    assert.equal(sanitizeOverlaySettings({ avatarSize: 'huge' }).avatarSize, 'medium');
     assert.deepEqual(sanitizeOverlaySettings({ interactiveBinding: { code: 'KeyO', ctrlKey: true } }).interactiveBinding, {
       altKey: false,
       code: 'KeyO',

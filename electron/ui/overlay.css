@@ -13,24 +13,47 @@ body {
   height: max-content;
   overflow: hidden;
   background: transparent;
+  color: #fff;
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   user-select: none;
 }
 
+html[data-mode='panel'],
+html[data-mode='panel'] body {
+  width: 100vw;
+  height: 100vh;
+}
+
+/* HUD: a column of avatars glued to a corner of the game. */
 .overlay-people {
+  --avatar-size: 36px;
+  --name-size: 13px;
+  --row-gap: 7px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--row-gap);
   margin: 0;
   padding: 2px;
   list-style: none;
+}
+
+.overlay-people[data-size='small'] {
+  --avatar-size: 28px;
+  --name-size: 12px;
+  --row-gap: 5px;
+}
+
+.overlay-people[data-size='large'] {
+  --avatar-size: 46px;
+  --name-size: 15px;
+  --row-gap: 9px;
 }
 
 /* Speaking is shown by the whole row turning fully opaque; nobody gets a ring. */
 .overlay-person {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(var(--avatar-size) * 0.22);
   min-width: 0;
   opacity: var(--overlay-idle-opacity, 0.5);
   transition: opacity 0.12s ease;
@@ -40,23 +63,29 @@ body {
   opacity: 1;
 }
 
-.overlay-avatar {
+.overlay-avatar,
+.overlay-tile-avatar {
   position: relative;
   flex: none;
-  width: 40px;
-  height: 40px;
   border-radius: 50%;
   background: #5865f2;
 }
 
+.overlay-avatar {
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+}
+
 .overlay-avatar img,
+.overlay-tile-avatar img,
 .overlay-initial {
   width: 100%;
   height: 100%;
   border-radius: 50%;
 }
 
-.overlay-avatar img {
+.overlay-avatar img,
+.overlay-tile-avatar img {
   display: block;
   object-fit: cover;
 }
@@ -66,7 +95,7 @@ body {
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 16px;
+  font-size: calc(var(--avatar-size) * 0.42);
   font-weight: 800;
   letter-spacing: -0.03em;
 }
@@ -75,8 +104,8 @@ body {
   position: absolute;
   right: -1px;
   bottom: -1px;
-  width: 16px;
-  height: 16px;
+  width: calc(var(--avatar-size) * 0.42);
+  height: calc(var(--avatar-size) * 0.42);
   border-radius: 50%;
   background: #111214;
   box-shadow: 0 0 0 2px rgb(0 0 0 / 0.45);
@@ -92,25 +121,25 @@ body {
 }
 
 .overlay-mute::before {
-  width: 8px;
-  height: 6px;
-  border-radius: 0 0 4px 4px;
+  width: 50%;
+  height: 38%;
+  border-radius: 0 0 999px 999px;
   transform: translate(-50%, -35%);
 }
 
 .overlay-mute::after {
-  width: 12px;
-  height: 2px;
+  width: 75%;
+  height: 12%;
   border-radius: 1px;
   transform: translate(-50%, -50%) rotate(-42deg);
 }
 
 .overlay-name {
   min-width: 0;
-  max-width: 160px;
+  max-width: calc(var(--avatar-size) * 4.4);
   overflow: hidden;
   color: #fff;
-  font-size: 14px;
+  font-size: var(--name-size);
   font-weight: 650;
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -120,4 +149,144 @@ body {
     0 1px 2px rgb(0 0 0 / 0.95),
     0 0 12px rgb(0 0 0 / 0.7);
   white-space: nowrap;
+}
+
+/* Panel: the hotkey dims the game and shows everyone in the call as tiles. */
+.overlay-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgb(0 0 0 / 0.62);
+  animation: overlay-fade 0.14s ease-out;
+}
+
+.overlay-panel-card {
+  width: min(880px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 18px;
+  background: rgb(24 25 28 / 0.94);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.5);
+  animation: overlay-rise 0.16s ease-out;
+}
+
+.overlay-panel-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.overlay-panel-kicker {
+  margin: 0 0 2px;
+  color: rgb(255 255 255 / 0.5);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.overlay-panel-room {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.overlay-panel-hint {
+  margin: 0;
+  color: rgb(255 255 255 / 0.55);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.overlay-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.overlay-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 148px;
+  padding: 16px 12px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 2px transparent;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.overlay-tile[data-speaking='true'] {
+  background: rgb(35 165 89 / 0.1);
+  box-shadow: inset 0 0 0 2px #23a559;
+}
+
+.overlay-tile-avatar {
+  --avatar-size: 72px;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+}
+
+.overlay-tile-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-tile-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+}
+
+.overlay-tile-icon {
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.45);
+  color: #f23f43;
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes overlay-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-panel,
+  .overlay-panel-card {
+    animation: none;
+  }
 }

@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('voiceRoomOverlay', {
   action: (name) => ipcRenderer.invoke('desktop-overlay:action', name),
+  closePanel: () => ipcRenderer.invoke('desktop-overlay:close-panel'),
   onState: (handler) => {
     if (typeof handler !== 'function') return () => {};
     const listener = (_event, payload) => handler(payload);

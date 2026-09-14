@@ -3,6 +3,7 @@
 const { bindingToAccelerator } = require('../hotkeys');
 
 const OVERLAY_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+const OVERLAY_AVATAR_SIZES = Object.freeze(['small', 'medium', 'large']);
 const OVERLAY_MARGIN_PX = 16;
 const OVERLAY_MIN_OPACITY = 0.2;
 const OVERLAY_MAX_OPACITY = 1;
@@ -25,6 +26,7 @@ const OVERLAY_SETTINGS_VERSION = 2;
 const DEFAULT_OVERLAY_SETTINGS = Object.freeze({
   allowedExecutables: Object.freeze([]),
   anchor: 'top-left',
+  avatarSize: 'medium',
   clickThrough: true,
   enabled: true,
   interactiveBinding: DEFAULT_INTERACTIVE_BINDING,
@@ -69,6 +71,9 @@ function sanitizeOverlaySettings(payload) {
   return Object.freeze({
     allowedExecutables: sanitizeAllowedExecutables(source.allowedExecutables),
     anchor,
+    avatarSize: OVERLAY_AVATAR_SIZES.includes(source.avatarSize)
+      ? source.avatarSize
+      : DEFAULT_OVERLAY_SETTINGS.avatarSize,
     clickThrough: source.clickThrough !== false,
     enabled: source.enabled !== false,
     interactiveBinding: sanitizeInteractiveBinding(
@@ -208,6 +213,7 @@ module.exports = {
   DEFAULT_INTERACTIVE_BINDING,
   DEFAULT_OVERLAY_SETTINGS,
   OVERLAY_ANCHORS,
+  OVERLAY_AVATAR_SIZES,
   OVERLAY_MARGIN_PX,
   OVERLAY_MAX_PARTICIPANTS,
   OVERLAY_SETTINGS_VERSION,

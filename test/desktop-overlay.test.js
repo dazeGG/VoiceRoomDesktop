@@ -317,6 +317,37 @@ describe('desktop overlay controller', () => {
     assert.equal(controller.getForeground().game, true);
   });
 
+  it('opens a panel over the whole game window and folds back to the HUD', (t) => {
+    const { callControls, controller, shortcuts, windows } = createHarness(t);
+    controller.attachMainWindow(new FakeMainWindow());
+    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    controller.handleForeground({ ...CS2, bounds: { height: 900, width: 1600, x: 100, y: 50 } });
+    const overlay = windows[0];
+
+    shortcuts.get('Control+`')();
+    assert.deepEqual(overlay.bounds, { height: 900, width: 1600, x: 100, y: 50 });
+    assert.equal(overlay.focused, true);
+    assert.equal(overlay.ignoreMouse.at(-1)[0], false);
+    assert.equal(lastState(overlay).interactive, true);
+    assert.equal(lastState(overlay).settings.avatarSize, 'medium');
+
+    controller.setInteractive(false);
+    assert.equal(lastState(overlay).interactive, false);
+    assert.equal(overlay.visible, true);
+    assert.equal(overlay.focused, false);
+    assert.equal(overlay.ignoreMouse.at(-1)[0], true);
+    assert.deepEqual(overlay.bounds, { height: 48, width: 52, x: 116, y: 66 });
+
+    shortcuts.get('Control+`')();
+    overlay.emit('blur');
+    assert.equal(lastState(overlay).interactive, false);
+
+    shortcuts.get('Control+`')();
+    controller.handleForeground(CHROME);
+    assert.equal(lastState(overlay).interactive, false);
+    assert.equal(overlay.visible, false);
+  });
+
   it('sends avatars to the overlay window as absolute Voice Room URLs', (t) => {
     const { callControls, controller, windows } = createHarness(t);
     controller.attachMainWindow(new FakeMainWindow());

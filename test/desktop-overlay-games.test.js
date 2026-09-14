@@ -70,12 +70,13 @@ describe('overlay foreground payload', () => {
 
 describe('overlay foreground script path', () => {
   it('refuses to run a script from inside app.asar and copies it out', () => {
-    const path = require('node:path');
+    // Windows paths on every CI host: the default `path` on Linux would split on "/".
+    const path = require('node:path').win32;
     const { isInsideAsar, resolveRunnableForegroundScript } = require('../electron/overlay-foreground');
     const asarFile = 'C:\\app\\resources\\app.asar\\native\\overlay\\windows\\foreground.ps1';
     const unpacked = 'C:\\app\\resources\\app.asar.unpacked\\native\\overlay\\windows\\foreground.ps1';
-    assert.equal(isInsideAsar(asarFile), true);
-    assert.equal(isInsideAsar(unpacked), false);
+    assert.equal(isInsideAsar(asarFile, path), true);
+    assert.equal(isInsideAsar(unpacked, path), false);
 
     const copied = [];
     const resolved = resolveRunnableForegroundScript({

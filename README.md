@@ -398,6 +398,18 @@ Create a local `.env`:
 VOICE_ROOM_URL=https://voice.example.com
 ```
 
+Release and dev builds from CI point at `https://voiceroom.ru`.
+
+### Windows native helpers
+
+`npm run electron` and every Windows build compile the native helpers (screen capture, system audio, global hotkeys) with MSVC. Install Visual Studio 2022 Build Tools with MSVC x64 and a Windows 11 SDK once:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+A Developer Command Prompt is not required. When `cl.exe` is not on `PATH`, the build scripts find the Build Tools through `vswhere` and load `vcvars64.bat` themselves. Without MSVC they stop with an install hint.
+
 ## Commands
 
 `npm run preview:picker` opens the picker UI with mock sources only. It does not use the Electron preload bridge, so it is for layout review rather than real screen capture.
@@ -408,10 +420,12 @@ npm run preview:picker
 npm run build
 npm run build:mac
 npm run build:win
+npm run build:win:dev
+npm run build:mac:dev
 npm run check
 npm test
 ```
 
-Build artifacts are written to `dist/`.
+Build artifacts are written to `dist/`. Dev builds (`build:*:dev`) produce a portable Windows `.exe` or macOS `.dmg` in `dist/dev/<commit>/`, with a `-dirty` suffix when the tree has uncommitted changes. They use the `dev` channel and the `voiceroom-dev://` scheme.
 
 Releases are built by GitHub Actions from version tags. See [docs/releasing.md](docs/releasing.md).

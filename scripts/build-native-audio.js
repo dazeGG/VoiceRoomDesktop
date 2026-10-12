@@ -3,6 +3,7 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { requireMsvcEnv } = require('./msvc-env');
 
 const rootDir = path.join(__dirname, '..');
 const nativeDir = path.join(rootDir, 'native', 'audio');
@@ -19,6 +20,7 @@ function run(command, args, options = {}) {
 
   if (result.status !== 0) {
     if (options.optional) return false;
+    if (result.error) console.error(`${command}: ${result.error.message}`);
     if (options.quiet) {
       process.stderr.write(result.stderr || result.stdout || '');
     }
@@ -100,8 +102,13 @@ function buildWindows(options = {}) {
     return;
   }
 
+  // Without /Fo cl.exe drops the .obj into the cwd, which is the repo root.
+  const objectDir = path.join(rootDir, 'native', '.cache', 'obj');
+  ensureDir(objectDir);
+
   run('cl.exe', [
     '/nologo',
+    `/Fo:${objectDir}${path.sep}`,
     '/EHsc',
     '/std:c++17',
     '/O2',
@@ -112,7 +119,7 @@ function buildWindows(options = {}) {
     'ole32.lib',
     'propsys.lib',
     'uuid.lib'
-  ]);
+  ], { env: requireMsvcEnv('Windows native audio helper') });
 }
 
 const targets = process.argv.slice(2);

@@ -73,7 +73,7 @@ body {
   height: var(--avatar-size);
   margin-right: calc(var(--avatar-size) * 0.08);
   border-radius: 50%;
-  background: #5865f2;
+  background: oklch(74% 0.1 278);
 }
 
 .overlay-avatar img,

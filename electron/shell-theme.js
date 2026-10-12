@@ -1,11 +1,11 @@
 'use strict';
 
-const WINDOW_BACKGROUND = '#10110f';
+const WINDOW_BACKGROUND = '#0b0c0e';
 const TITLEBAR_HEIGHT = 32;
 // Windows paints the caption buttons itself, over the topbar view, so their
-// background must match --paper from shell-tokens.css (oklch(15.5% 0.015 92)).
-const TITLEBAR_OVERLAY_COLOR = '#0e0c06';
-const TITLEBAR_OVERLAY_SYMBOL_COLOR = '#b0aea8';
+// background must match --paper from shell-tokens.css (oklch(15.5% 0.005 260)).
+const TITLEBAR_OVERLAY_COLOR = '#0b0c0e';
+const TITLEBAR_OVERLAY_SYMBOL_COLOR = '#a2a5a8';
 const TITLEBAR_MAC_TRAFFIC_LIGHTS_PADDING = '78px';
 const TITLEBAR_WIN_CONTROLS_PADDING = '140px';
 

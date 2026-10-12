@@ -3,20 +3,25 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { requireMsvcEnv } = require('./msvc-env');
 
 const rootDir = path.join(__dirname, '..');
 const nativeDir = path.join(rootDir, 'native', 'capture');
 const binDir = path.join(rootDir, 'native', 'bin');
 
-function run(command, args) {
+function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: rootDir,
     encoding: 'utf8',
+    env: options.env || process.env,
     shell: false,
     stdio: 'inherit'
   });
 
-  if (result.status !== 0) process.exit(result.status || 1);
+  if (result.status !== 0) {
+    if (result.error) console.error(`${command}: ${result.error.message}`);
+    process.exit(result.status || 1);
+  }
 }
 
 // The cursor-correct capture helper is Windows-only: it exists to work around
@@ -37,8 +42,13 @@ function buildWindows(options = {}) {
     return;
   }
 
+  // Without /Fo cl.exe drops the .obj into the cwd, which is the repo root.
+  const objectDir = path.join(rootDir, 'native', '.cache', 'obj');
+  fs.mkdirSync(objectDir, { recursive: true });
+
   run('cl.exe', [
     '/nologo',
+    `/Fo:${objectDir}${path.sep}`,
     '/EHsc',
     '/std:c++17',
     '/permissive-',
@@ -56,7 +66,7 @@ function buildWindows(options = {}) {
     'user32.lib',
     'windowsapp.lib',
     'avrt.lib'
-  ]);
+  ], { env: requireMsvcEnv('Windows native capture helper') });
 }
 
 const targets = process.argv.slice(2);

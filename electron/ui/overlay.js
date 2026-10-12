@@ -2,23 +2,25 @@
 
 const people = document.querySelector('#overlayPeople');
 
-const AVATAR_COLORS = {
-  amber: 'oklch(63% 0.19 70)',
-  blue: 'oklch(54% 0.22 260)',
-  blurple: 'oklch(58% 0.26 278)',
-  coral: 'oklch(61% 0.22 36)',
-  cyan: 'oklch(55% 0.17 214)',
-  green: 'oklch(52% 0.19 148)',
-  indigo: 'oklch(51% 0.23 284)',
-  magenta: 'oklch(56% 0.26 351)',
-  olive: 'oklch(50% 0.16 112)',
-  orchid: 'oklch(58% 0.24 326)',
-  rose: 'oklch(58% 0.24 16)',
-  rust: 'oklch(53% 0.20 42)',
-  sky: 'oklch(57% 0.18 242)',
-  slate: 'oklch(44% 0.06 260)',
-  teal: 'oklch(53% 0.18 182)',
-  violet: 'oklch(55% 0.25 304)'
+// Hues of the avatar colour keys, as in the web app: a pastel fill and a dark
+// letter on it, so every avatar sits at the same lightness on graphite.
+const AVATAR_HUES = {
+  amber: 70,
+  blue: 260,
+  blurple: 278,
+  coral: 36,
+  cyan: 214,
+  green: 148,
+  indigo: 284,
+  magenta: 351,
+  olive: 112,
+  orchid: 326,
+  rose: 16,
+  rust: 42,
+  sky: 242,
+  slate: 260,
+  teal: 182,
+  violet: 304
 };
 const AVATAR_SIZES = ['small', 'medium', 'large'];
 const DEFAULT_AVATAR_SIZE = 'medium';
@@ -75,9 +77,18 @@ function participantLabel(participant) {
   return participant.name || (participant.self ? 'Вы' : 'Участник');
 }
 
+function avatarHue(participant) {
+  return AVATAR_HUES[participant.avatarColorKey] ?? AVATAR_HUES.blurple;
+}
+
 function avatarBackground(participant) {
   if (participant.avatarAccent) return participant.avatarAccent;
-  return AVATAR_COLORS[participant.avatarColorKey] || AVATAR_COLORS.blurple;
+  return `oklch(74% 0.1 ${avatarHue(participant)})`;
+}
+
+// An accent sent by the web app is its own colour and keeps the white letter.
+function avatarInk(participant) {
+  return participant.avatarAccent ? '#fff' : `oklch(25% 0.05 ${avatarHue(participant)})`;
 }
 
 function createPerson() {
@@ -113,6 +124,7 @@ function updatePerson(node, participant, showNames) {
 
   node.item.dataset.speaking = participant.speaking ? 'true' : 'false';
   node.avatar.style.background = avatarBackground(participant);
+  node.initial.style.color = avatarInk(participant);
   if (showImage) {
     if (node.image.getAttribute('src') !== src) node.image.src = src;
   } else {

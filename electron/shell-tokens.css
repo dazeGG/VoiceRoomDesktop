@@ -1,21 +1,23 @@
 :root {
   color-scheme: dark;
-  --paper: oklch(15.5% 0.015 92);
-  --ink: oklch(94% 0.012 92);
-  --muted: oklch(69% 0.028 88);
-  --line: oklch(35% 0.025 92);
-  --control: oklch(23% 0.016 92);
-  --control-hover: oklch(30% 0.018 92);
-  --control-line: oklch(41% 0.018 92);
-  --control-active: oklch(84% 0.012 92);
-  --control-active-hover: oklch(89% 0.01 92);
-  --ink-inverse: oklch(9% 0.012 92);
-  --focus-ring: oklch(78% 0.12 164);
-  --accent: oklch(84% 0.012 92);
-  --danger: oklch(67% 0.18 31);
-  --disabled-surface: oklch(12% 0.012 92 / 0.8);
-  --disabled-border: oklch(30% 0.018 92 / 0.86);
-  --disabled-ink: oklch(60% 0.018 92);
+  /* Graphite, the same neutrals as the web app's default theme (--vr-* in
+     theme.css): hue 260 with almost no chroma, and the Volt accent. */
+  --paper: oklch(15.5% 0.005 260);
+  --ink: oklch(96% 0.003 260);
+  --muted: oklch(72% 0.006 260);
+  --line: oklch(26% 0.006 260);
+  --control: oklch(24% 0.006 260);
+  --control-hover: oklch(28% 0.006 260);
+  --control-line: oklch(32% 0.006 260);
+  --control-active: oklch(90% 0.19 125);
+  --control-active-hover: oklch(94% 0.16 125);
+  --ink-inverse: oklch(20% 0.04 125);
+  --focus-ring: oklch(90% 0.19 125);
+  --accent: oklch(90% 0.19 125);
+  --danger: oklch(60% 0.19 25);
+  --disabled-surface: oklch(13% 0.005 260 / 0.8);
+  --disabled-border: oklch(26% 0.006 260 / 0.86);
+  --disabled-ink: oklch(54% 0.006 260);
   --touch-target: 44px;
   --radius-sm: 8px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);

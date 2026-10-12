@@ -1,34 +1,34 @@
 :root {
-  --paper-deep: oklch(10.5% 0.012 92);
-  --panel: oklch(20% 0.017 92);
-  --panel-strong: oklch(25% 0.019 92);
-  --panel-gradient-top: oklch(22% 0.018 92 / 0.96);
-  --panel-gradient-bottom: oklch(15% 0.014 92 / 0.98);
-  --control-muted: oklch(28% 0.018 92);
-  --control-surface: oklch(14% 0.014 92 / 0.9);
-  --control-pressed: oklch(17% 0.014 92 / 0.9);
-  --ink-strong: oklch(96% 0.008 92);
-  --border: oklch(34% 0.02 92);
-  --border-soft: oklch(36% 0.02 92);
-  --surface: oklch(15% 0.014 92);
-  --surface-hover: oklch(19% 0.016 92);
-  --surface-selected-top: oklch(21% 0.017 92);
-  --surface-selected-bottom: oklch(16% 0.015 92);
-  --preview-backdrop: oklch(7% 0.01 92);
-  --green: oklch(72% 0.16 164);
-  --blue: oklch(68% 0.14 246);
-  --coral: oklch(67% 0.18 31);
-  --amber: oklch(79% 0.14 82);
-  --accent-soft: oklch(84% 0.012 92 / 0.14);
-  --accent-softer: oklch(84% 0.012 92 / 0.16);
-  --accent-faint: oklch(84% 0.012 92 / 0.2);
-  --accent-ghost: oklch(84% 0.012 92 / 0.18);
-  --accent-ghost-soft: oklch(84% 0.012 92 / 0.12);
-  --accent-ghost-faint: oklch(84% 0.012 92 / 0.08);
-  --accent-ghost-min: oklch(84% 0.012 92 / 0.06);
-  --switch-track: oklch(19% 0.014 92);
-  --switch-thumb: oklch(78% 0.012 92);
-  --shadow: 0 24px 70px oklch(6% 0.02 92 / 0.46);
+  --paper-deep: oklch(10.5% 0.006 260);
+  --panel: oklch(20% 0.006 260);
+  --panel-strong: oklch(25% 0.006 260);
+  --panel-gradient-top: oklch(22% 0.006 260 / 0.96);
+  --panel-gradient-bottom: oklch(15% 0.006 260 / 0.98);
+  --control-muted: oklch(28% 0.006 260);
+  --control-surface: oklch(14% 0.006 260 / 0.9);
+  --control-pressed: oklch(17% 0.006 260 / 0.9);
+  --ink-strong: oklch(96% 0.003 260);
+  --border: oklch(32% 0.006 260);
+  --border-soft: oklch(34% 0.006 260);
+  --surface: oklch(15% 0.006 260);
+  --surface-hover: oklch(19% 0.006 260);
+  --surface-selected-top: oklch(21% 0.006 260);
+  --surface-selected-bottom: oklch(16% 0.006 260);
+  --preview-backdrop: oklch(7% 0.005 260);
+  --green: oklch(78% 0.15 150);
+  --blue: oklch(75% 0.12 240);
+  --coral: oklch(64% 0.18 25);
+  --amber: oklch(80% 0.14 83);
+  --accent-soft: oklch(90% 0.19 125 / 0.14);
+  --accent-softer: oklch(90% 0.19 125 / 0.16);
+  --accent-faint: oklch(90% 0.19 125 / 0.2);
+  --accent-ghost: oklch(90% 0.19 125 / 0.18);
+  --accent-ghost-soft: oklch(90% 0.19 125 / 0.12);
+  --accent-ghost-faint: oklch(90% 0.19 125 / 0.08);
+  --accent-ghost-min: oklch(90% 0.19 125 / 0.06);
+  --switch-track: oklch(19% 0.006 260);
+  --switch-thumb: oklch(78% 0.006 260);
+  --shadow: 0 24px 70px oklch(0% 0 0 / 0.46);
   --radius-md: 14px;
   --space-2xs: 4px;
   --space-xs: 8px;
@@ -280,7 +280,7 @@ h1 {
 }
 
 .preview-desktop {
-  background: linear-gradient(135deg, oklch(30% 0.035 92), var(--paper-deep) 66%);
+  background: linear-gradient(135deg, oklch(30% 0.006 260), var(--paper-deep) 66%);
 }
 
 .preview-topbar {
@@ -296,7 +296,7 @@ h1 {
   inset: 48px 14px 14px;
   border-radius: 7px;
   background:
-    linear-gradient(90deg, oklch(68% 0.14 246 / 0.58) 0 36%, transparent 36%),
+    linear-gradient(90deg, oklch(75% 0.12 240 / 0.58) 0 36%, transparent 36%),
     linear-gradient(180deg, var(--accent-ghost), var(--accent-ghost-min));
 }
 
@@ -314,12 +314,12 @@ h1 {
 
 .preview-code span:first-child {
   grid-row: span 3;
-  background: oklch(68% 0.14 246 / 0.32);
+  background: oklch(75% 0.12 240 / 0.32);
 }
 
 .preview-browser {
   padding: 14px;
-  background: oklch(13% 0.02 92);
+  background: oklch(13% 0.006 260);
 }
 
 .preview-address,
@@ -330,15 +330,15 @@ h1 {
 
 .preview-address {
   height: 22px;
-  background: oklch(84% 0.012 92 / 0.14);
+  background: oklch(90% 0.19 125 / 0.14);
 }
 
 .preview-room {
   margin-top: var(--space-md);
   height: calc(100% - 38px);
   background:
-    radial-gradient(circle at 28% 32%, oklch(72% 0.16 164 / 0.48), transparent 15%),
-    linear-gradient(135deg, oklch(68% 0.14 246 / 0.42), var(--accent-ghost-faint));
+    radial-gradient(circle at 28% 32%, oklch(78% 0.15 150 / 0.48), transparent 15%),
+    linear-gradient(135deg, oklch(75% 0.12 240 / 0.42), var(--accent-ghost-faint));
 }
 
 .preview-chat {
@@ -346,19 +346,19 @@ h1 {
   align-content: end;
   gap: 10px;
   padding: 18px;
-  background: oklch(16% 0.026 136);
+  background: oklch(16% 0.006 260);
 }
 
 .preview-chat span {
   width: 72%;
   height: 24px;
   border-radius: 999px;
-  background: oklch(84% 0.012 92 / 0.14);
+  background: oklch(90% 0.19 125 / 0.14);
 }
 
 .preview-chat span:nth-child(2) {
   justify-self: end;
-  background: oklch(72% 0.16 164 / 0.42);
+  background: oklch(78% 0.15 150 / 0.42);
 }
 
 /* Footer bar */

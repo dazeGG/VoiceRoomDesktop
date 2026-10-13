@@ -1,6 +1,8 @@
 'use strict';
 
 const elements = {
+  appAudioRow: document.querySelector('#screenAppAudioRow'),
+  appAudioToggle: document.querySelector('#screenAppAudioToggle'),
   audioToggle: document.querySelector('#screenAudioToggle'),
   closeButton: document.querySelector('#screenSourceClose'),
   gearButton: document.querySelector('#screenSettingsGear'),
@@ -22,6 +24,7 @@ const sourceButtons = new Map();
 let cachedGridColumnCount = 1;
 
 const fallbackState = {
+  appAudioSupported: true,
   defaultFpsId: '30',
   defaultQualityId: 'balanced',
   defaultStreamAudioEnabled: true,
@@ -34,6 +37,7 @@ const fallbackState = {
 };
 
 const state = {
+  appAudioSupported: false,
   mode: 'games',       // 'games' (30fps) | 'text' (5fps)
   qualityId: 'balanced', // 'balanced' (SD/720p) | 'high' (HD/1080p)
   selectedSourceId: '',
@@ -67,6 +71,7 @@ async function init() {
 
   const pickerState = await getPickerState();
   state.sources = pickerState.sources || [];
+  state.appAudioSupported = pickerState.appAudioSupported === true;
   state.qualityId = pickerState.defaultQualityId === 'high' ? 'high' : 'balanced';
   state.mode = pickerState.defaultFpsId === '5' ? 'text' : 'games';
   elements.audioToggle.checked = pickerState.defaultStreamAudioEnabled !== false;
@@ -83,6 +88,7 @@ async function init() {
   elements.modeGames.addEventListener('click', () => setMode('games'));
   elements.modeText.addEventListener('click', () => setMode('text'));
   elements.audioToggle.addEventListener('change', updateSummary);
+  elements.appAudioToggle.addEventListener('change', updateSummary);
 
   elements.resToggle.addEventListener('click', (event) => {
     const preset = event.target?.dataset?.qualityPreset;
@@ -283,10 +289,21 @@ function updateSourceSelection() {
   elements.startButton.disabled = !state.selectedSourceId;
 }
 
+// A window share can carry only that app's sound; a screen share always carries
+// everything except Voice Room.
+function canChooseAppAudio() {
+  return state.appAudioSupported && state.sourceType === 'window' && elements.audioToggle.checked;
+}
+
+function isAppAudioOnly() {
+  return canChooseAppAudio() && elements.appAudioToggle.checked;
+}
+
 function updateSummary() {
   const source = state.sources.find((s) => s.id === state.selectedSourceId);
   const fpsLabel = state.mode === 'text' ? '5 к/с' : '30 к/с';
-  const audioLabel = elements.audioToggle.checked ? ' · звук' : '';
+  elements.appAudioRow.hidden = !canChooseAppAudio();
+  const audioLabel = !elements.audioToggle.checked ? '' : isAppAudioOnly() ? ' · звук окна' : ' · звук';
 
   elements.summaryName.textContent = source?.name ?? 'Не выбрано';
   if (state.mode === 'text') {
@@ -485,6 +502,7 @@ function submitSelection() {
   const fpsId = state.mode === 'text' ? '5' : '30';
   const qualityId = state.mode === 'text' ? 'source' : state.qualityId;
   const selection = {
+    appAudioOnly: isAppAudioOnly(),
     fpsId,
     qualityId,
     sourceId: state.selectedSourceId,

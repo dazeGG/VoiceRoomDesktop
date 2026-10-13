@@ -27,6 +27,9 @@ const pendingDesktopCaptureSources = new Map();
 const desktopCaptureSourceSnapshots = new Map();
 const desktopCapturePickerSessions = new Map();
 const grantedDesktopCaptureByFrame = new Map();
+// The window whose app alone feeds the stream sound, per page frame. Kept until
+// the next source pick so the page may restart stream audio mid-share.
+const streamAudioWindowByFrame = new Map();
 let latestPendingDesktopCaptureSource = null;
 let nextDesktopCapturePickerSessionId = 1;
 
@@ -248,6 +251,19 @@ function peekPendingDesktopCaptureSource(frame, securityOrigin = '') {
   return latestPendingDesktopCaptureSource;
 }
 
+function setStreamAudioWindow(frameKey, windowHandle) {
+  if (!frameKey) return;
+  if (process.platform === 'win32' && Number.isSafeInteger(windowHandle) && windowHandle > 0) {
+    streamAudioWindowByFrame.set(frameKey, windowHandle);
+  } else {
+    streamAudioWindowByFrame.delete(frameKey);
+  }
+}
+
+function getStreamAudioWindow(frameKey) {
+  return (frameKey && streamAudioWindowByFrame.get(frameKey)) || 0;
+}
+
 function isNativeOnlyScreenCaptureEligible(pending) {
   return process.platform === 'win32'
     && pending?.source?.id?.startsWith('screen:')
@@ -390,6 +406,7 @@ module.exports = {
   getDesktopCapturePickerSessionForEvent,
   getDesktopCaptureSourceForSelection,
   getDesktopCaptureSources,
+  getStreamAudioWindow,
   isNativeOnlyScreenCaptureEligible,
   openDesktopCapturePickerWindow,
   peekPendingDesktopCaptureSource,
@@ -398,6 +415,7 @@ module.exports = {
   resolveDesktopCapturePickerSession,
   serializeDesktopSource,
   setPendingDesktopCaptureSource,
+  setStreamAudioWindow,
   storeDesktopCaptureSourceSnapshot,
   takeGrantedDesktopCapture,
   takePendingDesktopCaptureSource

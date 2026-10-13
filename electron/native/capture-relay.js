@@ -372,6 +372,7 @@ function attachChild(session, child) {
 function restartHelper(session, { code, reason, signal }) {
   session.frameState = createFrameState();
   session.restarts += 1;
+  postParent({ restarts: session.restarts, type: 'restarted' });
   let nextChild = null;
   try {
     nextChild = spawnHelper(session);

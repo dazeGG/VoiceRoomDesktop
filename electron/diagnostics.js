@@ -32,6 +32,62 @@ function yesNo(value) {
   return value ? 'yes' : 'no';
 }
 
+const HEALTH_TOKEN_PATTERN = /^[a-z0-9._-]{1,64}$/i;
+
+function healthToken(value, fallback = '-') {
+  return typeof value === 'string' && HEALTH_TOKEN_PATTERN.test(value) ? value : fallback;
+}
+
+function healthCount(value) {
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+// Stream and overlay state reduced to plain tokens: support reads it to tell a
+// crashing helper from a network problem, and it never carries paths or names.
+function sanitizeStreamHealth(health) {
+  const source = health && typeof health === 'object' ? health : {};
+  const capture = source.capture && typeof source.capture === 'object' ? source.capture : {};
+  const audio = source.audio && typeof source.audio === 'object' ? source.audio : {};
+  const overlay = source.overlay && typeof source.overlay === 'object' ? source.overlay : {};
+  return {
+    audio: {
+      active: audio.active === true,
+      lastExitCode: Number.isInteger(audio.lastExitCode) ? audio.lastExitCode : null,
+      restarts: healthCount(audio.restarts),
+      target: healthToken(audio.target)
+    },
+    capture: {
+      active: capture.active === true,
+      endReason: healthToken(capture.endReason),
+      restarts: healthCount(capture.restarts),
+      sourceType: healthToken(capture.sourceType)
+    },
+    gpuCrashes: healthCount(source.gpuCrashes),
+    overlay: {
+      enabled: overlay.enabled === true,
+      game: healthToken(overlay.game),
+      visible: overlay.visible === true,
+      watcher: healthToken(overlay.watcher, 'none')
+    }
+  };
+}
+
+function formatStreamHealthLines(health) {
+  const { audio, capture, gpuCrashes, overlay } = health;
+  const captureState = capture.active
+    ? `active (${capture.sourceType})`
+    : `idle, last=${capture.sourceType}, end=${capture.endReason}`;
+  const audioState = audio.active
+    ? `active (${audio.target})`
+    : `idle, last=${audio.target}, exit=${audio.lastExitCode ?? '-'}`;
+  return [
+    `stream capture: ${captureState}, restarts=${capture.restarts}`,
+    `stream audio: ${audioState}, restarts=${audio.restarts}`,
+    `overlay: ${overlay.enabled ? 'on' : 'off'}, watcher=${overlay.watcher}, visible=${yesNo(overlay.visible)}, game=${overlay.game}`,
+    `gpu process crashes: ${gpuCrashes}`
+  ];
+}
+
 // Plain "key: value" lines: easy to paste into a chat and to grep for.
 function formatDiagnosticsText(info) {
   return [
@@ -43,6 +99,7 @@ function formatDiagnosticsText(info) {
     `gpu: ${info.gpu}`,
     `native helpers: audio=${yesNo(info.nativeHelpers.audio)}, capture=${yesNo(info.nativeHelpers.capture)}, hotkeys=${yesNo(info.nativeHelpers.hotkeys)}`,
     `hotkeys backend: ${info.hotkeysBackend}`,
+    ...formatStreamHealthLines(info.streamHealth || sanitizeStreamHealth(null)),
     `update: ${info.update.phase}${info.update.version ? ` ${info.update.version}` : ''}`,
     `autostart: ${info.autostart.supported ? yesNo(info.autostart.openAtLogin) : 'unsupported'}${info.autostart.startMinimized ? ' (minimized)' : ''}`,
     `voice active: ${yesNo(info.voiceActive)}`,
@@ -66,6 +123,7 @@ function createDiagnosticsController({
   getUpdateState = () => null,
   getAutostartSettings = () => null,
   getHotkeysBackend = () => 'none',
+  getStreamHealth = () => null,
   isVoiceActive = () => false,
   now = () => new Date()
 }) {
@@ -111,6 +169,7 @@ function createDiagnosticsController({
         platform,
         release: safely(() => (osRelease ? osRelease() : require('node:os').release()), 'unknown')
       },
+      streamHealth: sanitizeStreamHealth(safely(getStreamHealth, null)),
       runtime: {
         chromium: versions.chrome || 'unknown',
         electron: versions.electron || 'unknown',
@@ -183,5 +242,6 @@ module.exports = {
   formatDiagnosticsText,
   resolvePackageType,
   sanitizeContextId,
+  sanitizeStreamHealth,
   summarizeGpuStatus
 };

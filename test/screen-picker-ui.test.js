@@ -128,8 +128,10 @@ function makeModeButton(id, selected) {
   return button;
 }
 
-function createPickerHarness() {
+function createPickerHarness({ appAudioSupported = true, sources } = {}) {
   const elements = {
+    screenAppAudioRow: makeElement('screenAppAudioRow', 'label'),
+    screenAppAudioToggle: makeElement('screenAppAudioToggle', 'input'),
     screenAudioToggle: makeElement('screenAudioToggle', 'input'),
     screenSourceClose: makeElement('screenSourceClose', 'button'),
     screenSettingsGear: makeElement('screenSettingsGear', 'button'),
@@ -146,6 +148,8 @@ function createPickerHarness() {
     screenSourceWindowsTab: makeElement('screenSourceWindowsTab', 'button')
   };
   elements.screenAudioToggle.checked = true;
+  elements.screenAppAudioToggle.checked = true;
+  elements.screenAppAudioRow.hidden = true;
   elements.screenSettingsPopover.hidden = true;
 
   const sdButton = makeElement('', 'button');
@@ -173,10 +177,11 @@ function createPickerHarness() {
     getComputedStyle: () => ({ gridTemplateColumns: '1fr 1fr 1fr' }),
     voiceRoomScreenPicker: {
       getState: async () => ({
+        appAudioSupported,
         defaultFpsId: '30',
         defaultQualityId: 'balanced',
         defaultStreamAudioEnabled: true,
-        sources: [{ id: 'screen:1:0', name: 'Display 1', thumbnail: '', type: 'screen' }]
+        sources: sources || [{ id: 'screen:1:0', name: 'Display 1', thumbnail: '', type: 'screen' }]
       }),
       select: async (selection) => { selected.push(selection); }
     }
@@ -208,6 +213,7 @@ describe('screen picker stream profile UI', () => {
     assert.equal(elements.screenResToggle.getAttribute('aria-hidden'), 'true');
     assert.equal(elements.screenSummaryDetail.textContent, 'Источник · 5 к/с · звук');
     assert.deepEqual(JSON.parse(JSON.stringify(selected.at(-1))), {
+      appAudioOnly: false,
       fpsId: '5',
       qualityId: 'source',
       sourceId: 'screen:1:0',
@@ -225,10 +231,56 @@ describe('screen picker stream profile UI', () => {
     assert.equal(elements.screenResToggle.hidden, false);
     assert.equal(elements.screenSummaryDetail.textContent, 'HD · 1080p · 30 к/с · звук');
     assert.deepEqual(JSON.parse(JSON.stringify(selected.at(-1))), {
+      appAudioOnly: false,
       fpsId: '30',
       qualityId: 'high',
       sourceId: 'screen:1:0',
       streamAudioEnabled: true
     });
+  });
+});
+
+describe('screen picker app audio', () => {
+  const GAME_WINDOW = [{ id: 'window:4242:0', name: 'Dota 2', thumbnail: '', type: 'window' }];
+
+  it('offers app-only sound for a window and submits it', async () => {
+    const { elements, selected } = createPickerHarness({ sources: GAME_WINDOW });
+    await flushInit();
+
+    assert.equal(elements.screenAppAudioRow.hidden, false);
+    assert.equal(elements.screenSummaryDetail.textContent, 'SD · 720p · 30 к/с · звук окна');
+    elements.screenSourceStart.click();
+    assert.equal(selected.at(-1).appAudioOnly, true);
+    assert.equal(selected.at(-1).sourceId, 'window:4242:0');
+
+    elements.screenAppAudioToggle.checked = false;
+    elements.screenAppAudioToggle.dispatch('change');
+    assert.equal(elements.screenSummaryDetail.textContent, 'SD · 720p · 30 к/с · звук');
+    elements.screenSourceStart.click();
+    assert.equal(selected.at(-1).appAudioOnly, false);
+  });
+
+  it('hides the choice when stream sound is off or the platform cannot do it', async () => {
+    const muted = createPickerHarness({ sources: GAME_WINDOW });
+    await flushInit();
+    muted.elements.screenAudioToggle.checked = false;
+    muted.elements.screenAudioToggle.dispatch('change');
+    assert.equal(muted.elements.screenAppAudioRow.hidden, true);
+    muted.elements.screenSourceStart.click();
+    assert.equal(muted.selected.at(-1).appAudioOnly, false);
+
+    const mac = createPickerHarness({ appAudioSupported: false, sources: GAME_WINDOW });
+    await flushInit();
+    assert.equal(mac.elements.screenAppAudioRow.hidden, true);
+    mac.elements.screenSourceStart.click();
+    assert.equal(mac.selected.at(-1).appAudioOnly, false);
+  });
+
+  it('keeps screen shares on system sound', async () => {
+    const { elements, selected } = createPickerHarness();
+    await flushInit();
+    assert.equal(elements.screenAppAudioRow.hidden, true);
+    elements.screenSourceStart.click();
+    assert.equal(selected.at(-1).appAudioOnly, false);
   });
 });

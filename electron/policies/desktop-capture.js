@@ -112,12 +112,22 @@ function normalizeScreenFpsId(fpsId) {
 }
 
 function normalizeDesktopCapturePickerSelection(selection) {
+  const sourceId = String(selection.sourceId || '');
+  const streamAudioEnabled = selection.streamAudioEnabled !== false;
   return {
+    appAudioOnly: selection.appAudioOnly === true && streamAudioEnabled && getSourceType(sourceId) === 'window',
     fpsId: normalizeScreenFpsId(selection.fpsId),
     qualityId: normalizeScreenQualityId(selection.qualityId),
-    sourceId: String(selection.sourceId || ''),
-    streamAudioEnabled: selection.streamAudioEnabled !== false
+    sourceId,
+    streamAudioEnabled
   };
+}
+
+// Electron window sources are "window:<HWND>:<n>" on Windows.
+function getWindowSourceHandle(sourceId) {
+  const match = /^window:(\d+):/.exec(String(sourceId || ''));
+  const handle = match ? Number(match[1]) : 0;
+  return Number.isSafeInteger(handle) && handle > 0 ? handle : 0;
 }
 
 // Resolves a live-reconfigure request (quality/FPS) into the concrete capture
@@ -139,6 +149,7 @@ module.exports = {
   createScreenProfileId,
   getScreenQualityMaxHeight,
   getScreenQualityMaxWidth,
+  getWindowSourceHandle,
   normalizeApplyProfileRequest,
   normalizeDesktopAudioCapture,
   normalizeDesktopCapturePickerSelection,

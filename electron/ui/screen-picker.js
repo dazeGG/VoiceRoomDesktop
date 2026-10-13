@@ -107,6 +107,10 @@ async function init() {
   });
 
   document.addEventListener('pointerdown', (event) => {
+    if (event.target?.classList?.contains('screen-picker-shell')) {
+      cancelPicker();
+      return;
+    }
     if (elements.settingsPopover.hidden) return;
     const wrap = elements.settingsPopover.closest('.screen-source-gear-wrap');
     if (!wrap?.contains(event.target)) closePopover();

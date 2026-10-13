@@ -212,7 +212,7 @@ await window.voiceRoomDesktopOverlay.setSnapshot({
 });
 ```
 
-The HUD never takes input: every click goes to the game, and there is no overlay hotkey. Game detection polls the foreground window through PowerShell only during a call or while the settings screen asks for it. Overlay preferences live in `desktop-settings.json` next to autostart.
+The HUD never takes input: every click goes to the game, and there is no overlay hotkey. Game detection runs only during a call or while the settings screen asks for it. It uses the native `VoiceRoomForeground.exe` helper, which reacts to window events (focus, move, resize, minimize) instead of polling and reports per-monitor DPI-aware bounds, so the HUD lands on the game on scaled monitors too. When the helper is missing or keeps dying before its first report, the shell falls back to the older PowerShell poller (`native/overlay/windows/foreground.ps1`); `VOICE_ROOM_NATIVE_FOREGROUND=0` forces that fallback. The HUD raises itself again on every report and after a GPU process restart, so a game that makes its own window topmost does not bury it. Overlay preferences live in `desktop-settings.json` next to autostart.
 
 ## Window size and position
 
@@ -229,7 +229,7 @@ await window.voiceRoomDesktopDiagnostics.openLogsFolder();  // { ok: true } | { 
 const info = await window.voiceRoomDesktopDiagnostics.getInfo(); // structured data plus `text`
 ```
 
-The summary lists the app version, channel and package type, Electron/Chromium/Node versions, OS, locale, GPU feature status, native helper availability, update and autostart state, whether voice is active, and the user and room ids from `setContext`. It never includes file paths or the OS user name.
+The summary lists the app version, channel and package type, Electron/Chromium/Node versions, OS, locale, GPU feature status, native helper availability, stream health (native capture and stream audio state, helper restarts, how the last capture ended), overlay state (watcher backend, visibility, detected game's file name), GPU process crashes since launch, update and autostart state, whether voice is active, and the user and room ids from `setContext`. It never includes file paths or the OS user name.
 
 ## Supported platforms
 
@@ -299,7 +299,9 @@ const selection = await window.voiceRoomDesktopCapture.openPicker({
 
 // selection.profileId contains the chosen quality/FPS profile.
 // selection.maxHeight contains the native Windows capture height cap:
-// low = 540 (legacy), balanced = 720, high = 1080, source = no shell downscale.
+// low = 540 (legacy), balanced = 720, high = 1080,
+// source = up to 3840x2160 (2560x1440 above 30 fps): raw frames are copied
+// between processes, so even "source" keeps a ceiling.
 // The selected source is already staged for the next getDisplayMedia call.
 // openPicker always uses safe-system audio with allowEchoFallback: false.
 // Use selectSource directly when you need Chromium loopback fallback.
@@ -343,6 +345,10 @@ const removeDataListener = window.voiceRoomDesktopAudio.onData(({ sessionId, chu
 ```
 
 The web app is still responsible for converting these PCM chunks into a `MediaStreamTrack` (for example via `AudioWorklet` + `MediaStreamAudioDestinationNode`) and publishing that track as LiveKit screen audio. If the helper is unavailable, the shell can fall back to Chromium loopback when `allowEchoFallback` is enabled.
+
+On Windows, a window share picked with «Только звук этого окна» in the stream picker captures only the app behind that window (its process tree; Store apps resolve through their frame host). The page needs no changes: `startSafeSystem` picks the window up from the last picker selection, and the helper falls back to all system sound minus Voice Room if the window is already gone.
+
+A helper that dies mid-stream is restarted under the same `sessionId` with the same format, so the page keeps its audio track and hears only a short gap. The page receives `{ event: 'restarting', attempt, delayMs }` for each restart and `{ event: 'exit' }` only once the shell gives up (after roughly a minute of failures). The video capture helper follows the same budget: three immediate restarts, then growing pauses while the stream holds its last frame, so a GPU driver reset no longer ends the share.
 
 ## Screen share limits
 
@@ -426,7 +432,7 @@ Release and dev builds from CI point at `https://voiceroom.ru`.
 
 ### Windows native helpers
 
-`npm run electron` and every Windows build compile the native helpers (screen capture, system audio, global hotkeys) with MSVC. Install Visual Studio 2022 Build Tools with MSVC x64 and a Windows 11 SDK once:
+`npm run electron` and every Windows build compile the native helpers (screen capture, system audio, global hotkeys, overlay foreground watcher) with MSVC. Install Visual Studio 2022 Build Tools with MSVC x64 and a Windows 11 SDK once:
 
 ```powershell
 winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"

@@ -25,7 +25,7 @@ function run(command, commandArgs, options = {}) {
   }
 }
 
-// Load MSVC once for the three native helper builds instead of once per script.
+// Load MSVC once for the native helper builds instead of once per script.
 function nativeBuildEnv() {
   const buildsWindows = targets.length === 0
     ? process.platform === 'win32'
@@ -76,6 +76,7 @@ if (
   && (targets.length === 0 || targets.includes('--mac') || targets.includes('mac'))
 ) hotkeyTargets.push('--require-universal');
 run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-hotkeys.js'), ...hotkeyTargets], { env: nativeEnv });
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-overlay.js'), ...targets], { env: nativeEnv });
 
 const env = {
   ...process.env,

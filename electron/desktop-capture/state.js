@@ -27,6 +27,9 @@ const pendingDesktopCaptureSources = new Map();
 const desktopCaptureSourceSnapshots = new Map();
 const desktopCapturePickerSessions = new Map();
 const grantedDesktopCaptureByFrame = new Map();
+// The window whose app alone feeds the stream sound, per page frame. Kept until
+// the next source pick so the page may restart stream audio mid-share.
+const streamAudioWindowByFrame = new Map();
 let latestPendingDesktopCaptureSource = null;
 let nextDesktopCapturePickerSessionId = 1;
 
@@ -69,10 +72,11 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
   timer.unref?.();
 
   const audioCapture = normalizeDesktopAudioCapture(source, audioOptions, getNativeAudioCapabilities());
-  const fps = Number(normalizeScreenFpsId(normalizedCaptureOptions.fpsId));
+  const fpsId = normalizeScreenFpsId(normalizedCaptureOptions.fpsId);
+  const fps = Number(fpsId);
   const qualityId = normalizeScreenQualityId(normalizedCaptureOptions.qualityId);
-  const maxHeight = getScreenQualityMaxHeight(qualityId);
-  const maxWidth = getScreenQualityMaxWidth(qualityId);
+  const maxHeight = getScreenQualityMaxHeight(qualityId, fpsId);
+  const maxWidth = getScreenQualityMaxWidth(qualityId, fpsId);
   const pendingSource = {
     audioCapture,
     fps,
@@ -104,8 +108,8 @@ function recordGrantedDesktopCapture(frame, pending) {
   grantedDesktopCaptureByFrame.set(frameKey, {
     fps: pending.fps || 30,
     grantedAt: Date.now(),
-    maxHeight: pending.maxHeight || getScreenQualityMaxHeight(pending.qualityId),
-    maxWidth: pending.maxWidth || getScreenQualityMaxWidth(pending.qualityId),
+    maxHeight: pending.maxHeight || getScreenQualityMaxHeight(pending.qualityId, pending.fps),
+    maxWidth: pending.maxWidth || getScreenQualityMaxWidth(pending.qualityId, pending.fps),
     qualityId: normalizeScreenQualityId(pending.qualityId),
     sourceId: pending.source.id
   });
@@ -245,6 +249,19 @@ function peekPendingDesktopCaptureSource(frame, securityOrigin = '') {
     return null;
   }
   return latestPendingDesktopCaptureSource;
+}
+
+function setStreamAudioWindow(frameKey, windowHandle) {
+  if (!frameKey) return;
+  if (process.platform === 'win32' && Number.isSafeInteger(windowHandle) && windowHandle > 0) {
+    streamAudioWindowByFrame.set(frameKey, windowHandle);
+  } else {
+    streamAudioWindowByFrame.delete(frameKey);
+  }
+}
+
+function getStreamAudioWindow(frameKey) {
+  return (frameKey && streamAudioWindowByFrame.get(frameKey)) || 0;
 }
 
 function isNativeOnlyScreenCaptureEligible(pending) {
@@ -389,6 +406,7 @@ module.exports = {
   getDesktopCapturePickerSessionForEvent,
   getDesktopCaptureSourceForSelection,
   getDesktopCaptureSources,
+  getStreamAudioWindow,
   isNativeOnlyScreenCaptureEligible,
   openDesktopCapturePickerWindow,
   peekPendingDesktopCaptureSource,
@@ -397,6 +415,7 @@ module.exports = {
   resolveDesktopCapturePickerSession,
   serializeDesktopSource,
   setPendingDesktopCaptureSource,
+  setStreamAudioWindow,
   storeDesktopCaptureSourceSnapshot,
   takeGrantedDesktopCapture,
   takePendingDesktopCaptureSource

@@ -7,7 +7,11 @@ const path = require('node:path');
 const { parseForegroundPayload } = require('./policies/overlay-games');
 
 const SCRIPT_RELATIVE = path.join('native', 'overlay', 'windows', 'foreground.ps1');
+const NATIVE_HELPER_RELATIVE = path.join('native', 'bin', 'windows', 'VoiceRoomForeground.exe');
 const RESTART_DELAYS_MS = Object.freeze([2_000, 5_000, 15_000, 60_000]);
+// A native helper that dies this many times before its first report is treated
+// as blocked (antivirus, missing runtime) and the PowerShell script takes over.
+const NATIVE_FAILURES_BEFORE_FALLBACK = 2;
 
 function isInsideAsar(filePath, pathModule = path) {
   const needle = `${pathModule.sep}app.asar${pathModule.sep}`;
@@ -51,14 +55,36 @@ function resolveRunnableForegroundScript({
   return dest;
 }
 
+// The event-driven helper is preferred: no PowerShell start-up cost, no Add-Type
+// (which AppLocker and Constrained Language Mode block) and per-monitor DPI aware
+// window bounds.
+function resolveNativeForegroundHelper({
+  appPath = '',
+  resourcesPath = '',
+  fs: fsModule = fs,
+  path: pathModule = path
+} = {}) {
+  const candidates = [
+    pathModule.join(resourcesPath, 'app.asar.unpacked', NATIVE_HELPER_RELATIVE),
+    pathModule.join(resourcesPath, NATIVE_HELPER_RELATIVE),
+    pathModule.join(appPath, NATIVE_HELPER_RELATIVE),
+    pathModule.join(__dirname, '..', NATIVE_HELPER_RELATIVE)
+  ];
+  return candidates.find((candidate) => (
+    !isInsideAsar(candidate, pathModule) && fsModule.existsSync(candidate)
+  )) || '';
+}
+
 function createForegroundWatcher({
   platform = process.platform,
   spawn = nodeSpawn,
   parentPid = process.pid,
   scriptPath,
+  nativeHelperPath,
   appPath = '',
   resourcesPath = '',
   tempPath = '',
+  env = process.env,
   fs: fsModule = fs,
   path: pathModule = path,
   onChange,
@@ -70,6 +96,9 @@ function createForegroundWatcher({
   let running = false;
   let failures = 0;
   let restartTimer = null;
+  let nativeFailures = 0;
+  let reported = false;
+  let backend = 'none';
 
   function emit(payload) {
     if (typeof onChange !== 'function') return;
@@ -89,6 +118,7 @@ function createForegroundWatcher({
       const payload = parseForegroundPayload(line);
       if (!payload) continue;
       failures = 0;
+      reported = true;
       emit(payload);
     }
   }
@@ -121,44 +151,76 @@ function createForegroundWatcher({
     restartTimer.unref?.();
   }
 
-  function spawnWatcher() {
+  function resolveNativeHelper() {
+    if (env.VOICE_ROOM_NATIVE_FOREGROUND === '0') return '';
+    if (nativeFailures >= NATIVE_FAILURES_BEFORE_FALLBACK) return '';
+    if (nativeHelperPath !== undefined) return nativeHelperPath || '';
+    try {
+      return resolveNativeForegroundHelper({ appPath, fs: fsModule, path: pathModule, resourcesPath });
+    } catch {
+      return '';
+    }
+  }
+
+  function resolveCommand() {
+    const helper = resolveNativeHelper();
+    if (helper) {
+      return { args: ['--parent-pid', String(parentPid)], backend: 'native', command: helper };
+    }
+
     const file = resolveScript();
     if (!file) {
       log.warn?.('Foreground watcher script is missing; overlay will not detect games.');
-      running = false;
-      return;
+      return null;
     }
     if (isInsideAsar(file, pathModule)) {
       log.warn?.('Foreground watcher script is inside asar and cannot be executed:', file);
-      running = false;
-      return;
+      return null;
     }
-
-    let proc;
-    try {
-      proc = spawn(powershellExecutable(), [
+    return {
+      args: [
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy', 'Bypass',
         '-File', file,
         '-ParentPid', String(parentPid),
         '-IntervalMs', String(intervalMs)
-      ], {
+      ],
+      backend: 'powershell',
+      command: powershellExecutable()
+    };
+  }
+
+  function spawnWatcher() {
+    const resolved = resolveCommand();
+    if (!resolved) {
+      backend = 'none';
+      running = false;
+      return;
+    }
+
+    let proc;
+    try {
+      proc = spawn(resolved.command, resolved.args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true
       });
     } catch (error) {
       log.warn?.('Foreground watcher failed to start:', error);
+      noteNativeFailure(resolved.backend);
       scheduleRestart('spawn failed');
       return;
     }
 
     child = proc;
     buffer = '';
+    reported = false;
+    backend = resolved.backend;
     // A late event from a replaced helper must not clear the current one.
     const finish = (reason) => {
       if (child !== proc) return;
       child = null;
+      if (!reported) noteNativeFailure(resolved.backend);
       scheduleRestart(reason);
     };
     proc.stdout?.on?.('data', (chunk) => {
@@ -173,6 +235,14 @@ function createForegroundWatcher({
       finish('error');
     });
     proc.on?.('exit', (code, signal) => finish(`exit ${code ?? signal ?? 'unknown'}`));
+  }
+
+  function noteNativeFailure(failedBackend) {
+    if (failedBackend !== 'native') return;
+    nativeFailures += 1;
+    if (nativeFailures === NATIVE_FAILURES_BEFORE_FALLBACK) {
+      log.warn?.('Native foreground helper keeps failing; switching to the PowerShell watcher.');
+    }
   }
 
   function start() {
@@ -199,13 +269,19 @@ function createForegroundWatcher({
     }
   }
 
-  return { start, stop };
+  return {
+    getStatus: () => ({ backend, failures, running }),
+    start,
+    stop
+  };
 }
 
 module.exports = {
+  NATIVE_FAILURES_BEFORE_FALLBACK,
   RESTART_DELAYS_MS,
   createForegroundWatcher,
   isInsideAsar,
   resolveForegroundScript,
+  resolveNativeForegroundHelper,
   resolveRunnableForegroundScript
 };

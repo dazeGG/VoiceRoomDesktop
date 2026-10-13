@@ -5,6 +5,7 @@ const {
   createScreenProfileId,
   getScreenQualityMaxHeight,
   getScreenQualityMaxWidth,
+  getWindowSourceHandle,
   normalizeApplyProfileRequest,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,
@@ -18,12 +19,14 @@ const {
   getDesktopCapturePickerSessionForEvent,
   getDesktopCaptureSourceForSelection,
   getDesktopCaptureSources,
+  getStreamAudioWindow,
   isNativeOnlyScreenCaptureEligible,
   openDesktopCapturePickerWindow,
   peekPendingDesktopCaptureSource,
   resolveDesktopCapturePickerSession,
   serializeDesktopSource,
   setPendingDesktopCaptureSource,
+  setStreamAudioWindow,
   storeDesktopCaptureSourceSnapshot,
   takeGrantedDesktopCapture
 } = desktopCaptureState;
@@ -90,12 +93,13 @@ function configureDesktopCaptureIpc() {
       fpsId: selection.fpsId,
       qualityId: selection.qualityId
     });
+    setStreamAudioWindow(frameKey, selection.appAudioOnly ? getWindowSourceHandle(source.id) : 0);
 
     return {
       audioCapture,
       fpsId: selection.fpsId,
-      maxHeight: getScreenQualityMaxHeight(selection.qualityId),
-      maxWidth: getScreenQualityMaxWidth(selection.qualityId),
+      maxHeight: getScreenQualityMaxHeight(selection.qualityId, selection.fpsId),
+      maxWidth: getScreenQualityMaxWidth(selection.qualityId, selection.fpsId),
       ok: true,
       profileId: createScreenProfileId(selection.qualityId, selection.fpsId),
       qualityId: selection.qualityId,
@@ -117,12 +121,14 @@ function configureDesktopCaptureIpc() {
     }
 
     const qualityId = normalizeScreenQualityId(normalizedCaptureOptions.qualityId);
+    const fpsId = normalizeScreenFpsId(normalizedCaptureOptions.fpsId);
     const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions, normalizedCaptureOptions);
+    setStreamAudioWindow(frameKey, 0);
     return {
       audioCapture,
-      fpsId: normalizeScreenFpsId(normalizedCaptureOptions.fpsId),
-      maxHeight: getScreenQualityMaxHeight(qualityId),
-      maxWidth: getScreenQualityMaxWidth(qualityId),
+      fpsId,
+      maxHeight: getScreenQualityMaxHeight(qualityId, fpsId),
+      maxWidth: getScreenQualityMaxWidth(qualityId, fpsId),
       ok: true,
       qualityId
     };
@@ -236,7 +242,12 @@ function configureDesktopCaptureIpc() {
       throw new Error('Desktop audio is only available for the configured Voice Room URL.');
     }
 
-    const session = startSafeSystemAudioCapture(event.sender, options);
+    // The page never chooses the app window itself: only the shell's picker does.
+    const source = options && typeof options === 'object' ? options : {};
+    const session = startSafeSystemAudioCapture(event.sender, {
+      ...source,
+      targetWindow: getStreamAudioWindow(getFrameScopeKey(event.senderFrame))
+    });
     return { sessionId: session.sessionId };
   });
 
@@ -279,6 +290,8 @@ function configureScreenPickerIpc() {
   ipcMain.handle('screen-picker:get-state', (event) => {
     const session = getDesktopCapturePickerSessionForEvent(event);
     return {
+      // Only the Windows audio helper can capture a single app.
+      appAudioSupported: process.platform === 'win32',
       defaultFpsId: session.defaultFpsId,
       defaultQualityId: session.defaultQualityId,
       defaultStreamAudioEnabled: session.defaultStreamAudioEnabled,

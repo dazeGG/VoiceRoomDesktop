@@ -411,7 +411,7 @@ describe('native capture relay child lifecycle', { concurrency: false }, () => {
     }
   });
 
-  it('stops restarting after the bounded crash budget is exhausted', () => {
+  it('retries after a pause once the immediate restarts are spent, keeping the stream open', () => {
     const harness = loadRelayHarness();
     try {
       const port = harness.start();
@@ -419,7 +419,60 @@ describe('native capture relay child lifecycle', { concurrency: false }, () => {
         harness.exitChild(index, 1);
       }
 
-      assert.equal(harness.children.length, 4, 'initial helper plus three bounded restarts');
+      assert.equal(harness.children.length, 4, 'initial helper plus three immediate restarts');
+      assert.equal(port.messages.some((message) => message.type === 'end'), false);
+
+      harness.send({ fps: 15, requestId: 61, type: 'reconfigure' });
+      assert.deepEqual(
+        harness.parentMessages.filter((message) => message.requestId === 61).at(-1),
+        { ok: false, reason: 'helper-unavailable', requestId: 61, type: 'reconfigured' },
+        'a reconfigure during the pause is refused at once instead of timing out'
+      );
+
+      assert.equal(harness.runTimeouts(1000), 1);
+      assert.equal(harness.children.length, 5);
+      assert.deepEqual(harness.spawnCalls[4], harness.spawnCalls[0]);
+
+      harness.children[4].stdout.emit('data', makeBgrxFrame({ timestampMs: 9n }));
+      assert.equal(port.messages.filter((message) => message.type === 'frame').at(-1).timestampMs, 9);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('cancels a pending restart when the stream is stopped', () => {
+    const harness = loadRelayHarness();
+    try {
+      harness.start();
+      for (let index = 0; index < 4; ++index) {
+        harness.exitChild(index, 1);
+      }
+      harness.send({ type: 'stop' });
+
+      assert.equal(harness.runTimeouts(1000), 0);
+      assert.equal(harness.children.length, 4);
+      assert.deepEqual(
+        harness.parentMessages.filter((message) => message.type === 'exited').at(-1),
+        { code: 0, reason: 'stopped', signal: null, type: 'exited' }
+      );
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('stops restarting after the crash budget is exhausted', () => {
+    const harness = loadRelayHarness();
+    try {
+      const port = harness.start();
+      const pauses = [1000, 2000, 5000, 10000, 15000, 30000];
+      for (let index = 0; index < 3; ++index) harness.exitChild(index, 1);
+      for (const pause of pauses) {
+        harness.exitChild(harness.children.length - 1, 1);
+        assert.equal(harness.runTimeouts(pause), 1, `restart after ${pause} ms`);
+      }
+      harness.exitChild(harness.children.length - 1, 1);
+
+      assert.equal(harness.children.length, 10, 'initial helper plus three immediate and six delayed restarts');
       assert.deepEqual(port.messages.at(-1), { reason: 'exited', type: 'end' });
       assert.deepEqual(
         harness.parentMessages.filter((message) => message.type === 'exited').at(-1),

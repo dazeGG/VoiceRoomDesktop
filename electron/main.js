@@ -12,12 +12,12 @@ const { createCallControlsController } = require('./call-controls');
 const { createOverlayController } = require('./overlay');
 const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
 const { createDiagnosticsController } = require('./diagnostics');
-const { getNativeAudioCapabilities } = require('./native/audio');
+const { getNativeAudioCapabilities, getNativeAudioState } = require('./native/audio');
 const { findNativeHotkeyHelper } = require('./native/hotkeys');
 const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
 const { consumeRelaunchIntent, resolveStartHidden, writeRelaunchIntent } = require('./app/launch-mode');
 const { createKeepAwakeController } = require('./keep-awake');
-const { getNativeCaptureCapabilities } = require('./native/capture');
+const { getNativeCaptureCapabilities, getNativeCaptureState } = require('./native/capture');
 const { createBackgroundUpdateController } = require('./policies/update-background');
 const { runUpdateGate } = require('./policies/update-gate');
 const { readBuildProfile, shouldRunUpdateGateState } = require('./policies/update-gate-policy');
@@ -228,9 +228,14 @@ const overlay = createOverlayController({
   screen: {
     getCursorScreenPoint: () => require('electron').screen.getCursorScreenPoint(),
     getDisplayNearestPoint: (point) => require('electron').screen.getDisplayNearestPoint(point),
-    getPrimaryDisplay: () => require('electron').screen.getPrimaryDisplay()
+    getPrimaryDisplay: () => require('electron').screen.getPrimaryDisplay(),
+    // Windows only: converts the native helper's physical pixels per monitor.
+    ...(process.platform === 'win32'
+      ? { screenToDipRect: (window, rect) => require('electron').screen.screenToDipRect(window, rect) }
+      : {})
   }
 });
+let gpuProcessCrashes = 0;
 const callSurfaces = createCallSurfaces({
   app,
   Menu,
@@ -251,6 +256,12 @@ const diagnostics = createDiagnosticsController({
   clipboard,
   getAutostartSettings: () => autostart.getSettings(),
   getHotkeysBackend: () => desktopHotkeys.getBackend(),
+  getStreamHealth: () => ({
+    audio: getNativeAudioState(),
+    capture: getNativeCaptureState(),
+    gpuCrashes: gpuProcessCrashes,
+    overlay: overlay.getStatus()
+  }),
   getNativeHelpers: () => ({
     audio: getNativeAudioCapabilities().nativeSafeLoopback,
     capture: getNativeCaptureCapabilities().available,
@@ -378,6 +389,22 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     windowLifecycle.requestQuit();
+  });
+
+  // A GPU process crash (often a driver reset mid-game) freezes streams and can
+  // drop the overlay's z-order. Chromium restarts the process; log it and put the
+  // overlay back on top.
+  app.on('child-process-gone', (_event, details) => {
+    if (details?.reason === 'clean-exit') return;
+    log.warn('Child process gone:', {
+      exitCode: details?.exitCode,
+      name: details?.name || details?.serviceName || '',
+      reason: details?.reason,
+      type: details?.type
+    });
+    if (details?.type !== 'GPU') return;
+    gpuProcessCrashes += 1;
+    setTimeout(() => overlay.recoverFromGpuCrash(), 1000).unref?.();
   });
 
   app.on('will-quit', () => {

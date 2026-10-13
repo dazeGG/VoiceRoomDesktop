@@ -117,6 +117,7 @@ describe('overlay foreground watcher', () => {
     const children = [];
     const watcher = createForegroundWatcher({
       log: { warn() {} },
+      nativeHelperPath: '',
       onChange() {},
       platform: 'win32',
       scriptPath: 'C:\\watcher\\foreground.ps1',
@@ -150,5 +151,130 @@ describe('overlay foreground watcher', () => {
     children[1].emit('exit', null, 'SIGTERM');
     t.mock.timers.tick(60_000);
     assert.equal(children.length, 2);
+  });
+
+  function createSpawnRecorder() {
+    const calls = [];
+    const spawn = (command, args) => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => { child.killed = true; };
+      calls.push({ args, child, command });
+      return child;
+    };
+    return { calls, spawn };
+  }
+
+  it('prefers the native helper and reports which backend runs', () => {
+    const { createForegroundWatcher } = require('../electron/overlay-foreground');
+    const { calls, spawn } = createSpawnRecorder();
+    const payloads = [];
+    const watcher = createForegroundWatcher({
+      log: { warn() {} },
+      nativeHelperPath: 'C:\\app\\VoiceRoomForeground.exe',
+      onChange: (payload) => payloads.push(payload),
+      parentPid: 77,
+      platform: 'win32',
+      scriptPath: 'C:\\watcher\\foreground.ps1',
+      spawn
+    });
+
+    watcher.start();
+    assert.equal(calls[0].command, 'C:\\app\\VoiceRoomForeground.exe');
+    assert.deepEqual(calls[0].args, ['--parent-pid', '77']);
+    assert.equal(watcher.getStatus().backend, 'native');
+
+    calls[0].child.stdout.emit('data', '{"event":"ready"}\n{"pid":5,"hwnd":9,"exe":"C:\\\\g\\\\game.exe"}\n');
+    assert.equal(payloads.length, 1, 'the ready line is not a payload');
+    assert.equal(payloads[0].exe, 'C:\\g\\game.exe');
+    watcher.stop();
+  });
+
+  it('falls back to PowerShell when the native helper dies before reporting', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { NATIVE_FAILURES_BEFORE_FALLBACK, createForegroundWatcher } = require('../electron/overlay-foreground');
+    const { calls, spawn } = createSpawnRecorder();
+    const watcher = createForegroundWatcher({
+      log: { warn() {} },
+      nativeHelperPath: 'C:\\app\\VoiceRoomForeground.exe',
+      onChange() {},
+      platform: 'win32',
+      scriptPath: 'C:\\watcher\\foreground.ps1',
+      spawn
+    });
+
+    watcher.start();
+    for (let index = 0; index < NATIVE_FAILURES_BEFORE_FALLBACK; ++index) {
+      calls.at(-1).child.emit('exit', 1, null);
+      t.mock.timers.tick(60_000);
+    }
+    assert.equal(calls.length, NATIVE_FAILURES_BEFORE_FALLBACK + 1);
+    assert.match(calls.at(-1).command, /powershell\.exe$/i);
+    assert.ok(calls.at(-1).args.includes('C:\\watcher\\foreground.ps1'));
+    assert.equal(watcher.getStatus().backend, 'powershell');
+    watcher.stop();
+  });
+
+  it('keeps the native helper after it has reported once', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { createForegroundWatcher } = require('../electron/overlay-foreground');
+    const { calls, spawn } = createSpawnRecorder();
+    const watcher = createForegroundWatcher({
+      log: { warn() {} },
+      nativeHelperPath: 'C:\\app\\VoiceRoomForeground.exe',
+      onChange() {},
+      platform: 'win32',
+      scriptPath: 'C:\\watcher\\foreground.ps1',
+      spawn
+    });
+
+    watcher.start();
+    for (let index = 0; index < 3; ++index) {
+      calls.at(-1).child.stdout.emit('data', '{"pid":5,"hwnd":9,"exe":"C:\\\\g.exe"}\n');
+      calls.at(-1).child.emit('exit', 1, null);
+      t.mock.timers.tick(60_000);
+    }
+    assert.ok(calls.every((call) => call.command === 'C:\\app\\VoiceRoomForeground.exe'));
+    watcher.stop();
+  });
+
+  it('can be forced back to PowerShell with VOICE_ROOM_NATIVE_FOREGROUND=0', () => {
+    const { createForegroundWatcher } = require('../electron/overlay-foreground');
+    const { calls, spawn } = createSpawnRecorder();
+    const watcher = createForegroundWatcher({
+      env: { VOICE_ROOM_NATIVE_FOREGROUND: '0' },
+      log: { warn() {} },
+      nativeHelperPath: 'C:\\app\\VoiceRoomForeground.exe',
+      onChange() {},
+      platform: 'win32',
+      scriptPath: 'C:\\watcher\\foreground.ps1',
+      spawn
+    });
+    watcher.start();
+    assert.match(calls[0].command, /powershell\.exe$/i);
+    watcher.stop();
+  });
+});
+
+describe('overlay native foreground helper path', () => {
+  it('uses only an unpacked helper next to the app', () => {
+    const path = require('node:path').win32;
+    const { resolveNativeForegroundHelper } = require('../electron/overlay-foreground');
+    const unpacked = 'C:\\app\\resources\\app.asar.unpacked\\native\\bin\\windows\\VoiceRoomForeground.exe';
+    const packed = 'C:\\app\\resources\\app.asar\\native\\bin\\windows\\VoiceRoomForeground.exe';
+
+    assert.equal(resolveNativeForegroundHelper({
+      appPath: 'C:\\app\\resources\\app.asar',
+      fs: { existsSync: (file) => file === unpacked || file === packed },
+      path,
+      resourcesPath: 'C:\\app\\resources'
+    }), unpacked);
+    assert.equal(resolveNativeForegroundHelper({
+      appPath: 'C:\\app\\resources\\app.asar',
+      fs: { existsSync: (file) => file === packed },
+      path,
+      resourcesPath: 'C:\\app\\resources'
+    }), '');
   });
 });

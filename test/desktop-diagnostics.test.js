@@ -34,6 +34,12 @@ function createHarness(overrides = {}) {
     getAutostartSettings: () => ({ openAtLogin: true, startMinimized: true, supported: true }),
     getHotkeysBackend: () => 'native',
     getNativeHelpers: () => ({ audio: true, capture: false, hotkeys: true }),
+    getStreamHealth: () => ({
+      audio: { active: true, restarts: 1, target: 'app' },
+      capture: { active: false, endReason: 'exited', restarts: 3, sourceType: 'screen' },
+      gpuCrashes: 1,
+      overlay: { enabled: true, game: 'cs2.exe', visible: true, watcher: 'native' }
+    }),
     getUpdateState: () => ({ phase: 'ready', version: '1.3.1' }),
     isVoiceActive: () => true,
     log: { transports: { file: { getFile: () => ({ path: LOG_FILE }) } }, warn() {} },
@@ -102,6 +108,10 @@ describe('desktop diagnostics controller', () => {
       'gpu: gpu_compositing=enabled, video_decode=enabled',
       'native helpers: audio=yes, capture=no, hotkeys=yes',
       'hotkeys backend: native',
+      'stream capture: idle, last=screen, end=exited, restarts=3',
+      'stream audio: active (app), restarts=1',
+      'overlay: on, watcher=native, visible=yes, game=cs2.exe',
+      'gpu process crashes: 1',
       'update: ready 1.3.1',
       'autostart: yes (minimized)',
       'voice active: yes',
@@ -120,9 +130,27 @@ describe('desktop diagnostics controller', () => {
     assert.match(text, /user: -\nroom: -$/);
   });
 
+  it('keeps only plain tokens in the stream health lines', () => {
+    const { controller } = createHarness({
+      getStreamHealth: () => ({
+        audio: { active: false, lastExitCode: 3, restarts: -1, target: 'C:\\Users\\secret-user' },
+        capture: { active: true, restarts: 'many', sourceType: 'window' },
+        overlay: { enabled: true, game: 'D:\\Games\\secret-user\\game.exe', visible: false, watcher: 'powershell' }
+      })
+    });
+    const { text } = controller.getInfo();
+
+    assert.doesNotMatch(text, /secret-user/);
+    assert.match(text, /stream capture: active \(window\), restarts=0/);
+    assert.match(text, /stream audio: idle, last=-, exit=3, restarts=0/);
+    assert.match(text, /overlay: on, watcher=powershell, visible=no, game=-/);
+    assert.match(text, /gpu process crashes: 0/);
+  });
+
   it('survives failing probes', () => {
     const { controller } = createHarness({
       getAutostartSettings: () => { throw new Error('boom'); },
+      getStreamHealth: () => { throw new Error('boom'); },
       getNativeHelpers: () => { throw new Error('boom'); },
       getUpdateState: () => null,
       readBuildProfile: () => { throw new Error('boom'); }

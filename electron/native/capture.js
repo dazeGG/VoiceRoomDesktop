@@ -17,6 +17,8 @@ const TREE_KILL_TIMEOUT_MS = 2000;
 
 let activeSession = null;
 let nextReconfigureRequestId = 1;
+// Last outcome, kept after the session ends for diagnostics.
+let lastSessionSummary = null;
 
 app.on('before-quit', () => {
   stopNativeCaptureSession();
@@ -105,9 +107,12 @@ function startNativeCaptureSession(webContents, options = {}) {
     id: sessionId,
     pendingReconfigures: new Map(),
     relay,
+    endReason: '',
     relayExited: false,
     relayExitTimer: null,
     relayKillStarted: false,
+    restarts: 0,
+    sourceType: sourceId.startsWith('screen:') ? 'screen' : 'window',
     stopped: false,
     treeKillStarted: false,
     webContents,
@@ -130,7 +135,10 @@ function startNativeCaptureSession(webContents, options = {}) {
       } else {
         log.info(message.message, detail || '');
       }
+    } else if (message?.type === 'restarted') {
+      session.restarts = Number(message.restarts) || session.restarts + 1;
     } else if (message?.type === 'exited') {
+      session.endReason = String(message.reason || '');
       if (message.reason !== 'stopped' && message.code !== 0 && message.code !== null) {
         log.warn('Native capture relay exited:', {
           code: message.code,
@@ -215,6 +223,7 @@ function stopNativeCaptureSession(sessionId = '') {
 
   activeSession = null;
   session.stopped = true;
+  summarizeSession(session);
   failReconfigureRequests(session, 'session-stopped');
 
   if (session.webContentsDestroyedListener && !session.webContents.isDestroyed()) {
@@ -320,8 +329,25 @@ function killRelay(session, relayPid, reason) {
   return killAccepted;
 }
 
+function summarizeSession(session) {
+  lastSessionSummary = {
+    endReason: session.endReason || (session.relayExited ? 'relay-exited' : 'stopped'),
+    restarts: session.restarts,
+    sourceType: session.sourceType
+  };
+}
+
+function getNativeCaptureState() {
+  const session = activeSession;
+  if (session && !session.stopped) {
+    return { active: true, restarts: session.restarts, sourceType: session.sourceType };
+  }
+  return { active: false, ...(lastSessionSummary || {}) };
+}
+
 function cleanupSession(session, { relayExited = false } = {}) {
   if (activeSession === session) activeSession = null;
+  summarizeSession(session);
   session.stopped = true;
   if (relayExited) session.relayExited = true;
   failReconfigureRequests(session, 'session-ended');
@@ -420,6 +446,7 @@ async function reconfigureNativeCaptureSession({ fps, maxHeight, maxWidth } = {}
 
 module.exports = {
   getNativeCaptureCapabilities,
+  getNativeCaptureState,
   reconfigureNativeCaptureSession,
   startNativeCaptureSession,
   stopNativeCaptureSession

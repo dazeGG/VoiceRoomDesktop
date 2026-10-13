@@ -639,6 +639,15 @@ h1 {
   background: var(--surface-hover);
 }
 
+.screen-audio-toggle[hidden] {
+  display: none;
+}
+
+.screen-audio-app-toggle .screen-audio-label {
+  font-weight: 600;
+  color: color-mix(in oklch, var(--ink), transparent 20%);
+}
+
 .screen-audio-toggle input {
   position: absolute;
   width: 1px;

@@ -55,7 +55,8 @@ function createOverlayController({
   platform = process.platform,
   processPid = process.pid,
   appUrl = '',
-  createForegroundWatcher: createWatcher = createForegroundWatcher
+  createForegroundWatcher: createWatcher = createForegroundWatcher,
+  onGameModeChange = () => {}
 }) {
   const settingsStore = createDesktopSettingsStore({ app, fs, log, path: pathModule });
   let overlayWindow = null;
@@ -72,6 +73,7 @@ function createOverlayController({
   let activeGame = null;
   let watcherRunning = false;
   let foregroundLease = null;
+  let gameMode = false;
   const watcher = createWatcher({
     appPath: typeof app.getAppPath === 'function' ? app.getAppPath() : '',
     fs,
@@ -317,6 +319,28 @@ function createOverlayController({
     syncWatcher();
     if (isVisibleNow()) showWindow();
     else hideWindow();
+    reportGameMode(isGameModeNow());
+  }
+
+  // Game mode for the web app, like Discord's: during a call a game is on screen
+  // and the app window is not the one in front, so nobody is looking at its
+  // animations. It comes from the same watcher as the HUD, so it needs the
+  // overlay switched on.
+  function isGameModeNow() {
+    if (disposing || previewing || !watcherRunning) return false;
+    if (callControls.getState().active !== true) return false;
+    if (mainWindow && !mainWindow.isDestroyed?.() && mainWindow.isFocused?.() === true) return false;
+    return gameOnScreen();
+  }
+
+  function reportGameMode(next) {
+    if (next === gameMode) return;
+    gameMode = next;
+    try {
+      onGameModeChange(gameMode);
+    } catch (error) {
+      log.warn?.('Game mode listener failed:', error);
+    }
   }
 
   function setContentSize(size) {
@@ -479,6 +503,7 @@ function createOverlayController({
     watcherRunning = false;
     detachMainWindow();
     disposeWindow();
+    reportGameMode(false);
   }
 
   function configureIpc({ ipcMain, isTrustedFrame }) {
@@ -562,6 +587,7 @@ function createOverlayController({
     getSettings,
     getStatus,
     handleForeground,
+    isGameMode: () => gameMode,
     recoverFromGpuCrash,
     removeAllowedGame,
     setSettings,

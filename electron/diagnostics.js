@@ -72,6 +72,54 @@ function sanitizeStreamHealth(health) {
   };
 }
 
+function roundTo(value, digits) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+// Chromium's own processes (main, renderers, GPU, utilities) from
+// app.getAppMetrics(): CPU is a percentage of one core since the previous
+// reading, memory the working set. The native helpers are separate executables
+// and not part of it.
+function summarizeAppMetrics(metrics) {
+  const list = Array.isArray(metrics) ? metrics : [];
+  const byType = {};
+  let cpuPercent = 0;
+  let memoryKb = 0;
+  for (const metric of list) {
+    const type = typeof metric?.type === 'string' && HEALTH_TOKEN_PATTERN.test(metric.type) ? metric.type : 'Unknown';
+    const entry = byType[type] || (byType[type] = { count: 0, cpuPercent: 0, memoryMb: 0 });
+    entry.count += 1;
+    const cpu = Number(metric?.cpu?.percentCPUUsage);
+    if (Number.isFinite(cpu) && cpu >= 0) {
+      entry.cpuPercent += cpu;
+      cpuPercent += cpu;
+    }
+    const memory = Number(metric?.memory?.workingSetSize);
+    if (Number.isFinite(memory) && memory >= 0) {
+      entry.memoryMb += memory / 1024;
+      memoryKb += memory;
+    }
+  }
+  for (const entry of Object.values(byType)) {
+    entry.cpuPercent = roundTo(entry.cpuPercent, 1);
+    entry.memoryMb = Math.round(entry.memoryMb);
+  }
+  return {
+    byType,
+    count: list.length,
+    cpuPercent: roundTo(cpuPercent, 1),
+    memoryMb: Math.round(memoryKb / 1024)
+  };
+}
+
+function formatProcessLine(processes) {
+  const parts = Object.entries(processes.byType)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([type, entry]) => `${type} ${entry.count}: ${entry.cpuPercent}% ${entry.memoryMb} MB`);
+  return `processes: ${processes.count}, cpu ${processes.cpuPercent}% of a core, memory ${processes.memoryMb} MB${parts.length ? ` (${parts.join('; ')})` : ''}`;
+}
+
 function formatStreamHealthLines(health) {
   const { audio, capture, gpuCrashes, overlay } = health;
   const captureState = capture.active
@@ -100,6 +148,7 @@ function formatDiagnosticsText(info) {
     `native helpers: audio=${yesNo(info.nativeHelpers.audio)}, capture=${yesNo(info.nativeHelpers.capture)}, hotkeys=${yesNo(info.nativeHelpers.hotkeys)}`,
     `hotkeys backend: ${info.hotkeysBackend}`,
     ...formatStreamHealthLines(info.streamHealth || sanitizeStreamHealth(null)),
+    formatProcessLine(info.processes || summarizeAppMetrics(null)),
     `update: ${info.update.phase}${info.update.version ? ` ${info.update.version}` : ''}`,
     `autostart: ${info.autostart.supported ? yesNo(info.autostart.openAtLogin) : 'unsupported'}${info.autostart.startMinimized ? ' (minimized)' : ''}`,
     `voice active: ${yesNo(info.voiceActive)}`,
@@ -170,6 +219,7 @@ function createDiagnosticsController({
         release: safely(() => (osRelease ? osRelease() : require('node:os').release()), 'unknown')
       },
       streamHealth: sanitizeStreamHealth(safely(getStreamHealth, null)),
+      processes: summarizeAppMetrics(safely(() => app.getAppMetrics?.(), null)),
       runtime: {
         chromium: versions.chrome || 'unknown',
         electron: versions.electron || 'unknown',
@@ -184,10 +234,16 @@ function createDiagnosticsController({
     return { ...info, text: formatDiagnosticsText(info) };
   }
 
-  function copyInfo() {
+  // Electron 44's clipboard is asynchronous; a failed write is reported, not thrown.
+  async function copyInfo() {
     const { text } = getInfo();
-    clipboard.writeText(text);
-    return { ok: true };
+    try {
+      await clipboard.writeText(text);
+      return { ok: true };
+    } catch (error) {
+      log?.warn?.('Failed to copy diagnostics:', error);
+      return { ok: false, reason: 'clipboard-failed' };
+    }
   }
 
   async function openLogsFolder() {
@@ -199,6 +255,17 @@ function createDiagnosticsController({
       return { ok: false, reason: 'open-failed' };
     }
     return { ok: true };
+  }
+
+  // VOICE_ROOM_PERF_LOG=1: one line of process CPU and memory every interval,
+  // so a before/after comparison of a call, the tray or a game is a log grep.
+  function startPerformanceLog({ intervalMs = 10_000, timers = { setInterval, clearInterval } } = {}) {
+    const timer = timers.setInterval(() => {
+      const processes = summarizeAppMetrics(safely(() => app.getAppMetrics?.(), null));
+      log?.info?.(`Performance: voice=${yesNo(safely(isVoiceActive, false) === true)}, ${formatProcessLine(processes)}`);
+    }, intervalMs);
+    timer?.unref?.();
+    return () => timers.clearInterval(timer);
   }
 
   function setContext(payload) {
@@ -229,7 +296,8 @@ function createDiagnosticsController({
     copyInfo,
     getInfo,
     openLogsFolder,
-    setContext
+    setContext,
+    startPerformanceLog
   };
 }
 
@@ -243,5 +311,6 @@ module.exports = {
   resolvePackageType,
   sanitizeContextId,
   sanitizeStreamHealth,
+  summarizeAppMetrics,
   summarizeGpuStatus
 };

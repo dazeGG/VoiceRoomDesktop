@@ -52,6 +52,8 @@ module.exports = {
     'assets/logo/themes/*.ico',
     'assets/logo/themes/*.png',
     'electron/call-controls.js',
+    'electron/system-events.js',
+    'electron/window/background-throttling.js',
     'electron/deep-links.js',
     'electron/diagnostics.js',
     'electron/window/call-surfaces.js',

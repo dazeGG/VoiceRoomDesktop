@@ -15,6 +15,8 @@ const { createDiagnosticsController } = require('./diagnostics');
 const { getNativeAudioCapabilities, getNativeAudioState } = require('./native/audio');
 const { findNativeHotkeyHelper } = require('./native/hotkeys');
 const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
+const { createBackgroundThrottlingController } = require('./window/background-throttling');
+const { createSystemEventsController } = require('./system-events');
 const { consumeRelaunchIntent, resolveStartHidden, writeRelaunchIntent } = require('./app/launch-mode');
 const { createKeepAwakeController } = require('./keep-awake');
 const { getNativeCaptureCapabilities, getNativeCaptureState } = require('./native/capture');
@@ -70,6 +72,12 @@ const WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES = [
   'WebRtcScreenshareSwEncoding'
 ];
 
+// Outside a call the hidden window is throttled like a background tab (see
+// window/background-throttling.js). Chromium's intensive wake-up throttling
+// would then cut it to one timer a minute after five minutes, which starves the
+// realtime heartbeat; with it off, hidden timers still run every second or two.
+const disabledChromiumFeatures = ['IntensiveWakeUpThrottling'];
+
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
 }
@@ -106,20 +114,20 @@ if (process.platform === 'win32') {
     release: windowsRelease
   });
   const enabledFeatures = [...captureFeaturePolicy.enabledFeatures];
-  const disabledFeatures = [...captureFeaturePolicy.disabledFeatures];
+  disabledChromiumFeatures.push(...captureFeaturePolicy.disabledFeatures);
 
   if (process.env.VOICE_ROOM_WEBRTC_HW_ENCODER !== '0') {
     enabledFeatures.push(...WINDOWS_HW_ENCODER_CHROMIUM_FEATURES);
-    disabledFeatures.push(...WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES);
+    disabledChromiumFeatures.push(...WINDOWS_HW_ENCODER_DISABLED_CHROMIUM_FEATURES);
   }
 
   if (enabledFeatures.length > 0) {
     app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','));
   }
-  if (disabledFeatures.length > 0) {
-    app.commandLine.appendSwitch('disable-features', disabledFeatures.join(','));
-  }
 }
+
+// One switch for every platform: a second `disable-features` would replace the first.
+app.commandLine.appendSwitch('disable-features', [...new Set(disabledChromiumFeatures)].join(','));
 
 // Rooms auto-join without a page gesture. Electron defaults to the permissive
 // autoplay policy, but pin it explicitly so a future Electron/Chromium default
@@ -216,6 +224,13 @@ let launchInProgress = null;
 let requestLaunch = () => Promise.resolve();
 
 const callControls = createCallControlsController({ log });
+const systemEvents = createSystemEventsController({ isTrustedUrl, log });
+const backgroundThrottling = createBackgroundThrottlingController({ log });
+const syncVoiceBackgroundThrottling = () => {
+  backgroundThrottling.setVoiceActive(desktopHotkeys.isVoiceActive() || callControls.getState().active);
+};
+desktopHotkeys.onVoiceActiveChange(syncVoiceBackgroundThrottling);
+callControls.onStateChange(syncVoiceBackgroundThrottling);
 const overlay = createOverlayController({
   BrowserWindow,
   app,
@@ -223,6 +238,7 @@ const overlay = createOverlayController({
   callControls,
   fs,
   log,
+  onGameModeChange: (active) => systemEvents.setGameMode(active),
   path,
   platform: process.platform,
   screen: {
@@ -273,6 +289,9 @@ const diagnostics = createDiagnosticsController({
   readBuildProfile,
   shell
 });
+// VOICE_ROOM_PERF_LOG=1 logs process CPU and memory every 10 s, for measuring a
+// change in a call, in the tray or next to a game.
+const stopPerformanceLog = process.env.VOICE_ROOM_PERF_LOG === '1' ? diagnostics.startPerformanceLog() : null;
 windowLifecycle.setDiagnosticsActions({
   copyInfo: () => diagnostics.copyInfo(),
   openLogsFolder: () => {
@@ -361,6 +380,8 @@ const appBootstrap = createAppBootstrap({
   previewEnabled: PICKER_PREVIEW_ENABLED,
   onMainWindowCreated: (window) => {
     appIcon.attachWindow(window);
+    backgroundThrottling.attachWindow(window);
+    systemEvents.attachWindow(window);
     deepLinks.attachWindow(window);
     callSurfaces.attachWindow(window);
     overlay.attachMainWindow(window);
@@ -411,6 +432,8 @@ if (!gotLock) {
     desktopHotkeys.dispose();
     keepAwake.dispose();
     overlay.dispose();
+    systemEvents.dispose();
+    stopPerformanceLog?.();
     backgroundUpdates?.dispose();
   });
 
@@ -514,6 +537,8 @@ if (!gotLock) {
       desktopHotkeys.install(ipcMain);
       desktopHotkeys.installPowerMonitor(powerMonitor);
       keepAwake.installPowerMonitor(powerMonitor);
+      systemEvents.installPowerMonitor(powerMonitor);
+      systemEvents.configureIpc({ ipcMain, isTrustedFrame });
       autostart.configureIpc({ ipcMain, isTrustedFrame });
       appIcon.configureIpc({ ipcMain, isTrustedFrame });
       callControls.configureIpc({ ipcMain, isTrustedFrame });

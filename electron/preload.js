@@ -122,6 +122,11 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopAutostart', {
   setSettings: (settings) => ipcRenderer.invoke('desktop-autostart:set-settings', settings)
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopAppIcon', {
+  getTheme: () => ipcRenderer.invoke('desktop-app-icon:get'),
+  setTheme: (theme) => ipcRenderer.invoke('desktop-app-icon:set-theme', theme)
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopAttention', {
   requestAttention: (options) => ipcRenderer.invoke('desktop-attention:request', options),
   setBadgeCount: (count) => ipcRenderer.invoke('desktop-attention:set-badge-count', count)

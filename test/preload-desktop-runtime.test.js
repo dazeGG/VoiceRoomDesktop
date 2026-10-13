@@ -113,6 +113,13 @@ test('preload installs desktop markers without native capture contract modules',
   overlay.setSuspended(true);
   assert.deepEqual(invoked.at(-1), ['desktop-overlay:set-suspended', true]);
 
+  const appIcon = exposed.get('voiceRoomDesktopAppIcon');
+  assert.deepEqual(Object.keys(appIcon), ['getTheme', 'setTheme']);
+  appIcon.getTheme();
+  assert.deepEqual(invoked.at(-1), ['desktop-app-icon:get']);
+  appIcon.setTheme('graphite-ice');
+  assert.deepEqual(invoked.at(-1), ['desktop-app-icon:set-theme', 'graphite-ice']);
+
   const attention = exposed.get('voiceRoomDesktopAttention');
   assert.deepEqual(Object.keys(attention), ['requestAttention', 'setBadgeCount']);
   attention.setBadgeCount(3);

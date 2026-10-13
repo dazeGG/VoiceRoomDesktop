@@ -56,7 +56,10 @@ function createFakeWindow() {
   return window;
 }
 
-function createControllerHarness({ platform = 'win32' } = {}) {
+function createControllerHarness({
+  platform = 'win32',
+  resolveTrayIconPath = ({ inCall = false } = {}) => (inCall ? 'in-call.png' : 'icon.ico')
+} = {}) {
   const appCalls = [];
   const trayInstances = [];
   class FakeTray {
@@ -94,7 +97,7 @@ function createControllerHarness({ platform = 'win32' } = {}) {
       quit: () => appCalls.push('quit')
     },
     platform,
-    resolveTrayIconPath: ({ inCall = false } = {}) => (inCall ? 'in-call.png' : 'icon.ico')
+    resolveTrayIconPath
   });
   return { appCalls, controller, trayInstances };
 }
@@ -233,6 +236,23 @@ describe('window lifecycle controller', () => {
     assert.deepEqual(tray.menu.map(({ label }) => label), ['Открыть Voice Room', 'Выход']);
     assert.equal(tray.iconPath, 'icon.ico');
     assert.equal(tray.tooltip, 'Voice Room');
+  });
+
+  it('swaps the tray icon when the app icon theme changes', () => {
+    let theme = 'icon.ico';
+    const { controller, trayInstances } = createControllerHarness({
+      resolveTrayIconPath: ({ inCall = false } = {}) => (inCall ? `in-call-${theme}` : theme)
+    });
+    controller.refreshTrayIcon();
+    controller.installTray();
+    assert.equal(trayInstances[0].iconPath, 'icon.ico');
+
+    theme = 'ice.ico';
+    controller.refreshTrayIcon();
+    assert.equal(trayInstances[0].iconPath, 'ice.ico');
+
+    controller.setCallMenu({ inCall: true, items: [], tooltip: 'Voice Room' });
+    assert.equal(trayInstances[0].iconPath, 'in-call-ice.ico');
   });
 
   it('creates the tray with the call state set before it existed', () => {

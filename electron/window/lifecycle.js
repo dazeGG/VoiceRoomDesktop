@@ -105,6 +105,11 @@ function createWindowLifecycleController({
     if (iconChanged) tray.setImage(resolveTrayIconPath({ inCall: callMenu.inCall }));
   }
 
+  // The app icon theme changed: the tray picks the matching variant.
+  function refreshTrayIcon() {
+    if (tray) tray.setImage(resolveTrayIconPath({ inCall: callMenu.inCall }));
+  }
+
   function setDiagnosticsActions(actions) {
     diagnosticsActions = actions
       && typeof actions.openLogsFolder === 'function'
@@ -175,6 +180,7 @@ function createWindowLifecycleController({
     installTray,
     isMainWindowVisible,
     isQuitRequested,
+    refreshTrayIcon,
     requestQuit,
     restoreMainWindow,
     setCallMenu,

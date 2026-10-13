@@ -48,6 +48,9 @@ module.exports = {
   files: [
     'assets/call/*.png',
     'assets/logo/icon.ico',
+    'assets/logo/icon.png',
+    'assets/logo/themes/*.ico',
+    'assets/logo/themes/*.png',
     'electron/call-controls.js',
     'electron/deep-links.js',
     'electron/diagnostics.js',
@@ -67,6 +70,7 @@ module.exports = {
     'electron/native/hotkeys.js',
     'electron/idle.js',
     'electron/attention.js',
+    'electron/app-icon.js',
     'electron/autostart.js',
     'electron/keep-awake.js',
     'electron/native/audio.js',

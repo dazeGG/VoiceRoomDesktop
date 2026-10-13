@@ -1,16 +1,23 @@
 'use strict';
 
 // Renders the call-control icons (tray "in call" badge and taskbar toolbar
-// glyphs) into assets/call. Run with `npm run icons:call` after changing the
-// logo or the lucide version; the PNGs are committed.
+// glyphs) into assets/call, and the per-theme app icons (window icon, Dock
+// icon, tray badge) into assets/logo/themes. Run with `npm run icons:call`
+// after changing the logo, the themes or the lucide version; the output is
+// committed.
 
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const lucide = require('lucide');
+const { APP_ICON_THEMES, DEFAULT_ACCENT, DEFAULT_APP_ICON_THEME } = require('../electron/app-icon');
 
 const OUTPUT_DIR = path.join(__dirname, '..', 'assets', 'call');
-const LOGO_SVG_PATH = path.join(__dirname, '..', 'assets', 'logo', 'icon.svg');
+const LOGO_DIR = path.join(__dirname, '..', 'assets', 'logo');
+const LOGO_SVG_PATH = path.join(LOGO_DIR, 'icon.svg');
+const THEME_LOGO_DIR = path.join(LOGO_DIR, 'themes');
+const THEME_PNG_SIZE = 512;
+const THEME_ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
 const BASE_SIZE = 16;
 const SCALES = [1, 2];
 const GLYPH_COLORS = { dark: '#1e1f22', light: '#f2f3f5' };
@@ -36,6 +43,27 @@ function lucideSvg(iconName, color) {
     return `<${tag} ${attributes}/>`;
   }).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">${children}</svg>`;
+}
+
+// An ICO file is a directory of images; Windows reads PNG payloads since Vista.
+function packIco(images) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  const entries = [];
+  let offset = header.length + images.length * 16;
+  for (const { size, png } of images) {
+    const entry = Buffer.alloc(16);
+    entry.writeUInt8(size >= 256 ? 0 : size, 0);
+    entry.writeUInt8(size >= 256 ? 0 : size, 1);
+    entry.writeUInt16LE(1, 4);
+    entry.writeUInt16LE(32, 6);
+    entry.writeUInt32LE(png.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    entries.push(entry);
+    offset += png.length;
+  }
+  return Buffer.concat([header, ...entries, ...images.map(({ png }) => png)]);
 }
 
 function outputName(base, scale) {
@@ -96,6 +124,28 @@ async function main() {
     write(outputName('tray-in-call', scale), await renderPng(window, logoSvg, BASE_SIZE * scale, { dot: true }));
   }
 
+  fs.mkdirSync(THEME_LOGO_DIR, { recursive: true });
+  for (const [themeId, { accent }] of Object.entries(APP_ICON_THEMES)) {
+    // The default theme is the installed icon itself (icon.ico, icon.png).
+    if (themeId === DEFAULT_APP_ICON_THEME) continue;
+    const themedSvg = logoSvg.replaceAll(DEFAULT_ACCENT, accent);
+    const writeTheme = (fileName, buffer) => {
+      fs.writeFileSync(path.join(THEME_LOGO_DIR, fileName), buffer);
+      written.push(path.join('themes', fileName));
+    };
+    writeTheme(`${themeId}.svg`, Buffer.from(themedSvg));
+    writeTheme(`${themeId}.png`, await renderPng(window, themedSvg, THEME_PNG_SIZE));
+    const images = [];
+    for (const size of THEME_ICO_SIZES) images.push({ size, png: await renderPng(window, themedSvg, size) });
+    writeTheme(`${themeId}.ico`, packIco(images));
+    for (const scale of SCALES) {
+      write(
+        outputName(`tray-in-call-${themeId}`, scale),
+        await renderPng(window, themedSvg, BASE_SIZE * scale, { dot: true })
+      );
+    }
+  }
+
   for (const glyph of GLYPHS) {
     for (const [variant, glyphColor] of Object.entries(GLYPH_COLORS)) {
       const svg = lucideSvg(glyph.icon, glyph.alert ? ALERT_COLOR : glyphColor);
@@ -106,7 +156,7 @@ async function main() {
   }
 
   window.destroy();
-  console.log(`Wrote ${written.length} icons to ${path.relative(process.cwd(), OUTPUT_DIR)}`);
+  console.log(`Wrote ${written.length} icons to ${path.relative(process.cwd(), OUTPUT_DIR)} and ${path.relative(process.cwd(), THEME_LOGO_DIR)}`);
   app.quit();
 }
 

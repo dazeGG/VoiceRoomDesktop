@@ -253,26 +253,54 @@ function isNativeOnlyScreenCaptureEligible(pending) {
     && pending.audioCapture?.mode !== 'loopback';
 }
 
+// The picker is a frameless, transparent overlay laid exactly over the parent's
+// content area, so it reads as an in-app modal (dimmed backdrop + card) and
+// always opens on the monitor the app is on.
+function getPickerOverlayBounds(parentWindow) {
+  if (!parentWindow || parentWindow.isDestroyed()) return null;
+  return parentWindow.getContentBounds();
+}
+
 function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
   const sessionId = String(nextDesktopCapturePickerSessionId++);
+  const overlayBounds = getPickerOverlayBounds(parentWindow);
   const pickerWindow = new BrowserWindow({
-    backgroundColor: WINDOW_BACKGROUND,
-    height: 760,
-    minHeight: 640,
-    minWidth: 760,
-    modal: Boolean(parentWindow),
+    ...(overlayBounds || { height: 760, width: 1040 }),
+    backgroundColor: overlayBounds ? '#00000000' : WINDOW_BACKGROUND,
+    frame: false,
+    fullscreenable: false,
+    hasShadow: !overlayBounds,
+    maximizable: false,
+    minimizable: false,
+    // A macOS modal becomes a sheet; a plain child window already follows the parent there.
+    modal: Boolean(parentWindow) && process.platform !== 'darwin',
     parent: parentWindow || undefined,
+    resizable: false,
     show: false,
+    skipTaskbar: true,
     title: 'Voice Room Stream Picker',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    transparent: Boolean(overlayBounds),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, '../ui/screen-picker-preload.js'),
       sandbox: true
-    },
-    width: 1040
+    }
   });
+
+  const syncOverlayBounds = () => {
+    const bounds = getPickerOverlayBounds(parentWindow);
+    if (bounds && !pickerWindow.isDestroyed()) pickerWindow.setBounds(bounds);
+  };
+  if (overlayBounds) {
+    parentWindow.on('move', syncOverlayBounds);
+    parentWindow.on('resize', syncOverlayBounds);
+    pickerWindow.once('closed', () => {
+      if (parentWindow.isDestroyed()) return;
+      parentWindow.off('move', syncOverlayBounds);
+      parentWindow.off('resize', syncOverlayBounds);
+    });
+  }
 
   return new Promise((resolve, reject) => {
     const session = {

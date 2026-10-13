@@ -84,6 +84,30 @@ const result = await window.voiceRoomDesktopAttention.requestAttention({ critica
 
 The web app owns the count: send the current value whenever it changes, including `0` once everything is read and again after a page reload. Counts are floored and capped at 9999; anything that is not a finite number clears the badge.
 
+## App icon follows the web theme
+
+Each colour theme of the web app has its own app icon (same logo, the theme's accent). The web app reports its theme through `window.voiceRoomDesktopAppIcon`; the shell swaps the icon and remembers it:
+
+```js
+await window.voiceRoomDesktopAppIcon.setTheme('graphite-ice');
+// { supported: true, theme: 'graphite-ice' }
+
+const state = await window.voiceRoomDesktopAppIcon.getTheme();
+// { supported: true, theme: 'graphite-ice' }
+```
+
+| Theme id | Accent | Icon |
+| --- | --- | --- |
+| `graphite-volt` (default) | lime | the installed icon (`assets/logo/icon.*`) |
+| `graphite-ice` | cyan | `assets/logo/themes/graphite-ice.*` |
+| `graphite-coral` | coral | `assets/logo/themes/graphite-coral.*` |
+
+- Contract: the web app owns the theme. Call `setTheme(id)` on every start and on every change, with the id it stores in `data-theme`; the shell does not poll. Calling it again with the current theme is a no-op. An id the shell does not know returns `{ supported: true, theme: <current>, reason: 'unknown-theme' }` and changes nothing, so a theme the web app adds later keeps the last known icon until the desktop shell ships its icon. New themes are added in `electron/app-icon.js` and rendered with `npm run icons:call`.
+- Windows: the window / taskbar button icon, the tray icon and the tray "in call" badge change. macOS: the Dock icon changes. Linux reports `{ supported: false, reason: 'unsupported' }`.
+- The last reported theme is kept in `desktop-settings.json`, so the next launch (including a hidden autostart) shows it before the web app has loaded.
+- The executable, the installer, a pinned taskbar shortcut and the macOS app bundle icon are baked in at build time and stay the default icon.
+- Web apps older than this contract never call it and keep the default icon; a shell older than this contract has no `voiceRoomDesktopAppIcon`, so the web app must feature-detect it.
+
 ## Notifications
 
 The hosted web app shows native notifications through `window.voiceRoomDesktopNotifications`:

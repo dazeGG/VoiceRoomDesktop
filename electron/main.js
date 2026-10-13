@@ -5,7 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { configureDesktopAttentionIpc } = require('./attention');
+const { createAppIconController } = require('./app-icon');
 const { createAutostartController } = require('./autostart');
+const { createDesktopSettingsStore } = require('./desktop-settings');
 const { createCallControlsController } = require('./call-controls');
 const { createOverlayController } = require('./overlay');
 const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
@@ -173,7 +175,7 @@ const windowLifecycle = createWindowLifecycleController({
   Tray,
   app,
   platform: process.platform,
-  resolveTrayIconPath: resolveWindowsTrayIconPath
+  resolveTrayIconPath: (options) => resolveWindowsTrayIconPath({ ...options, theme: appIcon.getTheme() })
 });
 
 const windowState = createWindowStateController({
@@ -200,6 +202,14 @@ const keepAwake = createKeepAwakeController({ powerSaveBlocker, log });
 desktopHotkeys.onVoiceActiveChange((active) => keepAwake.setVoiceActive(active));
 
 const autostart = createAutostartController({ app, fs, log, path });
+const appIcon = createAppIconController({
+  app,
+  getMainWindow: () => windowLifecycle.getMainWindow(),
+  log,
+  nativeImage,
+  refreshTray: () => windowLifecycle.refreshTrayIcon(),
+  settingsStore: createDesktopSettingsStore({ app, fs, log, path })
+});
 let backgroundUpdates = null;
 let launchInProgress = null;
 // Replaced by the guarded launcher once the single-instance lock is held.
@@ -339,6 +349,7 @@ const appBootstrap = createAppBootstrap({
   desktopLayoutCss: DESKTOP_LAYOUT_CSS,
   previewEnabled: PICKER_PREVIEW_ENABLED,
   onMainWindowCreated: (window) => {
+    appIcon.attachWindow(window);
     deepLinks.attachWindow(window);
     callSurfaces.attachWindow(window);
     overlay.attachMainWindow(window);
@@ -477,6 +488,7 @@ if (!gotLock) {
       desktopHotkeys.installPowerMonitor(powerMonitor);
       keepAwake.installPowerMonitor(powerMonitor);
       autostart.configureIpc({ ipcMain, isTrustedFrame });
+      appIcon.configureIpc({ ipcMain, isTrustedFrame });
       callControls.configureIpc({ ipcMain, isTrustedFrame });
       overlay.configureIpc({ ipcMain, isTrustedFrame });
       diagnostics.configureIpc({ ipcMain, isTrustedFrame });

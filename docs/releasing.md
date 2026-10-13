@@ -114,6 +114,8 @@ Windows artifacts are currently published unsigned. The planned SignPath flow is
 documented in [code-signing.md](code-signing.md), but it is not wired into the
 release workflow yet.
 
-macOS artifacts are currently unsigned. Electron 42+ requires code signing for
-macOS notifications, so unsigned builds must remain on the Electron 41 line.
-Do not upgrade Electron until Apple Developer ID signing is configured in CI.
+macOS artifacts are currently unsigned. They run Electron 44, where unsigned
+apps get no native notifications (Electron 42+ needs a code-signed app for
+`UNNotification`). That trade was made on purpose; see
+[code-signing.md](code-signing.md). Configuring Apple Developer ID signing in CI
+brings them back.

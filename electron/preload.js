@@ -165,6 +165,22 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopOverlay', {
   setSuspended: (suspended) => ipcRenderer.invoke('desktop-overlay:set-suspended', Boolean(suspended))
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopSystem', {
+  getState: () => ipcRenderer.invoke('desktop-system:get-state'),
+  onState: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-system:state', listener);
+    return () => ipcRenderer.removeListener('desktop-system:state', listener);
+  },
+  onWake: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-system:wake', listener);
+    return () => ipcRenderer.removeListener('desktop-system:wake', listener);
+  }
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopCall', {
   onAction: (handler) => {
     if (typeof handler !== 'function') return () => {};

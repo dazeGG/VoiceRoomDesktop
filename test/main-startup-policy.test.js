@@ -69,6 +69,33 @@ test('main process module load tolerates an invalid startup app URL', () => {
   }
 });
 
+test('main process disables intensive wake-up throttling in its single disable-features switch', () => {
+  const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
+  const originalLoad = Module._load;
+  const electronMock = createElectronMock();
+  const switches = [];
+  electronMock.app.commandLine.appendSwitch = (name, value) => switches.push([name, value]);
+
+  Module._load = function loadWithElectronMock(request, parent, isMain) {
+    if (request === 'electron') return electronMock;
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    delete require.cache[require.resolve(mainPath)];
+    require(mainPath);
+    const disableFeatures = switches.filter(([name]) => name === 'disable-features');
+    assert.equal(disableFeatures.length, 1, 'a second disable-features switch would replace the first');
+    assert.ok(disableFeatures[0][1].split(',').includes('IntensiveWakeUpThrottling'));
+    if (process.platform === 'win32' && process.env.VOICE_ROOM_WEBRTC_HW_ENCODER !== '0') {
+      assert.ok(disableFeatures[0][1].split(',').includes('WebRtcScreenshareSwEncoding'));
+    }
+  } finally {
+    delete require.cache[require.resolve(mainPath)];
+    Module._load = originalLoad;
+  }
+});
+
 test('main process wires window bootstrap installers into app bootstrap', () => {
   const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
   const originalLoad = Module._load;
@@ -164,7 +191,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 1);
-    assert.equal(handleCalls, 30);
+    assert.equal(handleCalls, 31);
     assert.deepEqual([...handledChannels].sort(), [
       'desktop-app-icon:get',
       'desktop-app-icon:set-theme',
@@ -193,6 +220,7 @@ test('main process installs IPC services once when macOS recreates its window', 
       'desktop-overlay:set-settings',
       'desktop-overlay:set-snapshot',
       'desktop-overlay:set-suspended',
+      'desktop-system:get-state',
       'window:is-fullscreen',
       'window:reload-main',
       'window:set-fullscreen'
@@ -211,7 +239,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 3);
-    assert.equal(handleCalls, 30);
+    assert.equal(handleCalls, 31);
   } finally {
     delete require.cache[require.resolve(mainPath)];
     Module._load = originalLoad;

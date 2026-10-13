@@ -83,7 +83,12 @@ function installContextMenu(window, { Menu, clipboard, log = console }) {
       paste: () => webContents.paste(),
       replaceMisspelling: (word) => webContents.replaceMisspelling(word),
       selectAll: () => webContents.selectAll(),
-      writeText: (text) => clipboard.writeText(text)
+      // Asynchronous since Electron 44; a failed copy only gets logged.
+      writeText: (text) => {
+        Promise.resolve(clipboard.writeText(text)).catch((error) => {
+          log.warn?.('Failed to copy to the clipboard:', error);
+        });
+      }
     });
     if (template.length === 0 || window.isDestroyed()) return;
     try {

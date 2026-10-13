@@ -9,10 +9,16 @@ Windows artifacts. The SignPath steps below are the target flow and are not yet
 enabled. Do not describe published Windows artifacts as signed until those steps
 and their required credentials are present in the workflow.
 
-Unsigned macOS builds are pinned to Electron 41 because Electron 42+ requires a
-code-signed application for native notifications. Upgrading Electron requires
-Apple Developer ID signing to be configured first. Electron 41 reaches end of
-support on 2026-08-25, so signing and the Electron upgrade must land before then.
+Both platforms run Electron 44. Electron 41 went out of support on 2026-08-25,
+so we chose a supported Electron over macOS notifications. Electron 42+ shows
+macOS notifications through `UNNotification`, which needs a code-signed app. So
+with unsigned macOS builds, native notifications do not appear on macOS:
+`Notification` emits `failed`, the shell answers `{ ok: false, reason: 'failed' }`,
+and the web app keeps its in-app cues. Windows notifications are unaffected.
+Configuring Apple Developer ID signing (and notarization) restores them. It
+also removes the Gatekeeper warning and allows enabling macOS auto-update.
+
+Electron 44 requires macOS 13 (Ventura) or later.
 
 ## Team roles
 

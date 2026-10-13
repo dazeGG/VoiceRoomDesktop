@@ -69,10 +69,11 @@ function setPendingDesktopCaptureSource(frameKey, source, audioOptions = 'loopba
   timer.unref?.();
 
   const audioCapture = normalizeDesktopAudioCapture(source, audioOptions, getNativeAudioCapabilities());
-  const fps = Number(normalizeScreenFpsId(normalizedCaptureOptions.fpsId));
+  const fpsId = normalizeScreenFpsId(normalizedCaptureOptions.fpsId);
+  const fps = Number(fpsId);
   const qualityId = normalizeScreenQualityId(normalizedCaptureOptions.qualityId);
-  const maxHeight = getScreenQualityMaxHeight(qualityId);
-  const maxWidth = getScreenQualityMaxWidth(qualityId);
+  const maxHeight = getScreenQualityMaxHeight(qualityId, fpsId);
+  const maxWidth = getScreenQualityMaxWidth(qualityId, fpsId);
   const pendingSource = {
     audioCapture,
     fps,
@@ -104,8 +105,8 @@ function recordGrantedDesktopCapture(frame, pending) {
   grantedDesktopCaptureByFrame.set(frameKey, {
     fps: pending.fps || 30,
     grantedAt: Date.now(),
-    maxHeight: pending.maxHeight || getScreenQualityMaxHeight(pending.qualityId),
-    maxWidth: pending.maxWidth || getScreenQualityMaxWidth(pending.qualityId),
+    maxHeight: pending.maxHeight || getScreenQualityMaxHeight(pending.qualityId, pending.fps),
+    maxWidth: pending.maxWidth || getScreenQualityMaxWidth(pending.qualityId, pending.fps),
     qualityId: normalizeScreenQualityId(pending.qualityId),
     sourceId: pending.source.id
   });

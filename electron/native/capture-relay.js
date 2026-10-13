@@ -167,11 +167,15 @@ function writeReconfigureToChild(session, command) {
 
 function handleReconfigure(session, message) {
   const command = normalizeReconfigureCommand(message);
-  if (!command || !session?.child) return false;
-  if (Number.isInteger(message.requestId) && message.requestId > 0) {
-    command.requestId = message.requestId;
+  const requestId = Number.isInteger(message?.requestId) && message.requestId > 0 ? message.requestId : null;
+  const accepted = Boolean(command && session?.child && !session.restartTimer && !session.stopped)
+    && writeReconfigureToChild(session, requestId === null ? command : { ...command, requestId });
+  // Answer at once when nothing can apply the profile (for example while the helper
+  // waits to be restarted); otherwise the main process times out and ends the stream.
+  if (!accepted && requestId !== null) {
+    postParent({ ok: false, reason: 'helper-unavailable', requestId, type: 'reconfigured' });
   }
-  return writeReconfigureToChild(session, command);
+  return accepted;
 }
 
 function finishPendingReconfigure(session, event) {
@@ -266,11 +270,18 @@ function startStatsTimer(session) {
       framesInFlight: session.framesInFlight,
       framesPosted: session.framesPosted,
       helperPaused: session.helperPaused,
+      restartPending: Boolean(session.restartTimer),
       restarts: session.restarts,
       type: 'stats'
     });
   }, STATS_INTERVAL_MS);
   session.statsTimer.unref?.();
+}
+
+function clearRestartTimer(session) {
+  if (!session?.restartTimer) return;
+  clearTimeout(session.restartTimer);
+  session.restartTimer = null;
 }
 
 function stopStatsTimer(session) {
@@ -294,6 +305,7 @@ function attachChild(session, child) {
     if (activeSession !== session || session.stopped || session.child !== child) return;
     const result = appendFrameChunk(session.frameState, chunk);
     session.framesParsed += result.frames.length;
+    if (result.frames.length > 0) session.restartPolicy.noteHealthy();
     for (const frame of result.frames) {
       postToRenderer(session, frame);
     }
@@ -332,43 +344,65 @@ function attachChild(session, child) {
       session.restartAfterExit = null;
       session.restartReason = '';
     }
-    const shouldRestart = !session.stopped
-      && session.restartPolicy.shouldRestart(restartReason ? null : code);
-    if (shouldRestart) {
-      session.frameState = createFrameState();
-      session.restarts += 1;
-      let nextChild = null;
-      try {
-        nextChild = spawnHelper(session);
-      } catch (error) {
-        log('error', 'Native capture helper restart failed.', { message: String(error?.message || error) });
-      }
-
-      if (nextChild) {
-        log('warn', restartReason
-          ? 'Native capture helper profile state was uncertain; restarting at the committed profile.'
-          : 'Native capture helper crashed; restarting.', {
-          attempt: session.restarts,
-          code,
-          reason: restartReason || undefined,
-          signal
-        });
-        attachChild(session, nextChild);
-        if (session.framesInFlight >= MAX_RENDERER_FRAMES_IN_FLIGHT) {
-          setHelperPaused(session, true);
-        }
-        return;
-      }
+    const delay = session.stopped
+      ? null
+      : session.restartPolicy.nextRestartDelay(restartReason ? null : code);
+    if (delay === 0 && restartHelper(session, { code, reason: restartReason, signal })) return;
+    if (delay > 0) {
+      // The renderer keeps showing the last frame while the helper is down.
+      log('warn', 'Native capture helper crashed; retrying after a pause.', {
+        attempt: session.restarts + 1,
+        code,
+        delayMs: delay,
+        signal
+      });
+      session.restartTimer = setTimeout(() => {
+        session.restartTimer = null;
+        if (activeSession !== session || session.stopped) return;
+        if (!restartHelper(session, { code, reason: '', signal })) endSession(session, 'exited', code, signal);
+      }, delay);
+      session.restartTimer.unref?.();
+      return;
     }
 
-    if (!session.stopped) {
-      if (code !== 0 && code !== null) {
-        log('warn', 'Native capture helper exited.', { code, signal });
-      }
-      postToRenderer(session, { reason: code === 2 ? 'unsupported' : 'exited', type: 'end' });
-    }
-    finishSession(session, code === 2 ? 'unsupported' : 'exited', code, signal);
+    endSession(session, code === 2 ? 'unsupported' : 'exited', code, signal);
   });
+}
+
+function restartHelper(session, { code, reason, signal }) {
+  session.frameState = createFrameState();
+  session.restarts += 1;
+  let nextChild = null;
+  try {
+    nextChild = spawnHelper(session);
+  } catch (error) {
+    log('error', 'Native capture helper restart failed.', { message: String(error?.message || error) });
+    return false;
+  }
+
+  log('warn', reason
+    ? 'Native capture helper profile state was uncertain; restarting at the committed profile.'
+    : 'Native capture helper crashed; restarting.', {
+    attempt: session.restarts,
+    code,
+    reason: reason || undefined,
+    signal
+  });
+  attachChild(session, nextChild);
+  if (session.framesInFlight >= MAX_RENDERER_FRAMES_IN_FLIGHT) {
+    setHelperPaused(session, true);
+  }
+  return true;
+}
+
+function endSession(session, reason, code, signal) {
+  if (!session.stopped) {
+    if (code !== 0 && code !== null) {
+      log('warn', 'Native capture helper exited.', { code, signal });
+    }
+    postToRenderer(session, { reason, type: 'end' });
+  }
+  finishSession(session, reason, code, signal);
 }
 
 function startSession(options, port) {
@@ -405,6 +439,7 @@ function startSession(options, port) {
     restartAfterExit: null,
     restartPolicy: createRestartPolicy(),
     restartReason: '',
+    restartTimer: null,
     restarts: 0,
     sourceId: options.sourceId,
     statsTimer: null,
@@ -434,6 +469,7 @@ function stopSession(session, options = {}) {
   if (!session || session.stopped) return false;
   session.stopped = true;
   stopStatsTimer(session);
+  clearRestartTimer(session);
   failPendingReconfigures(session, 'session-stopped');
 
   if (options.closePort) {
@@ -461,6 +497,7 @@ function finishSession(session, reason, code = 0, signal = null) {
   if (!session || activeSession !== session) return;
   if (session.forceKillTimer) clearTimeout(session.forceKillTimer);
   stopStatsTimer(session);
+  clearRestartTimer(session);
   failPendingReconfigures(session, reason || 'session-finished');
   activeSession = null;
   postParent({ code, reason, signal, type: 'exited' });

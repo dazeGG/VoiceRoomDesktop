@@ -21,10 +21,14 @@ describe('desktop capture apply-profile normalization', () => {
     );
   });
 
-  it('maps source quality to the no-downscale helper cap', () => {
+  it('caps source quality at 4K, and at 1440p for 60 fps', () => {
     assert.deepEqual(
       normalizeApplyProfileRequest({ fpsId: '5', qualityId: 'source' }),
-      { fps: 5, fpsId: '5', maxHeight: 16384, maxWidth: 16384, qualityId: 'source' }
+      { fps: 5, fpsId: '5', maxHeight: 2160, maxWidth: 3840, qualityId: 'source' }
+    );
+    assert.deepEqual(
+      normalizeApplyProfileRequest({ fpsId: '60', qualityId: 'source' }),
+      { fps: 60, fpsId: '60', maxHeight: 1440, maxWidth: 2560, qualityId: 'source' }
     );
   });
 

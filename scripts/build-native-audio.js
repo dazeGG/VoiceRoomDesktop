@@ -118,6 +118,7 @@ function buildWindows(options = {}) {
     'mmdevapi.lib',
     'ole32.lib',
     'propsys.lib',
+    'user32.lib',
     'uuid.lib'
   ], { env: requireMsvcEnv('Windows native audio helper') });
 }

@@ -13,14 +13,12 @@ const DEFAULT_SCREEN_FPS_ID = '30';
 const SCREEN_QUALITY_MAX_HEIGHTS = new Map([
   ['low', 540],
   ['balanced', 720],
-  ['high', 1080],
-  ['source', 16384]
+  ['high', 1080]
 ]);
 const SCREEN_QUALITY_MAX_WIDTHS = new Map([
   ['low', 960],
   ['balanced', 1280],
-  ['high', 1920],
-  ['source', 16384]
+  ['high', 1920]
 ]);
 
 function modeToCapabilityKey(mode) {
@@ -84,12 +82,29 @@ function normalizeScreenQualityId(qualityId) {
   return SCREEN_QUALITY_IDS.has(qualityId) ? qualityId : DEFAULT_SCREEN_QUALITY_ID;
 }
 
-function getScreenQualityMaxHeight(qualityId) {
-  return SCREEN_QUALITY_MAX_HEIGHTS.get(normalizeScreenQualityId(qualityId)) || 720;
+// Raw frames travel helper -> relay -> renderer as copies, so "source" still has a
+// ceiling: 4K up to 30 fps, 1440p at 60 fps. Beyond that the copies cost far more
+// than the encoder can use.
+const SOURCE_HIGH_FPS_THRESHOLD = 30;
+const SOURCE_MAX_SIZES = Object.freeze({
+  highFps: Object.freeze({ height: 1440, width: 2560 }),
+  standard: Object.freeze({ height: 2160, width: 3840 })
+});
+
+function getSourceMaxSize(fpsId) {
+  return Number(fpsId) > SOURCE_HIGH_FPS_THRESHOLD ? SOURCE_MAX_SIZES.highFps : SOURCE_MAX_SIZES.standard;
 }
 
-function getScreenQualityMaxWidth(qualityId) {
-  return SCREEN_QUALITY_MAX_WIDTHS.get(normalizeScreenQualityId(qualityId)) || 1280;
+function getScreenQualityMaxHeight(qualityId, fpsId) {
+  const normalized = normalizeScreenQualityId(qualityId);
+  if (normalized === 'source') return getSourceMaxSize(fpsId).height;
+  return SCREEN_QUALITY_MAX_HEIGHTS.get(normalized) || 720;
+}
+
+function getScreenQualityMaxWidth(qualityId, fpsId) {
+  const normalized = normalizeScreenQualityId(qualityId);
+  if (normalized === 'source') return getSourceMaxSize(fpsId).width;
+  return SCREEN_QUALITY_MAX_WIDTHS.get(normalized) || 1280;
 }
 
 function normalizeScreenFpsId(fpsId) {
@@ -114,8 +129,8 @@ function normalizeApplyProfileRequest(options = {}) {
   return {
     fps: Number(fpsId),
     fpsId,
-    maxHeight: getScreenQualityMaxHeight(qualityId),
-    maxWidth: getScreenQualityMaxWidth(qualityId),
+    maxHeight: getScreenQualityMaxHeight(qualityId, fpsId),
+    maxWidth: getScreenQualityMaxWidth(qualityId, fpsId),
     qualityId
   };
 }

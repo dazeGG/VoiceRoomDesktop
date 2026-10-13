@@ -94,8 +94,8 @@ function configureDesktopCaptureIpc() {
     return {
       audioCapture,
       fpsId: selection.fpsId,
-      maxHeight: getScreenQualityMaxHeight(selection.qualityId),
-      maxWidth: getScreenQualityMaxWidth(selection.qualityId),
+      maxHeight: getScreenQualityMaxHeight(selection.qualityId, selection.fpsId),
+      maxWidth: getScreenQualityMaxWidth(selection.qualityId, selection.fpsId),
       ok: true,
       profileId: createScreenProfileId(selection.qualityId, selection.fpsId),
       qualityId: selection.qualityId,
@@ -117,12 +117,13 @@ function configureDesktopCaptureIpc() {
     }
 
     const qualityId = normalizeScreenQualityId(normalizedCaptureOptions.qualityId);
+    const fpsId = normalizeScreenFpsId(normalizedCaptureOptions.fpsId);
     const audioCapture = setPendingDesktopCaptureSource(frameKey, source, audioOptions, normalizedCaptureOptions);
     return {
       audioCapture,
-      fpsId: normalizeScreenFpsId(normalizedCaptureOptions.fpsId),
-      maxHeight: getScreenQualityMaxHeight(qualityId),
-      maxWidth: getScreenQualityMaxWidth(qualityId),
+      fpsId,
+      maxHeight: getScreenQualityMaxHeight(qualityId, fpsId),
+      maxWidth: getScreenQualityMaxWidth(qualityId, fpsId),
       ok: true,
       qualityId
     };

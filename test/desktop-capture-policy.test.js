@@ -117,7 +117,10 @@ describe('picker profile normalization', () => {
     assert.equal(getScreenQualityMaxHeight('low'), 540);
     assert.equal(getScreenQualityMaxHeight('balanced'), 720);
     assert.equal(getScreenQualityMaxHeight('high'), 1080);
-    assert.equal(getScreenQualityMaxHeight('source'), 16384);
+    assert.equal(getScreenQualityMaxHeight('source'), 2160);
+    assert.equal(getScreenQualityMaxHeight('source', '30'), 2160);
+    assert.equal(getScreenQualityMaxHeight('source', '60'), 1440);
+    assert.equal(getScreenQualityMaxHeight('high', '60'), 1080);
     assert.equal(getScreenQualityMaxHeight('native'), 720);
   });
 
@@ -125,7 +128,8 @@ describe('picker profile normalization', () => {
     assert.equal(getScreenQualityMaxWidth('low'), 960);
     assert.equal(getScreenQualityMaxWidth('balanced'), 1280);
     assert.equal(getScreenQualityMaxWidth('high'), 1920);
-    assert.equal(getScreenQualityMaxWidth('source'), 16384);
+    assert.equal(getScreenQualityMaxWidth('source'), 3840);
+    assert.equal(getScreenQualityMaxWidth('source', '60'), 2560);
     assert.equal(getScreenQualityMaxWidth('native'), 1280);
   });
 

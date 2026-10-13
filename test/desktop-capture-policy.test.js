@@ -6,6 +6,7 @@ const {
   createScreenProfileId,
   getScreenQualityMaxHeight,
   getScreenQualityMaxWidth,
+  getWindowSourceHandle,
   normalizeDesktopAudioCapture,
   normalizeDesktopCapturePickerSelection,
   normalizeScreenFpsId,
@@ -117,7 +118,10 @@ describe('picker profile normalization', () => {
     assert.equal(getScreenQualityMaxHeight('low'), 540);
     assert.equal(getScreenQualityMaxHeight('balanced'), 720);
     assert.equal(getScreenQualityMaxHeight('high'), 1080);
-    assert.equal(getScreenQualityMaxHeight('source'), 16384);
+    assert.equal(getScreenQualityMaxHeight('source'), 2160);
+    assert.equal(getScreenQualityMaxHeight('source', '30'), 2160);
+    assert.equal(getScreenQualityMaxHeight('source', '60'), 1440);
+    assert.equal(getScreenQualityMaxHeight('high', '60'), 1080);
     assert.equal(getScreenQualityMaxHeight('native'), 720);
   });
 
@@ -125,7 +129,8 @@ describe('picker profile normalization', () => {
     assert.equal(getScreenQualityMaxWidth('low'), 960);
     assert.equal(getScreenQualityMaxWidth('balanced'), 1280);
     assert.equal(getScreenQualityMaxWidth('high'), 1920);
-    assert.equal(getScreenQualityMaxWidth('source'), 16384);
+    assert.equal(getScreenQualityMaxWidth('source'), 3840);
+    assert.equal(getScreenQualityMaxWidth('source', '60'), 2560);
     assert.equal(getScreenQualityMaxWidth('native'), 1280);
   });
 
@@ -138,12 +143,34 @@ describe('picker profile normalization', () => {
         streamAudioEnabled: false
       }),
       {
+        appAudioOnly: false,
         fpsId: '15',
         qualityId: 'source',
         sourceId: 'screen:9:0',
         streamAudioEnabled: false
       }
     );
+  });
+
+  it('allows app-only sound only for a window share with sound on', () => {
+    const pick = (overrides) => normalizeDesktopCapturePickerSelection({
+      appAudioOnly: true,
+      sourceId: 'window:4242:0',
+      streamAudioEnabled: true,
+      ...overrides
+    }).appAudioOnly;
+    assert.equal(pick({}), true);
+    assert.equal(pick({ sourceId: 'screen:1:0' }), false);
+    assert.equal(pick({ streamAudioEnabled: false }), false);
+    assert.equal(pick({ appAudioOnly: 'yes' }), false);
+  });
+
+  it('reads the window handle from an Electron window source id', () => {
+    assert.equal(getWindowSourceHandle('window:4242:0'), 4242);
+    assert.equal(getWindowSourceHandle('screen:1:0'), 0);
+    assert.equal(getWindowSourceHandle('window:abc:0'), 0);
+    assert.equal(getWindowSourceHandle('window:0:0'), 0);
+    assert.equal(getWindowSourceHandle(null), 0);
   });
 
   it('creates profile id from quality and fps', () => {

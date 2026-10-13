@@ -48,6 +48,7 @@ class FakeWindow extends EventEmitter {
     this.emit('closed');
   }
   setBounds(bounds) { this.bounds = { ...bounds }; }
+  moveTop() { this.raised = (this.raised || 0) + 1; }
   setContentSize(width, height) {
     this.bounds = { ...this.bounds, width, height };
   }
@@ -99,12 +100,13 @@ class FakeMainWindow extends EventEmitter {
 
 const VOICE_ROOM_PID = 1;
 
-function createHarness(t) {
+function createHarness(t, { backend, screenToDipRect } = {}) {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-room-overlay-'));
   t.after(() => fs.rmSync(userDataPath, { force: true, recursive: true }));
   const windows = [];
   const watcher = {
     running: false,
+    ...(backend ? { getStatus: () => ({ backend, failures: 0, running: watcher.running }) } : {}),
     start() { this.running = true; },
     stop() { this.running = false; }
   };
@@ -128,7 +130,8 @@ function createHarness(t) {
       getCursorScreenPoint: () => ({ x: 10, y: 10 }),
       getDisplayMatching: () => ({ scaleFactor: 1, workArea: { height: 1080, width: 1920, x: 0, y: 0 } }),
       getDisplayNearestPoint: () => ({ workArea: { height: 1080, width: 1920, x: 0, y: 0 } }),
-      getPrimaryDisplay: () => ({ workArea: { height: 1080, width: 1920, x: 0, y: 0 } })
+      getPrimaryDisplay: () => ({ workArea: { height: 1080, width: 1920, x: 0, y: 0 } }),
+      ...(screenToDipRect ? { screenToDipRect } : {})
     }
   });
   t.after(() => controller.dispose());
@@ -166,6 +169,62 @@ const CUSTOM_GAME = {
   pid: 9,
   title: 'My Game'
 };
+
+describe('desktop overlay placement and health', () => {
+  const SECOND_MONITOR_GAME = {
+    ...CS2,
+    bounds: { height: 1440, width: 2560, x: 2880, y: 0 }
+  };
+  const halveRect = (_window, rect) => ({
+    height: rect.height / 2,
+    width: rect.width / 2,
+    x: rect.x / 2,
+    y: rect.y / 2
+  });
+
+  function startCall(callControls, controller) {
+    const main = new FakeMainWindow();
+    controller.attachMainWindow(main);
+    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    main.blur();
+  }
+
+  it('converts native helper bounds (physical pixels) to DIP before placing the HUD', (t) => {
+    const { callControls, controller, windows } = createHarness(t, { backend: 'native', screenToDipRect: halveRect });
+    startCall(callControls, controller);
+    controller.handleForeground(SECOND_MONITOR_GAME);
+    assert.deepEqual(windows[0].bounds, { height: 48, width: 52, x: 1456, y: 16 });
+  });
+
+  it('uses PowerShell bounds as they are, since Windows already scales them', (t) => {
+    const { callControls, controller, windows } = createHarness(t, { backend: 'powershell', screenToDipRect: halveRect });
+    startCall(callControls, controller);
+    controller.handleForeground(SECOND_MONITOR_GAME);
+    assert.deepEqual(windows[0].bounds, { height: 48, width: 52, x: 2896, y: 16 });
+  });
+
+  it('raises the HUD again on every report and after a GPU process crash', (t) => {
+    const { callControls, controller, windows } = createHarness(t, { backend: 'native' });
+    startCall(callControls, controller);
+    controller.handleForeground(CS2);
+    const raised = windows[0].raised;
+    controller.handleForeground({ ...CS2, title: 'Counter-Strike 2 - round 2' });
+    assert.equal(windows[0].raised, raised + 1);
+
+    const topmostCalls = windows[0].alwaysOnTop.length;
+    controller.recoverFromGpuCrash();
+    assert.equal(windows[0].alwaysOnTop.length > topmostCalls, true);
+    assert.equal(windows[0].raised, raised + 2);
+  });
+
+  it('reports status without paths', (t) => {
+    const { callControls, controller } = createHarness(t, { backend: 'native' });
+    assert.deepEqual(controller.getStatus(), { enabled: true, game: '', visible: false, watcher: 'stopped' });
+    startCall(callControls, controller);
+    controller.handleForeground(CS2);
+    assert.deepEqual(controller.getStatus(), { enabled: true, game: 'cs2.exe', visible: true, watcher: 'native' });
+  });
+});
 
 describe('desktop overlay controller', () => {
   it('stays hidden until a game is in the foreground during a call', (t) => {

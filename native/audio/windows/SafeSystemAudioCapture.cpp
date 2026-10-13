@@ -49,6 +49,47 @@ static bool HasArg(int argc, wchar_t** argv, const wchar_t* name) {
   return false;
 }
 
+static uint64_t ReadUInt64Arg(int argc, wchar_t** argv, const wchar_t* name) {
+  for (int index = 1; index + 1 < argc; ++index) {
+    if (wcscmp(argv[index], name) == 0) return wcstoull(argv[index + 1], nullptr, 10);
+  }
+  return 0;
+}
+
+struct FrameHostSearch {
+  DWORD hostPid;
+  DWORD appPid;
+};
+
+static BOOL CALLBACK FindFrameHostChild(HWND child, LPARAM param) {
+  auto* search = reinterpret_cast<FrameHostSearch*>(param);
+  DWORD pid = 0;
+  GetWindowThreadProcessId(child, &pid);
+  if (pid != 0 && pid != search->hostPid) {
+    search->appPid = pid;
+    return FALSE;
+  }
+  return TRUE;
+}
+
+// The process that plays a window's sound. Store apps draw inside an
+// ApplicationFrameHost window, so their own process is the child window's owner.
+static DWORD ResolveWindowProcess(HWND window) {
+  if (!window || !IsWindow(window)) return 0;
+  DWORD pid = 0;
+  GetWindowThreadProcessId(window, &pid);
+  if (pid == 0) return 0;
+  FrameHostSearch search = {pid, 0};
+  EnumChildWindows(window, FindFrameHostChild, reinterpret_cast<LPARAM>(&search));
+  return search.appPid ? search.appPid : pid;
+}
+
+static bool WriteAll(const void* data, size_t size) {
+  if (size == 0) return true;
+  if (std::fwrite(data, 1, size, stdout) != size) return false;
+  return std::fflush(stdout) == 0;
+}
+
 static void Fail(HRESULT hr, const char* message) {
   char buffer[256];
   std::snprintf(buffer, sizeof(buffer), "%s HRESULT=0x%08lx", message, static_cast<unsigned long>(hr));
@@ -147,8 +188,21 @@ int wmain(int argc, wchar_t** argv) {
   std::signal(SIGINT, HandleSignal);
   std::signal(SIGTERM, HandleSignal);
 
-  const DWORD targetPid = ReadDWORDArg(argc, argv, L"--target-pid", GetCurrentProcessId());
-  const bool includeTarget = HasArg(argc, argv, L"--include-target");
+  DWORD targetPid = ReadDWORDArg(argc, argv, L"--target-pid", GetCurrentProcessId());
+  bool includeTarget = HasArg(argc, argv, L"--include-target");
+  // --target-window captures only the app that owns the window. When it is gone the
+  // helper falls back to everything except --target-pid (Voice Room itself).
+  const uint64_t targetWindow = ReadUInt64Arg(argc, argv, L"--target-window");
+  if (targetWindow != 0) {
+    const DWORD windowPid = ResolveWindowProcess(reinterpret_cast<HWND>(static_cast<uintptr_t>(targetWindow)));
+    if (windowPid != 0) {
+      targetPid = windowPid;
+      includeTarget = true;
+    } else {
+      LogEvent("warning", "Stream window is gone; capturing all system audio instead.");
+      includeTarget = false;
+    }
+  }
   const PROCESS_LOOPBACK_MODE mode = includeTarget
       ? PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
       : PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE;
@@ -243,30 +297,49 @@ int wmain(int argc, wchar_t** argv) {
     return 1;
   }
 
-  while (g_running) {
+  // A capture client that keeps failing never recovers by itself, and a closed
+  // stdout means Voice Room is gone. Exit in both cases instead of spinning
+  // silently: a non-zero code lets the shell start a fresh helper.
+  constexpr int kMaxConsecutiveFailures = 20;
+  int consecutiveFailures = 0;
+  int exitCode = 0;
+  while (g_running && exitCode == 0) {
     const DWORD wait = WaitForSingleObject(sampleReady, 500);
     if (wait != WAIT_OBJECT_0) continue;
 
     for (;;) {
       UINT32 packetFrames = 0;
       hr = captureClient->GetNextPacketSize(&packetFrames);
-      if (FAILED(hr) || packetFrames == 0) break;
+      if (SUCCEEDED(hr) && packetFrames == 0) break;
 
       BYTE* data = nullptr;
       UINT32 framesAvailable = 0;
       DWORD flags = 0;
-      hr = captureClient->GetBuffer(&data, &framesAvailable, &flags, nullptr, nullptr);
-      if (FAILED(hr)) break;
+      if (SUCCEEDED(hr)) hr = captureClient->GetBuffer(&data, &framesAvailable, &flags, nullptr, nullptr);
+      if (FAILED(hr)) {
+        consecutiveFailures += 1;
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED || hr == AUDCLNT_E_SERVICE_NOT_RUNNING
+            || consecutiveFailures >= kMaxConsecutiveFailures) {
+          Fail(hr, "Audio capture stopped working");
+          exitCode = 3;
+        }
+        break;
+      }
+      consecutiveFailures = 0;
 
       const size_t byteCount = static_cast<size_t>(framesAvailable) * desiredFormat.Format.nBlockAlign;
+      bool written = false;
       if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
         std::string silence(byteCount, '\0');
-        std::fwrite(silence.data(), 1, silence.size(), stdout);
+        written = WriteAll(silence.data(), silence.size());
       } else {
-        std::fwrite(data, 1, byteCount, stdout);
+        written = WriteAll(data, byteCount);
       }
-      std::fflush(stdout);
       captureClient->ReleaseBuffer(framesAvailable);
+      if (!written) {
+        g_running = 0;
+        break;
+      }
     }
   }
 
@@ -275,5 +348,5 @@ int wmain(int argc, wchar_t** argv) {
   CloseHandle(sampleReady);
   LogEvent("stopped");
   CoUninitialize();
-  return 0;
+  return exitCode;
 }

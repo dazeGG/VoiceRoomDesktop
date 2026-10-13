@@ -155,14 +155,18 @@ function createOverlayController({
     });
   }
 
+  // The native helper is per-monitor DPI aware and reports physical pixels, which
+  // Electron converts per monitor. The PowerShell fallback is DPI-virtualized by
+  // Windows, so its bounds are used as they are.
   function toDipBounds(bounds) {
     if (!bounds || bounds.width < 64 || bounds.height < 64) return null;
+    if (watcher.getStatus?.().backend !== 'native') return bounds;
     try {
       if (typeof screen.screenToDipRect === 'function') {
         return screen.screenToDipRect(null, bounds);
       }
-    } catch {
-      // Fall through to identity; PowerShell's GetWindowRect is often already DIP.
+    } catch (error) {
+      log.warn?.('Overlay could not convert game bounds to DIP:', error);
     }
     return bounds;
   }
@@ -282,6 +286,9 @@ function createOverlayController({
       if (typeof window.showInactive === 'function') window.showInactive();
       else window.show?.();
     }
+    // Games that make their own window topmost can cover the HUD; raise it again
+    // on every foreground report while it is shown.
+    window.moveTop?.();
   }
 
   // PowerShell polling is not free, so the watcher only runs during a call or
@@ -442,6 +449,25 @@ function createOverlayController({
     };
   }
 
+  // For diagnostics: no paths, only the game's file name.
+  function getStatus() {
+    const watcherStatus = watcher.getStatus?.() || {};
+    return {
+      enabled: settings.enabled === true,
+      game: activeGame?.name || '',
+      visible: Boolean(overlayWindow && !overlayWindow.isDestroyed?.() && overlayWindow.isVisible?.()),
+      watcher: watcherRunning ? watcherStatus.backend || 'unknown' : 'stopped'
+    };
+  }
+
+  // The GPU process restarted: transparent windows may come back without their
+  // z-order, so re-run the visibility logic, which raises the HUD again.
+  function recoverFromGpuCrash() {
+    if (!overlayWindow || overlayWindow.isDestroyed?.()) return;
+    applyAlwaysOnTop();
+    syncWindow();
+  }
+
   function dispose() {
     disposing = true;
     clearPreview();
@@ -534,7 +560,9 @@ function createOverlayController({
     dispose,
     getForeground,
     getSettings,
+    getStatus,
     handleForeground,
+    recoverFromGpuCrash,
     removeAllowedGame,
     setSettings,
     setSnapshot,

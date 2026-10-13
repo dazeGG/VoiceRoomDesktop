@@ -7,8 +7,8 @@
 // A line is written only when the snapshot changes. The first line is
 // {"event":"ready"}, which the shell ignores.
 //
-// Window events (foreground, move/resize, minimize, title, destroy) wake the
-// helper; a one-second poll covers anything the events miss. The process is
+// Window events (foreground, move/resize, minimize, destroy) wake the helper; a
+// one-second poll covers title changes and anything the events miss. The process is
 // per-monitor DPI aware, so bounds are physical pixels on every monitor.
 //
 // CLI:
@@ -254,7 +254,8 @@ int wmain(int argc, wchar_t** argv) {
       SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, OnWinEvent, 0, 0, kFlags),
       SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, nullptr, OnWinEvent, 0, 0, kFlags),
       SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_DESTROY, nullptr, OnWinEvent, 0, 0, kFlags),
-      SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_NAMECHANGE, nullptr, OnWinEvent, 0, 0, kFlags),
+      // Title changes are left to the poll: some games print their FPS there.
+      SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, OnWinEvent, 0, 0, kFlags),
   };
   if (!hooks[0]) {
     std::fputs("{\"event\":\"warning\",\"message\":\"Window events are unavailable; polling only.\"}\n", stderr);

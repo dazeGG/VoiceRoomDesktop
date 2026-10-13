@@ -1,15 +1,16 @@
 'use strict';
 
-const path = require('node:path');
+const { DEFAULT_APP_ICON_THEME, resolveAppIconPath, resolveTrayInCallIconPath } = require('../app-icon');
 
-const WINDOWS_TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'logo', 'icon.ico');
-const WINDOWS_TRAY_IN_CALL_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'call', 'tray-in-call.png');
+const WINDOWS_TRAY_ICON_PATH = resolveAppIconPath(DEFAULT_APP_ICON_THEME, { format: 'ico' });
+const WINDOWS_TRAY_IN_CALL_ICON_PATH = resolveTrayInCallIconPath(DEFAULT_APP_ICON_THEME);
 
-function resolveWindowsTrayIconPath({ inCall = false } = {}) {
-  return inCall ? WINDOWS_TRAY_IN_CALL_ICON_PATH : WINDOWS_TRAY_ICON_PATH;
+function resolveWindowsTrayIconPath({ inCall = false, theme = DEFAULT_APP_ICON_THEME } = {}) {
+  return inCall ? resolveTrayInCallIconPath(theme) : resolveAppIconPath(theme, { format: 'ico' });
 }
 
 module.exports = {
   WINDOWS_TRAY_IN_CALL_ICON_PATH,
+  WINDOWS_TRAY_ICON_PATH,
   resolveWindowsTrayIconPath
 };

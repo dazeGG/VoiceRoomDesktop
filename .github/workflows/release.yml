@@ -53,6 +53,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Electron 42+ no longer downloads its binary in postinstall; fetch it
+      # up front so a failed download fails here, not inside a test.
+      - name: Download Electron binary
+        run: npx --no install-electron
+
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
@@ -85,6 +90,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Electron 42+ no longer downloads its binary in postinstall; fetch it
+      # up front so a failed download fails here, not inside a test.
+      - name: Download Electron binary
+        run: npx --no install-electron
 
       - name: Run production Electron capture bridge smoke
         run: node --test test/electron-message-port.test.js
@@ -130,6 +140,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Electron 42+ no longer downloads its binary in postinstall; fetch it
+      # up front so a failed download fails here, not inside a test.
+      - name: Download Electron binary
+        run: npx --no install-electron
 
       - name: Run production Electron capture bridge smoke
         run: node --test test/electron-message-port.test.js

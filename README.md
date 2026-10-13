@@ -51,6 +51,28 @@ If the native helper is missing or exits, the shell releases push-to-talk immedi
 
 While the renderer reports an active voice connection through `voiceRoomDesktopHotkeys.configure({ active: true })`, the shell holds a `prevent-display-sleep` power blocker, so the screen does not dim or turn off while you talk, stream, or watch a stream. The blocker is released when voice ends (`active: false`, navigation, renderer failure, quit) and while the screen is locked. No extra web API is needed.
 
+## Background throttling outside voice
+
+During a call (voice reported through `voiceRoomDesktopHotkeys.configure({ active: true })` or `voiceRoomDesktopCall.setState({ active: true })`) the main window runs its timers at full speed even when it is hidden in the tray or behind a game, so meters, the realtime heartbeat and the overlay keep working. In that state Chromium also reports the page as visible. Outside a call a hidden window is throttled like a background browser tab: the page sees `document.visibilityState === 'hidden'`, `requestAnimationFrame` stops and timers run about once a second. Measured on Electron 41 and 44: an unthrottled hidden window kept running `requestAnimationFrame` at the monitor rate (240 times a second on a 240 Hz display).
+
+- On Electron 44 both switches take effect at once, even while the window is hidden. A call that starts from the tray is never held back, and one that ends there stops costing right away. Electron 41 applied "throttling allowed" only on the next hide.
+- `IntensiveWakeUpThrottling` is disabled. Without that, Chromium cuts a page that has been hidden for 5 minutes to one timer a minute, which would starve the 15 s realtime heartbeat.
+
+## System events and game mode
+
+The hosted web app receives system events through `window.voiceRoomDesktopSystem`:
+
+```js
+const { gameMode, windowVisible } = await window.voiceRoomDesktopSystem.getState();
+const stopState = window.voiceRoomDesktopSystem.onState(({ gameMode, windowVisible }) => {});
+const stopWake = window.voiceRoomDesktopSystem.onWake(({ reason }) => {}); // 'resume' | 'unlock-screen'
+```
+
+- **Game mode** works like Discord's. It is on during a call while a detected game is on screen and the Voice Room window is not in front. It comes from the overlay's game detection, so it needs the overlay setting on (Windows). The web app pauses looping animations, which nobody sees then. They resume as soon as the window is focused.
+- **windowVisible** is `false` while the main window is hidden in the tray or minimized. During a call the page reads as visible even then, so this is the only way it can tell. The web app stops receiving remote video (cameras and screens) while nobody can see it, and keeps voices and stream audio. It does not see a window covered by a game; that is game mode.
+- **Wake** fires after sleep and after unlocking the screen. During a call the page reads as visible, so it never gets a `visibilitychange` there. This tells the web app to check its realtime socket at once, instead of waiting out the heartbeat timeout.
+- Only the configured Voice Room page receives these events. A shell older than this contract has no `voiceRoomDesktopSystem`, so the web app must feature-detect it.
+
 ## Autostart
 
 The hosted web app renders desktop-only autostart switches through `window.voiceRoomDesktopAutostart`:
@@ -123,6 +145,7 @@ await window.voiceRoomDesktopNotifications.show({
 ```
 
 - Notifications are silent: the web app plays its own sound.
+- macOS: unsigned builds cannot show native notifications on Electron 42+, so `show()` answers `{ ok: false, reason: 'failed' }` there until the app is code-signed.
 - A notification with the same `tag` as one still shown replaces it, and the old one is also removed from the Windows Action Center / macOS Notification Center.
 - Clicking a notification with a `route` opens it like a link (see below): `/?dm=<userId>`, `/?room=<roomId>&message=<messageId>` or `/r/<roomId>`. Any other route, or none, only brings the window to the front.
 
@@ -229,13 +252,15 @@ await window.voiceRoomDesktopDiagnostics.openLogsFolder();  // { ok: true } | { 
 const info = await window.voiceRoomDesktopDiagnostics.getInfo(); // structured data plus `text`
 ```
 
-The summary lists the app version, channel and package type, Electron/Chromium/Node versions, OS, locale, GPU feature status, native helper availability, stream health (native capture and stream audio state, helper restarts, how the last capture ended), overlay state (watcher backend, visibility, detected game's file name), GPU process crashes since launch, update and autostart state, whether voice is active, and the user and room ids from `setContext`. It never includes file paths or the OS user name.
+The summary lists the app version, channel and package type, Electron/Chromium/Node versions, OS, locale, GPU feature status, native helper availability, stream health (native capture and stream audio state, helper restarts, how the last capture ended), overlay state (watcher backend, visibility, detected game's file name), GPU process crashes since launch, Chromium process CPU and memory by process type (`app.getAppMetrics()`; CPU is a percentage of one core since the previous reading, and the native helpers are not included), update and autostart state, whether voice is active, and the user and room ids from `setContext`. It never includes file paths or the OS user name.
+
+For measurements, `VOICE_ROOM_PERF_LOG=1` writes one `Performance: voice=…, processes: …` line to the log every 10 seconds. That makes it easy to compare a call, the tray or a game before and after a change.
 
 ## Supported platforms
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| macOS 12+ (Apple Silicon / Intel) | Supported | Native safe-system audio via ScreenCaptureKit |
+| macOS 13+ (Apple Silicon / Intel) | Supported | Native safe-system audio via ScreenCaptureKit. Unsigned builds show no native notifications (see [docs/code-signing.md](docs/code-signing.md)) |
 | Windows 10+ (x64) | Supported | Native safe-system audio via WASAPI process loopback |
 | Linux | Not supported | No builds or native audio helpers for Linux |
 

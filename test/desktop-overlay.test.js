@@ -100,7 +100,7 @@ class FakeMainWindow extends EventEmitter {
 
 const VOICE_ROOM_PID = 1;
 
-function createHarness(t, { backend, screenToDipRect } = {}) {
+function createHarness(t, { backend, screenToDipRect, onGameModeChange } = {}) {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-room-overlay-'));
   t.after(() => fs.rmSync(userDataPath, { force: true, recursive: true }));
   const windows = [];
@@ -123,6 +123,7 @@ function createHarness(t, { backend, screenToDipRect } = {}) {
     createForegroundWatcher: () => watcher,
     fs,
     log: { warn() {} },
+    ...(onGameModeChange ? { onGameModeChange } : {}),
     path,
     platform: 'win32',
     processPid: VOICE_ROOM_PID,
@@ -223,6 +224,64 @@ describe('desktop overlay placement and health', () => {
     startCall(callControls, controller);
     controller.handleForeground(CS2);
     assert.deepEqual(controller.getStatus(), { enabled: true, game: 'cs2.exe', visible: true, watcher: 'native' });
+  });
+});
+
+describe('desktop overlay game mode', () => {
+  function gameModeHarness(t) {
+    const changes = [];
+    const harness = createHarness(t, { onGameModeChange: (active) => changes.push(active) });
+    const main = new FakeMainWindow();
+    harness.controller.attachMainWindow(main);
+    return { ...harness, changes, main };
+  }
+
+  function focusMain(main) {
+    main.focused = true;
+    main.emit('focus');
+  }
+
+  it('is on while a game is on screen during a call and the app window is not in front', (t) => {
+    const { callControls, changes, controller, main } = gameModeHarness(t);
+    controller.handleForeground(CS2);
+    assert.deepEqual(changes, [], 'no call, no game mode');
+
+    const page = new FakeSender();
+    callControls.setState(page, { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    main.blur();
+    controller.handleForeground(CS2);
+    assert.deepEqual(changes, [true]);
+    assert.equal(controller.isGameMode(), true);
+
+    controller.handleForeground({ ...CS2, title: 'Counter-Strike 2 - round 2' });
+    assert.deepEqual(changes, [true], 'reported once per change');
+
+    focusMain(main);
+    assert.deepEqual(changes, [true, false], 'the app window in front ends it');
+    main.blur();
+    assert.deepEqual(changes, [true, false, true], 'back to the game that was last in front');
+    controller.handleForeground(CHROME);
+    assert.deepEqual(changes, [true, false, true, false], 'a browser over the game is not game mode');
+
+    controller.handleForeground(CS2);
+    assert.deepEqual(changes, [true, false, true, false, true]);
+    callControls.setState(page, { active: false });
+    assert.deepEqual(changes, [true, false, true, false, true, false], 'leaving the call ends it');
+  });
+
+  it('stays off with the overlay switched off, and ends on dispose', (t) => {
+    const { callControls, changes, controller, main } = gameModeHarness(t);
+    controller.setSettings({ enabled: false });
+    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    main.blur();
+    controller.handleForeground(CS2);
+    assert.deepEqual(changes, []);
+
+    controller.setSettings({ enabled: true });
+    controller.handleForeground(CS2);
+    assert.deepEqual(changes, [true]);
+    controller.dispose();
+    assert.deepEqual(changes, [true, false]);
   });
 });
 

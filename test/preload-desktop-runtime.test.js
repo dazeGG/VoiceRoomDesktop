@@ -146,6 +146,23 @@ test('preload installs desktop markers without native capture contract modules',
   hotkeys.setSuspended(true);
   assert.deepEqual(invoked.at(-1), ['desktop-hotkeys:set-suspended', true]);
 
+  const system = exposed.get('voiceRoomDesktopSystem');
+  assert.deepEqual(Object.keys(system), ['getState', 'onState', 'onWake']);
+  system.getState();
+  assert.deepEqual(invoked.at(-1), ['desktop-system:get-state']);
+  let systemState = null;
+  system.onState((payload) => {
+    systemState = payload;
+  });
+  listeners.get('desktop-system:state')({}, { gameMode: true });
+  assert.deepEqual(systemState, { gameMode: true });
+  let wake = null;
+  system.onWake((payload) => {
+    wake = payload;
+  });
+  listeners.get('desktop-system:wake')({}, { reason: 'resume' });
+  assert.deepEqual(wake, { reason: 'resume' });
+
   for (const [name, value] of exposed) {
     assert.notEqual(value?.invoke, ipcRenderer.invoke, `${name} must not expose raw ipcRenderer`);
     assert.equal(value?.send, undefined, `${name} must not expose ipcRenderer.send`);

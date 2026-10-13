@@ -11,6 +11,7 @@ const {
   createDiagnosticsController,
   resolvePackageType,
   sanitizeContextId,
+  summarizeAppMetrics,
   summarizeGpuStatus
 } = require('../electron/diagnostics');
 
@@ -22,6 +23,11 @@ function createHarness(overrides = {}) {
   const handlers = new Map();
   const controller = createDiagnosticsController({
     app: {
+      getAppMetrics: () => [
+        { type: 'Browser', cpu: { percentCPUUsage: 1.24 }, memory: { workingSetSize: 102400 } },
+        { type: 'Tab', cpu: { percentCPUUsage: 2.5 }, memory: { workingSetSize: 204800 } },
+        { type: 'GPU', cpu: { percentCPUUsage: 0.5 }, memory: { workingSetSize: 51200 } }
+      ],
       getAppPath: () => path.join('C:', 'Users', 'secret-user', 'app'),
       getGPUFeatureStatus: () => ({ gpu_compositing: 'enabled', video_decode: 'enabled', '2d_canvas': 'enabled' }),
       getLocale: () => 'ru',
@@ -85,6 +91,47 @@ describe('desktop diagnostics helpers', () => {
     assert.equal(summarizeGpuStatus({ webgl: 'enabled', gpu_compositing: 'disabled_software', other: 'x' }), 'gpu_compositing=disabled_software, webgl=enabled');
     assert.equal(summarizeGpuStatus(null), 'unknown');
   });
+
+  it('sums process CPU and memory by type and ignores garbage', () => {
+    assert.deepEqual(summarizeAppMetrics([
+      { type: 'Tab', cpu: { percentCPUUsage: 3 }, memory: { workingSetSize: 2048 } },
+      { type: 'Tab', cpu: { percentCPUUsage: 1.1 }, memory: { workingSetSize: 1024 } },
+      { type: 'C:\\evil path', cpu: { percentCPUUsage: -1 }, memory: { workingSetSize: 'x' } },
+      null
+    ]), {
+      byType: {
+        Tab: { count: 2, cpuPercent: 4.1, memoryMb: 3 },
+        Unknown: { count: 2, cpuPercent: 0, memoryMb: 0 }
+      },
+      count: 4,
+      cpuPercent: 4.1,
+      memoryMb: 3
+    });
+    assert.deepEqual(summarizeAppMetrics(undefined), { byType: {}, count: 0, cpuPercent: 0, memoryMb: 0 });
+  });
+});
+
+describe('desktop diagnostics performance log', () => {
+  it('logs one process line per interval and stops', () => {
+    const lines = [];
+    let tick = null;
+    let cleared = false;
+    const { controller } = createHarness({
+      log: { info: (line) => lines.push(line), warn() {}, transports: { file: { getFile: () => ({ path: LOG_FILE }) } } }
+    });
+    const stop = controller.startPerformanceLog({
+      intervalMs: 5,
+      timers: {
+        clearInterval: () => { cleared = true; },
+        setInterval: (callback) => { tick = callback; return { unref() {} }; }
+      }
+    });
+    tick();
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /^Performance: voice=yes, processes: 3, cpu 4\.2% of a core, memory 350 MB/);
+    stop();
+    assert.equal(cleared, true);
+  });
 });
 
 describe('desktop diagnostics controller', () => {
@@ -112,6 +159,7 @@ describe('desktop diagnostics controller', () => {
       'stream audio: active (app), restarts=1',
       'overlay: on, watcher=native, visible=yes, game=cs2.exe',
       'gpu process crashes: 1',
+      'processes: 3, cpu 4.2% of a core, memory 350 MB (Browser 1: 1.2% 100 MB; GPU 1: 0.5% 50 MB; Tab 1: 2.5% 200 MB)',
       'update: ready 1.3.1',
       'autostart: yes (minimized)',
       'voice active: yes',
@@ -163,11 +211,16 @@ describe('desktop diagnostics controller', () => {
     assert.match(info.text, /autostart: unsupported/);
   });
 
+  it('reports a clipboard that refused the copy instead of throwing', async () => {
+    const { invoke } = createHarness({ clipboard: { writeText: () => Promise.reject(new Error('busy')) } });
+    assert.deepEqual(await invoke(COPY_INFO_CHANNEL), { ok: false, reason: 'clipboard-failed' });
+  });
+
   it('copies the text and opens the logs folder over trusted IPC', async () => {
     const { copied, invoke, opened } = createHarness();
 
     assert.deepEqual(invoke(SET_CONTEXT_CHANNEL, { roomId: 'abc', userId: 'u1' }), { roomId: 'abc', userId: 'u1' });
-    assert.deepEqual(invoke(COPY_INFO_CHANNEL), { ok: true });
+    assert.deepEqual(await invoke(COPY_INFO_CHANNEL), { ok: true });
     assert.match(copied[0], /room: abc/);
     assert.equal(invoke(GET_INFO_CHANNEL).context.userId, 'u1');
     assert.deepEqual(await invoke(OPEN_LOGS_CHANNEL), { ok: true });

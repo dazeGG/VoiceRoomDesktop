@@ -17,6 +17,7 @@ const { findNativeHotkeyHelper } = require('./native/hotkeys');
 const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
 const { createBackgroundThrottlingController } = require('./window/background-throttling');
 const { createSystemEventsController } = require('./system-events');
+const { createUpdateBridge } = require('./update-bridge');
 const { consumeRelaunchIntent, resolveStartHidden, writeRelaunchIntent } = require('./app/launch-mode');
 const { createKeepAwakeController } = require('./keep-awake');
 const { getNativeCaptureCapabilities, getNativeCaptureState } = require('./native/capture');
@@ -225,6 +226,7 @@ let requestLaunch = () => Promise.resolve();
 
 const callControls = createCallControlsController({ log });
 const systemEvents = createSystemEventsController({ isTrustedUrl, log });
+const updateBridge = createUpdateBridge({ isTrustedUrl, log });
 const backgroundThrottling = createBackgroundThrottlingController({ log });
 const syncVoiceBackgroundThrottling = () => {
   backgroundThrottling.setVoiceActive(desktopHotkeys.isVoiceActive() || callControls.getState().active);
@@ -382,6 +384,7 @@ const appBootstrap = createAppBootstrap({
     appIcon.attachWindow(window);
     backgroundThrottling.attachWindow(window);
     systemEvents.attachWindow(window);
+    updateBridge.attachWindow(window);
     deepLinks.attachWindow(window);
     callSurfaces.attachWindow(window);
     overlay.attachMainWindow(window);
@@ -435,6 +438,7 @@ if (!gotLock) {
     systemEvents.dispose();
     stopPerformanceLog?.();
     backgroundUpdates?.dispose();
+    updateBridge.dispose();
   });
 
   function resolveInitialStartHidden() {
@@ -485,8 +489,11 @@ if (!gotLock) {
               label: version ? `Установить обновление ${version}` : 'Установить обновление'
             }
           : null);
+        // The page shows the same update in its own notice.
+        updateBridge.publish();
       }
     });
+    updateBridge.attachUpdater(backgroundUpdates);
     backgroundUpdates.installPowerMonitor(powerMonitor);
     backgroundUpdates.start({
       lastCheckFailed: gate.updateError === true,
@@ -539,6 +546,7 @@ if (!gotLock) {
       keepAwake.installPowerMonitor(powerMonitor);
       systemEvents.installPowerMonitor(powerMonitor);
       systemEvents.configureIpc({ ipcMain, isTrustedFrame });
+      updateBridge.configureIpc({ ipcMain, isTrustedFrame });
       autostart.configureIpc({ ipcMain, isTrustedFrame });
       appIcon.configureIpc({ ipcMain, isTrustedFrame });
       callControls.configureIpc({ ipcMain, isTrustedFrame });

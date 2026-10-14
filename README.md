@@ -407,7 +407,19 @@ While the app runs, it checks GitHub Releases again every 4 hours (15 minutes af
 
 - when the user quits the app for real (tray "Выход", Alt+F4);
 - from the tray menu item "Установить обновление X.Y.Z", which restarts the app with its window open;
-- automatically once the window has stayed in the tray for 10 minutes with no voice connection; the app relaunches back into the tray.
+- automatically once the window has stayed in the tray for 10 minutes with no voice connection; the app relaunches back into the tray;
+- from the hosted page's own "update available" notice ("Перезапустить"), which the page offers only outside a call.
+
+The hosted web app shows one update notice for its own deploys and for the shell. It reads the shell's update through `window.voiceRoomDesktopUpdate`:
+
+```js
+const { status, version } = await window.voiceRoomDesktopUpdate.getState();
+// status: 'none' | 'downloading' | 'ready'
+const stop = window.voiceRoomDesktopUpdate.onState(({ status, version }) => {});
+await window.voiceRoomDesktopUpdate.install(); // restarts into a ready release; rejects otherwise
+```
+
+Only the configured Voice Room URL gets the state or may install. Development builds report `none`.
 
 Development builds started with `npm run electron` skip the update gate and background updates. macOS auto-update stays disabled until Apple code signing is ready.
 

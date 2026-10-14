@@ -53,6 +53,7 @@ module.exports = {
     'assets/logo/themes/*.png',
     'electron/call-controls.js',
     'electron/system-events.js',
+    'electron/update-bridge.js',
     'electron/window/background-throttling.js',
     'electron/deep-links.js',
     'electron/diagnostics.js',

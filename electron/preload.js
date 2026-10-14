@@ -181,6 +181,17 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopSystem', {
   }
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopUpdate', {
+  getState: () => ipcRenderer.invoke('desktop-update:get-state'),
+  install: () => ipcRenderer.invoke('desktop-update:install'),
+  onState: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('desktop-update:state', listener);
+    return () => ipcRenderer.removeListener('desktop-update:state', listener);
+  }
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopCall', {
   onAction: (handler) => {
     if (typeof handler !== 'function') return () => {};

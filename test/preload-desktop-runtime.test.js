@@ -85,6 +85,17 @@ test('preload installs desktop markers without native capture contract modules',
     { body: 'Body', title: 'Title' }
   ]);
 
+  const update = exposed.get('voiceRoomDesktopUpdate');
+  assert.deepEqual(Object.keys(update), ['getState', 'install', 'onState']);
+  update.getState();
+  assert.deepEqual(invoked.at(-1), ['desktop-update:get-state']);
+  update.install();
+  assert.deepEqual(invoked.at(-1), ['desktop-update:install']);
+  const updateStates = [];
+  update.onState((state) => updateStates.push(state));
+  listeners.get('desktop-update:state')({}, { status: 'ready', version: '1.5.0' });
+  assert.deepEqual(updateStates, [{ status: 'ready', version: '1.5.0' }]);
+
   const idle = exposed.get('voiceRoomDesktopIdle');
   assert.deepEqual(Object.keys(idle), ['getSystemIdleTime']);
   assert.equal(typeof idle.getSystemIdleTime, 'function');

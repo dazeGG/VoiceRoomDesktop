@@ -441,8 +441,8 @@ Packaged builds write local log files through `electron-log` (no remote telemetr
 
 | Platform | Log file |
 |----------|----------|
-| macOS | `~/Library/Logs/VoiceRoom/main.log` |
-| Windows | `%APPDATA%\\VoiceRoom\\logs\\main.log` |
+| macOS | `~/Library/Logs/voice-room-desktop/main.log` |
+| Windows | `%APPDATA%\\voice-room-desktop\\logs\\main.log` |
 
 Development builds also print warnings and errors to the terminal.
 

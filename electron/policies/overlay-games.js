@@ -49,6 +49,7 @@ const BLACKLIST_NAMES = new Set([
   'upc.exe',
   'vivaldi.exe',
   'voice room.exe',
+  'voiceroom.exe',
   'windowsterminal.exe',
   'zoom.exe'
 ]);

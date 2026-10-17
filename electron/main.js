@@ -4,6 +4,11 @@ const { app, BrowserWindow, Menu, Tray, clipboard, dialog, globalShortcut, ipcMa
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { LEGACY_EXECUTABLE, migrateLegacyProductFolders } = require('./app/legacy-product-name');
+
+// Before anything opens the profile; see app/legacy-product-name.js.
+const legacyFolderMoves = migrateLegacyProductFolders({ app, fs, homedir: os.homedir(), path });
+
 const { configureDesktopAttentionIpc } = require('./attention');
 const { createAppIconController } = require('./app-icon');
 const { createAutostartController } = require('./autostart');
@@ -396,6 +401,11 @@ const appBootstrap = createAppBootstrap({
   windowState
 });
 
+for (const move of legacyFolderMoves) {
+  if (move.result === 'none') continue;
+  log[move.result === 'failed' ? 'warn' : 'info']('Legacy "Voice Room" folder:', move);
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -520,6 +530,9 @@ if (!gotLock) {
     // Process-wide IPC handlers and power-monitor listeners must be installed
     // once. On macOS, closing the last window keeps the app alive and a later
     // dock activation only needs to recreate the BrowserWindow.
+    if (autostart.migrateLegacyLoginItem(LEGACY_EXECUTABLE)) {
+      log.info('Autostart moved from the old "Voice Room.exe" entry');
+    }
     try {
       configureWindowIpc();
       configureDesktopIdleIpc({

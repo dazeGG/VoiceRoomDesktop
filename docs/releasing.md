@@ -75,12 +75,12 @@ publishes only after both builds succeed.
 
    ## Artifacts
 
-   - `Voice-Room-X.Y.Z-mac-arm64.dmg`
-   - `Voice-Room-X.Y.Z-mac-x64.dmg`
-   - `Voice-Room-X.Y.Z-mac-arm64.zip`
-   - `Voice-Room-X.Y.Z-mac-x64.zip`
-   - `Voice-Room-X.Y.Z-win-x64-setup.exe`
-   - `Voice-Room-X.Y.Z-win-x64.exe`
+   - `VoiceRoom-X.Y.Z-mac-arm64.dmg`
+   - `VoiceRoom-X.Y.Z-mac-x64.dmg`
+   - `VoiceRoom-X.Y.Z-mac-arm64.zip`
+   - `VoiceRoom-X.Y.Z-mac-x64.zip`
+   - `VoiceRoom-X.Y.Z-win-x64-setup.exe`
+   - `VoiceRoom-X.Y.Z-win-x64.exe`
    - `latest-mac.yml`
    - `latest.yml`
    ```

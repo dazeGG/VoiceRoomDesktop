@@ -6,10 +6,8 @@ const path = require('node:path');
 const packageJson = require('../package.json');
 const version = packageJson.version;
 
-// Keep in sync with artifactBase in electron-builder.config.js. The slug is a
-// space-free "Voice-Room" (productName is "Voice Room"): a space in the filename
-// breaks auto-update, so the artifacts — and therefore this filter — use hyphens.
-const ARTIFACT_SLUG = 'Voice-Room';
+// Keep in sync with artifactBase in electron-builder.config.js.
+const ARTIFACT_SLUG = 'VoiceRoom';
 const isDevBuild = (process.env.VOICE_ROOM_DEV_BUILD || '') === '1';
 // Same directory electron-builder wrote to: dist, or dist/dev/<hash> for dev builds.
 const distDir = path.join(__dirname, '..', (process.env.VOICE_ROOM_DIST_DIR || 'dist').trim());

@@ -12,6 +12,7 @@ function createAutostartController({
   path,
   platform = process.platform,
   env = process.env,
+  execPath = process.execPath,
   log = console
 }) {
   const settingsStore = createDesktopSettingsStore({ app, fs, log, path });
@@ -31,7 +32,7 @@ function createAutostartController({
   // The portable build runs from a temporary extraction directory; the login
   // item must point at the original portable executable instead.
   function windowsExecutablePath() {
-    return env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+    return env.PORTABLE_EXECUTABLE_FILE || execPath;
   }
 
   function windowsLoginItem(startMinimized) {
@@ -118,6 +119,37 @@ function createAutostartController({
     return getSettings();
   }
 
+  // 1.4.7 renamed "Voice Room.exe" to "VoiceRoom.exe" in the same folder. The
+  // Run entry keeps its name (the app id) but still points at the old file,
+  // which the update removed: register it for this executable with the same
+  // hidden-launch flag and Task Manager state.
+  function migrateLegacyLoginItem(legacyFileName) {
+    if (!isSupported() || platform !== 'win32' || env.PORTABLE_EXECUTABLE_FILE) return false;
+    const legacyExecutable = path.win32.join(path.win32.dirname(execPath), legacyFileName);
+    if (legacyExecutable.toLowerCase() === execPath.toLowerCase()) return false;
+
+    try {
+      for (const startMinimized of [false, true]) {
+        const settings = app.getLoginItemSettings({
+          ...windowsLoginItem(startMinimized),
+          path: `"${legacyExecutable}"`
+        });
+        if (settings.openAtLogin !== true) continue;
+        const entry = (settings.launchItems || [])
+          .find((item) => typeof item?.path === 'string' && item.path.toLowerCase() === legacyExecutable.toLowerCase());
+        app.setLoginItemSettings({
+          enabled: entry?.enabled !== false,
+          openAtLogin: true,
+          ...windowsLoginItem(startMinimized)
+        });
+        return true;
+      }
+    } catch (error) {
+      log.warn?.('Failed to move the login item to the renamed executable:', error);
+    }
+    return false;
+  }
+
   function configureIpc({ ipcMain, isTrustedFrame }) {
     const assertTrustedSender = (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
@@ -139,6 +171,7 @@ function createAutostartController({
   return {
     configureIpc,
     getSettings,
+    migrateLegacyLoginItem,
     readStoredSettings,
     setSettings
   };

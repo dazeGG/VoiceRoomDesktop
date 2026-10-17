@@ -59,13 +59,14 @@ function createWindowsApp(userDataPath, { isPackaged = true } = {}) {
   return app;
 }
 
-function createHarness(t, { app, env = {}, platform = 'win32' } = {}) {
+function createHarness(t, { app, env = {}, execPath, platform = 'win32' } = {}) {
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-room-autostart-'));
   t.after(() => fs.rmSync(userDataPath, { force: true, recursive: true }));
   const resolvedApp = app ? app(userDataPath) : createWindowsApp(userDataPath);
   const controller = createAutostartController({
     app: resolvedApp,
     env,
+    execPath,
     fs,
     log: { warn() {} },
     path,
@@ -176,6 +177,38 @@ describe('desktop autostart controller', () => {
 
     app.runEntry.approved = true;
     assert.equal(controller.getSettings().openAtLogin, true);
+  });
+
+  describe('after the rename to VoiceRoom.exe', () => {
+    const INSTALL_DIR = 'C:\\Users\\Test User\\AppData\\Local\\Programs\\voice-room-desktop';
+    const NEW_EXE = `${INSTALL_DIR}\\VoiceRoom.exe`;
+
+    it('points the old Run entry at the new executable, keeping the hidden launch', (t) => {
+      const { app, controller } = createHarness(t, { execPath: NEW_EXE });
+      app.runEntry = { approved: undefined, args: ['--hidden'], path: SPACED_EXE };
+
+      assert.equal(controller.migrateLegacyLoginItem('Voice Room.exe'), true);
+      assert.deepEqual(app.runEntry, { approved: undefined, args: ['--hidden'], path: NEW_EXE });
+    });
+
+    it('keeps an entry disabled in Task Manager disabled', (t) => {
+      const { app, controller } = createHarness(t, { execPath: NEW_EXE });
+      app.runEntry = { approved: false, args: [], path: SPACED_EXE };
+
+      assert.equal(controller.migrateLegacyLoginItem('Voice Room.exe'), true);
+      assert.deepEqual(app.runEntry, { approved: false, args: [], path: NEW_EXE });
+    });
+
+    it('does nothing when autostart was never on or already points here', (t) => {
+      const off = createHarness(t, { execPath: NEW_EXE });
+      assert.equal(off.controller.migrateLegacyLoginItem('Voice Room.exe'), false);
+      assert.equal(off.app.setCalls.length, 0);
+
+      const current = createHarness(t, { execPath: NEW_EXE });
+      current.app.runEntry = { approved: undefined, args: [], path: NEW_EXE };
+      assert.equal(current.controller.migrateLegacyLoginItem('Voice Room.exe'), false);
+      assert.equal(current.app.setCalls.length, 0);
+    });
   });
 
   it('uses plain login items on macOS', (t) => {

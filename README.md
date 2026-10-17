@@ -1,6 +1,6 @@
-# Voice Room Desktop
+# VoiceRoom Desktop
 
-Electron desktop shell for Voice Room. It opens the hosted Voice Room web app from `VOICE_ROOM_URL` and provides desktop-only screen capture and window controls.
+Electron desktop shell for VoiceRoom. It opens the hosted VoiceRoom web app from `VOICE_ROOM_URL` and provides desktop-only screen capture and window controls.
 
 ## Desktop runtime detection
 
@@ -68,10 +68,10 @@ const stopState = window.voiceRoomDesktopSystem.onState(({ gameMode, windowVisib
 const stopWake = window.voiceRoomDesktopSystem.onWake(({ reason }) => {}); // 'resume' | 'unlock-screen'
 ```
 
-- **Game mode** works like Discord's. It is on during a call while a detected game is on screen and the Voice Room window is not in front. It comes from the overlay's game detection, so it needs the overlay setting on (Windows). The web app pauses looping animations, which nobody sees then. They resume as soon as the window is focused.
+- **Game mode** works like Discord's. It is on during a call while a detected game is on screen and the VoiceRoom window is not in front. It comes from the overlay's game detection, so it needs the overlay setting on (Windows). The web app pauses looping animations, which nobody sees then. They resume as soon as the window is focused.
 - **windowVisible** is `false` while the main window is hidden in the tray or minimized. During a call the page reads as visible even then, so this is the only way it can tell. The web app stops receiving remote video (cameras and screens) while nobody can see it, and keeps voices and stream audio. It does not see a window covered by a game; that is game mode.
 - **Wake** fires after sleep and after unlocking the screen. During a call the page reads as visible, so it never gets a `visibilitychange` there. This tells the web app to check its realtime socket at once, instead of waiting out the heartbeat timeout.
-- Only the configured Voice Room page receives these events. A shell older than this contract has no `voiceRoomDesktopSystem`, so the web app must feature-detect it.
+- Only the configured VoiceRoom page receives these events. A shell older than this contract has no `voiceRoomDesktopSystem`, so the web app must feature-detect it.
 
 ## Autostart
 
@@ -88,7 +88,7 @@ await window.voiceRoomDesktopAutostart.setSettings({ openAtLogin: true, startMin
 - `startMinimized` starts the login launch hidden: in the tray on Windows (via the `--hidden` argument), without a window on macOS (click the Dock icon to open it). The preference is kept in `desktop-settings.json` in the user data folder, so it can be set while autostart is off.
 - Development builds report `{ supported: false, reason: 'unsupported' }`.
 
-A hidden launch skips the update splash (see below) and retries loading Voice Room in the background every 30 seconds until the network is up, instead of showing an error dialog at login.
+A hidden launch skips the update splash (see below) and retries loading VoiceRoom in the background every 30 seconds until the network is up, instead of showing an error dialog at login.
 
 ## Taskbar badge and attention
 
@@ -225,8 +225,8 @@ await window.voiceRoomDesktopOverlay.setSettings({
   allowedExecutables: ['mygame.exe']
 });
 const foreground = await window.voiceRoomDesktopOverlay.getForeground();
-// { game, label, reason, exe, title } — the last window before Voice Room, not Voice Room itself
-await window.voiceRoomDesktopOverlay.addGame(foreground.exe); // browsers, launchers and Voice Room are refused
+// { game, label, reason, exe, title } — the last window before VoiceRoom, not VoiceRoom itself
+await window.voiceRoomDesktopOverlay.addGame(foreground.exe); // browsers, launchers and VoiceRoom are refused
 
 await window.voiceRoomDesktopOverlay.setSnapshot({
   participants: [
@@ -272,7 +272,7 @@ The hosted web app lists microphones and speakers through `navigator.mediaDevice
 
 Desktop shell behavior:
 
-- grants `media` and `speaker-selection` permissions for the configured Voice Room origin
+- grants `media` and `speaker-selection` permissions for the configured VoiceRoom origin
 - on macOS, triggers the system microphone prompt through `systemPreferences.askForMediaAccess('microphone')`
 - exposes `window.voiceRoomDesktopAudio.ensureMediaAccess()` for the web app to request macOS access before device enumeration
 
@@ -344,10 +344,10 @@ const result = await window.voiceRoomDesktopCapture.applyProfile({
 // callers should fall back to videoTrack.applyConstraints(...) in that case.
 ```
 
-`safe-system` is the Discord-like intent: capture system audio while excluding Voice Room playback. The Electron shell builds native helpers for this path:
+`safe-system` is the Discord-like intent: capture system audio while excluding VoiceRoom playback. The Electron shell builds native helpers for this path:
 
 - macOS: ScreenCaptureKit audio with `excludesCurrentProcessAudio`.
-- Windows: WASAPI process loopback with the Voice Room process tree excluded.
+- Windows: WASAPI process loopback with the VoiceRoom process tree excluded.
 
 When `capabilities.nativeSafeLoopback` is true, the hosted web app should start native audio and bridge the returned Float32 PCM into the screen-share audio track:
 
@@ -371,7 +371,7 @@ const removeDataListener = window.voiceRoomDesktopAudio.onData(({ sessionId, chu
 
 The web app is still responsible for converting these PCM chunks into a `MediaStreamTrack` (for example via `AudioWorklet` + `MediaStreamAudioDestinationNode`) and publishing that track as LiveKit screen audio. If the helper is unavailable, the shell can fall back to Chromium loopback when `allowEchoFallback` is enabled.
 
-On Windows, a window share picked with «Только звук этого окна» in the stream picker captures only the app behind that window (its process tree; Store apps resolve through their frame host). The page needs no changes: `startSafeSystem` picks the window up from the last picker selection, and the helper falls back to all system sound minus Voice Room if the window is already gone.
+On Windows, a window share picked with «Только звук этого окна» in the stream picker captures only the app behind that window (its process tree; Store apps resolve through their frame host). The page needs no changes: `startSafeSystem` picks the window up from the last picker selection, and the helper falls back to all system sound minus VoiceRoom if the window is already gone.
 
 A helper that dies mid-stream is restarted under the same `sessionId` with the same format, so the page keeps its audio track and hears only a short gap. The page receives `{ event: 'restarting', attempt, delayMs }` for each restart and `{ event: 'exit' }` only once the shell gives up (after roughly a minute of failures). The video capture helper follows the same budget: three immediate restarts, then growing pauses while the stream holds its last frame, so a GPU driver reset no longer ends the share.
 
@@ -394,12 +394,12 @@ Window capture still depends on Windows.Graphics.Capture. The helper requests bo
 
 ## Auto-update
 
-Packaged builds check GitHub Releases on startup before opening Voice Room.
+Packaged builds check GitHub Releases on startup before opening VoiceRoom.
 
 - if an update is available, the app downloads and installs it before launch
-- if the update check or download fails, the app checks whether Voice Room itself is reachable
-- if Voice Room is reachable, the launch screen shows the update error and an explicit button to enter the app without updating
-- if Voice Room is unreachable too, the app stays on the launch screen and shows a site-unavailable error
+- if the update check or download fails, the app checks whether VoiceRoom itself is reachable
+- if VoiceRoom is reachable, the launch screen shows the update error and an explicit button to enter the app without updating
+- if VoiceRoom is unreachable too, the app stays on the launch screen and shows a site-unavailable error
 
 Hidden launches (autostart to tray, background update relaunch) run the same check silently: no splash, errors never block, and an available update is left to the background updater.
 
@@ -419,7 +419,7 @@ const stop = window.voiceRoomDesktopUpdate.onState(({ status, version }) => {});
 await window.voiceRoomDesktopUpdate.install(); // restarts into a ready release; rejects otherwise
 ```
 
-Only the configured Voice Room URL gets the state or may install. Development builds report `none`.
+Only the configured VoiceRoom URL gets the state or may install. Development builds report `none`.
 
 Development builds started with `npm run electron` skip the update gate and background updates. macOS auto-update stays disabled until Apple code signing is ready.
 
@@ -453,9 +453,9 @@ This desktop shell does not collect or send telemetry on its own.
 It only makes network requests to:
 
 - GitHub Releases, to check for and download application updates
-- the configured Voice Room URL (`https://voiceroom.ru` in production builds)
+- the configured VoiceRoom URL (`https://voiceroom.ru` in production builds)
 
-The hosted Voice Room web application has its own privacy policy.
+The hosted VoiceRoom web application has its own privacy policy.
 
 ## Setup
 

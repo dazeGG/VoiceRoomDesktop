@@ -148,7 +148,7 @@ function createAppBootstrap({
           loadVisibly();
           return;
         }
-        log.warn('Voice Room is not reachable yet, retrying in the background:', error?.message || error);
+        log.warn('VoiceRoom is not reachable yet, retrying in the background:', error?.message || error);
         retryTimer = setTimeout(attempt, HIDDEN_LOAD_RETRY_MS);
       });
     };
@@ -169,7 +169,7 @@ function createAppBootstrap({
         minHeight: 640,
         minWidth: 760,
         show: false,
-        title: 'Voice Room Stream Picker Preview',
+        title: 'VoiceRoom Stream Picker Preview',
         titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
         webPreferences: {
           contextIsolation: true,
@@ -184,13 +184,13 @@ function createAppBootstrap({
       });
 
       previewWindow.loadFile(path.join(__dirname, '../ui/screen-picker-preview.html')).catch((error) => {
-        dialog.showErrorBox('Voice Room', `Не удалось открыть preview\n\n${error.message}`);
+        dialog.showErrorBox('VoiceRoom', `Не удалось открыть preview\n\n${error.message}`);
       });
       return;
     }
 
     if (!appUrl) {
-      dialog.showErrorBox('Voice Room', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
+      dialog.showErrorBox('VoiceRoom', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
       app.quit();
       return;
     }
@@ -206,7 +206,7 @@ function createAppBootstrap({
       minHeight: MIN_WINDOW_SIZE.height,
       minWidth: MIN_WINDOW_SIZE.width,
       show: false,
-      title: 'Voice Room',
+      title: 'VoiceRoom',
       ...getMainWindowChromeOptions(process.platform),
       webPreferences: {
         additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`],

@@ -49,6 +49,6 @@ This desktop shell does not send telemetry on its own.
 Network access from the shell is limited to:
 
 - checking and downloading application updates from GitHub Releases
-- loading the configured Voice Room web application URL (`https://voiceroom.ru` in production builds)
+- loading the configured VoiceRoom web application URL (`https://voiceroom.ru` in production builds)
 
-The hosted Voice Room web application has its own privacy policy and data handling.
+The hosted VoiceRoom web application has its own privacy policy and data handling.

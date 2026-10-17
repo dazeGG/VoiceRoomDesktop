@@ -240,7 +240,7 @@ function createOverlayController({
       show: false,
       skipTaskbar: true,
       thickFrame: false,
-      title: 'Voice Room Overlay',
+      title: 'VoiceRoom Overlay',
       transparent: true,
       width: contentSize.width,
       ...(platform === 'darwin' ? { type: 'panel', visualEffectState: 'active' } : {}),
@@ -431,7 +431,7 @@ function createOverlayController({
   function addAllowedGame(exe) {
     const source = typeof exe === 'string' && exe.trim() ? { exe: exe.trim() } : lastCandidate;
     const classification = classify(source);
-    // Only unknown apps need the allowlist; Voice Room, browsers and launchers stay out.
+    // Only unknown apps need the allowlist; VoiceRoom, browsers and launchers stay out.
     if (classification.reason !== 'not-a-game') return getSettings();
     const next = setSettings({ allowedExecutables: [...settings.allowedExecutables, classification.exe] });
     reclassifyForeground();
@@ -457,7 +457,7 @@ function createOverlayController({
     syncWindow();
   }
 
-  // While settings are open Voice Room itself is in front, so report the last
+  // While settings are open VoiceRoom itself is in front, so report the last
   // other window the user was in: that is the game they want to add.
   function getForeground() {
     leaseForeground();
@@ -509,7 +509,7 @@ function createOverlayController({
   function configureIpc({ ipcMain, isTrustedFrame }) {
     const assertTrustedSender = (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop overlay is only available for the configured Voice Room URL.');
+        throw new Error('Desktop overlay is only available for the configured VoiceRoom URL.');
       }
     };
 

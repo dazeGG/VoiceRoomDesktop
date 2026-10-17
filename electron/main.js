@@ -323,7 +323,7 @@ const deepLinks = createDeepLinkController({
 function configureWindowIpc() {
   ipcMain.handle('window:set-fullscreen', (event, fullscreen) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Window controls are only available for the configured Voice Room URL.');
+      throw new Error('Window controls are only available for the configured VoiceRoom URL.');
     }
 
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -334,7 +334,7 @@ function configureWindowIpc() {
 
   ipcMain.handle('window:is-fullscreen', (event) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Window controls are only available for the configured Voice Room URL.');
+      throw new Error('Window controls are only available for the configured VoiceRoom URL.');
     }
 
     return Boolean(BrowserWindow.fromWebContents(event.sender)?.isFullScreen());

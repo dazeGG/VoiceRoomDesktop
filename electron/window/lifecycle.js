@@ -19,7 +19,7 @@ function createWindowLifecycleController({
   let quitRequested = false;
   let tray = null;
   let updateAction = null;
-  let callMenu = { inCall: false, items: [], tooltip: 'Voice Room' };
+  let callMenu = { inCall: false, items: [], tooltip: 'VoiceRoom' };
   let diagnosticsActions = null;
 
   function attachMainWindow(window) {
@@ -60,7 +60,7 @@ function createWindowLifecycleController({
   function buildTrayMenu() {
     const template = [
       {
-        label: 'Открыть Voice Room',
+        label: 'Открыть VoiceRoom',
         click: restoreMainWindow
       }
     ];
@@ -96,7 +96,7 @@ function createWindowLifecycleController({
     if (tray) tray.setContextMenu(buildTrayMenu());
   }
 
-  function setCallMenu({ inCall = false, items = [], tooltip = 'Voice Room' } = {}) {
+  function setCallMenu({ inCall = false, items = [], tooltip = 'VoiceRoom' } = {}) {
     const iconChanged = Boolean(inCall) !== callMenu.inCall;
     callMenu = { inCall: Boolean(inCall), items: Array.isArray(items) ? items : [], tooltip: String(tooltip) };
     if (!tray) return;

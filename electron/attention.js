@@ -130,7 +130,7 @@ function configureDesktopAttentionIpc({
 
   function assertTrustedSender(event) {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop attention is only available for the configured Voice Room URL.');
+      throw new Error('Desktop attention is only available for the configured VoiceRoom URL.');
     }
   }
 

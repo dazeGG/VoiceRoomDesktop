@@ -209,7 +209,7 @@ function normalizeForegroundPayload(source) {
 
 const CANDIDATE_REASONS = new Set(['allowlist', 'install-path', 'not-a-game']);
 
-// Windows worth offering in settings: games and unknown apps, never Voice Room,
+// Windows worth offering in settings: games and unknown apps, never VoiceRoom,
 // browsers or launchers.
 function isGameCandidate(classification) {
   return CANDIDATE_REASONS.has(classification?.reason);

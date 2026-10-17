@@ -98,7 +98,7 @@ describe('desktop notifications bridge', () => {
 
     assert.throws(
       () => handler(createEvent('https://evil.example'), { title: 'Hi' }),
-      /Desktop notifications are only available for the configured Voice Room URL\./
+      /Desktop notifications are only available for the configured VoiceRoom URL\./
     );
     assert.equal(notifications.length, 0);
   });

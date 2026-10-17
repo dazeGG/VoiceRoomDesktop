@@ -143,7 +143,7 @@ describe('window lifecycle controller', () => {
 
     assert.deepEqual(window.calls, ['restore', 'show', 'focus']);
     window.calls.length = 0;
-    assert.equal(trayInstances[0].menu[0].label, 'Открыть Voice Room');
+    assert.equal(trayInstances[0].menu[0].label, 'Открыть VoiceRoom');
     trayInstances[0].menu[0].click();
     assert.deepEqual(window.calls, ['focus']);
   });
@@ -192,7 +192,7 @@ describe('window lifecycle controller', () => {
 
     controller.setUpdateAction({ label: 'Установить обновление 1.3.0', click: () => installs.push(true) });
     assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), [
-      'Открыть Voice Room',
+      'Открыть VoiceRoom',
       'Установить обновление 1.3.0',
       'Выход'
     ]);
@@ -200,7 +200,7 @@ describe('window lifecycle controller', () => {
     assert.deepEqual(installs, [true]);
 
     controller.setUpdateAction(null);
-    assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), ['Открыть Voice Room', 'Выход']);
+    assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), ['Открыть VoiceRoom', 'Выход']);
   });
 
   it('shows call controls, tooltip and the in-call icon only during a call', () => {
@@ -209,7 +209,7 @@ describe('window lifecycle controller', () => {
     controller.installTray();
     const tray = trayInstances[0];
     assert.equal(tray.iconPath, 'icon.ico');
-    assert.equal(tray.tooltip, 'Voice Room');
+    assert.equal(tray.tooltip, 'VoiceRoom');
 
     controller.setCallMenu({
       inCall: true,
@@ -217,25 +217,25 @@ describe('window lifecycle controller', () => {
         { label: 'Выключить микрофон', click: () => clicks.push('mic') },
         { label: 'Отключиться', click: () => clicks.push('leave') }
       ],
-      tooltip: 'Voice Room — Гостиная'
+      tooltip: 'VoiceRoom — Гостиная'
     });
     assert.deepEqual(tray.menu.map(({ label, type }) => label || type), [
-      'Открыть Voice Room',
+      'Открыть VoiceRoom',
       'separator',
       'Выключить микрофон',
       'Отключиться',
       'separator',
       'Выход'
     ]);
-    assert.equal(tray.tooltip, 'Voice Room — Гостиная');
+    assert.equal(tray.tooltip, 'VoiceRoom — Гостиная');
     assert.equal(tray.iconPath, 'in-call.png');
     tray.menu[3].click();
     assert.deepEqual(clicks, ['leave']);
 
-    controller.setCallMenu({ inCall: false, items: [], tooltip: 'Voice Room' });
-    assert.deepEqual(tray.menu.map(({ label }) => label), ['Открыть Voice Room', 'Выход']);
+    controller.setCallMenu({ inCall: false, items: [], tooltip: 'VoiceRoom' });
+    assert.deepEqual(tray.menu.map(({ label }) => label), ['Открыть VoiceRoom', 'Выход']);
     assert.equal(tray.iconPath, 'icon.ico');
-    assert.equal(tray.tooltip, 'Voice Room');
+    assert.equal(tray.tooltip, 'VoiceRoom');
   });
 
   it('swaps the tray icon when the app icon theme changes', () => {
@@ -251,17 +251,17 @@ describe('window lifecycle controller', () => {
     controller.refreshTrayIcon();
     assert.equal(trayInstances[0].iconPath, 'ice.ico');
 
-    controller.setCallMenu({ inCall: true, items: [], tooltip: 'Voice Room' });
+    controller.setCallMenu({ inCall: true, items: [], tooltip: 'VoiceRoom' });
     assert.equal(trayInstances[0].iconPath, 'in-call-ice.ico');
   });
 
   it('creates the tray with the call state set before it existed', () => {
     const { controller, trayInstances } = createControllerHarness();
-    controller.setCallMenu({ inCall: true, items: [{ label: 'Отключиться', click() {} }], tooltip: 'Voice Room — в звонке' });
+    controller.setCallMenu({ inCall: true, items: [{ label: 'Отключиться', click() {} }], tooltip: 'VoiceRoom — в звонке' });
     controller.installTray();
 
     assert.equal(trayInstances[0].iconPath, 'in-call.png');
-    assert.equal(trayInstances[0].tooltip, 'Voice Room — в звонке');
+    assert.equal(trayInstances[0].tooltip, 'VoiceRoom — в звонке');
     assert.equal(trayInstances[0].menu[2].label, 'Отключиться');
   });
 
@@ -276,13 +276,13 @@ describe('window lifecycle controller', () => {
     });
 
     const menu = trayInstances[0].menu;
-    assert.deepEqual(menu.map(({ label }) => label), ['Открыть Voice Room', 'Установить обновление 1.3.1', 'Диагностика', 'Выход']);
+    assert.deepEqual(menu.map(({ label }) => label), ['Открыть VoiceRoom', 'Установить обновление 1.3.1', 'Диагностика', 'Выход']);
     assert.deepEqual(menu[2].submenu.map(({ label }) => label), ['Открыть папку логов', 'Скопировать информацию о системе']);
     menu[2].submenu.forEach((item) => item.click());
     assert.deepEqual(calls, ['logs', 'copy']);
 
     controller.setDiagnosticsActions(null);
-    assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), ['Открыть Voice Room', 'Установить обновление 1.3.1', 'Выход']);
+    assert.deepEqual(trayInstances[0].menu.map(({ label }) => label), ['Открыть VoiceRoom', 'Установить обновление 1.3.1', 'Выход']);
   });
 
   it('exposes the live main window only', () => {

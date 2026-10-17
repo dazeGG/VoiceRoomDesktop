@@ -122,7 +122,7 @@ function createAppIconController({
   function configureIpc({ ipcMain, isTrustedFrame }) {
     const assertTrustedSender = (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('The app icon is only available for the configured Voice Room URL.');
+        throw new Error('The app icon is only available for the configured VoiceRoom URL.');
       }
     };
 

@@ -147,7 +147,7 @@ describe('desktop diagnostics controller', () => {
     assert.deepEqual(info.context, { roomId: 'room-1', userId: 'user-7' });
     assert.equal(info.voiceActive, true);
     assert.equal(info.text, [
-      'Voice Room Desktop diagnostics',
+      'VoiceRoom Desktop diagnostics',
       'generated: 2026-09-11T10:00:00.000Z',
       'app: 1.3.0 (stable, nsis)',
       'electron: 41.10.2, chromium: 146.0.0.0, node: 24.1.0',
@@ -237,7 +237,7 @@ describe('desktop diagnostics controller', () => {
     for (const channel of [GET_INFO_CHANNEL, COPY_INFO_CHANNEL, OPEN_LOGS_CHANNEL, SET_CONTEXT_CHANNEL]) {
       assert.throws(
         () => handlers.get(channel)({ senderFrame: { trusted: false } }),
-        /Desktop diagnostics are only available for the configured Voice Room URL\./
+        /Desktop diagnostics are only available for the configured VoiceRoom URL\./
       );
     }
   });

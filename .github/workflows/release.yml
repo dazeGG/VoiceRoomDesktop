@@ -180,7 +180,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.validate.outputs.tag }}
-          name: Voice Room ${{ needs.validate.outputs.version }}
+          name: VoiceRoom ${{ needs.validate.outputs.version }}
           draft: false
           prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
           fail_on_unmatched_files: true

@@ -265,7 +265,7 @@ function rememberSession(session) {
 }
 
 function getSafeSystemAudioHelperArgs(options = {}) {
-  // Pass the main process PID so the macOS helper can exclude the entire Voice Room
+  // Pass the main process PID so the macOS helper can exclude the entire VoiceRoom
   // process tree from the system-audio capture (mirrors Windows EXCLUDE_TARGET_PROCESS_TREE).
   if (process.platform === 'darwin') return ['--safe-system', '--exclude-pid', String(process.pid)];
 

@@ -52,7 +52,7 @@ function createDevDiagnosticsController({
       height: 820,
       parent: parentWindow || undefined,
       show: false,
-      title: 'Voice Room WebRTC Internals',
+      title: 'VoiceRoom WebRTC Internals',
       width: 1180,
       webPreferences: {
         contextIsolation: true,

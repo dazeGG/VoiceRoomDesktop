@@ -161,7 +161,7 @@ const VOICE_ROOM = {
   bounds: { height: 900, width: 1400, x: 100, y: 100 },
   exe: 'C:\\Users\\me\\AppData\\Local\\Programs\\voice-room-desktop\\Voice Room.exe',
   pid: VOICE_ROOM_PID,
-  title: 'Voice Room'
+  title: 'VoiceRoom'
 };
 
 const CUSTOM_GAME = {
@@ -412,7 +412,7 @@ describe('desktop overlay controller', () => {
     assert.equal(windows[0].visible, true);
   });
 
-  it('offers the last window before Voice Room for the allowlist, outside a call too', (t) => {
+  it('offers the last window before VoiceRoom for the allowlist, outside a call too', (t) => {
     const { controller, watcher } = createHarness(t);
     controller.attachMainWindow(new FakeMainWindow());
     assert.equal(watcher.running, false);

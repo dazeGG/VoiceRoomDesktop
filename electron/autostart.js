@@ -121,7 +121,7 @@ function createAutostartController({
   function configureIpc({ ipcMain, isTrustedFrame }) {
     const assertTrustedSender = (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop autostart is only available for the configured Voice Room URL.');
+        throw new Error('Desktop autostart is only available for the configured VoiceRoom URL.');
       }
     };
 

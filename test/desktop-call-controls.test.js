@@ -53,7 +53,7 @@ describe('call state sanitizing', () => {
 describe('call control descriptions', () => {
   it('lists no controls outside a call', () => {
     assert.deepEqual(describeCallControls(INACTIVE_CALL_STATE), []);
-    assert.equal(describeCallTooltip(INACTIVE_CALL_STATE), 'Voice Room');
+    assert.equal(describeCallTooltip(INACTIVE_CALL_STATE), 'VoiceRoom');
   });
 
   it('labels actions and shows state icons', () => {
@@ -66,8 +66,8 @@ describe('call control descriptions', () => {
       describeCallControls({ ...ACTIVE, micMuted: true, outputMuted: true }).map(({ icon, label }) => [icon, label]),
       [['mic-off', 'Включить микрофон'], ['headphone-off', 'Включить звук'], ['phone-off', 'Отключиться']]
     );
-    assert.equal(describeCallTooltip(ACTIVE), 'Voice Room — Гостиная');
-    assert.equal(describeCallTooltip({ ...ACTIVE, roomName: '' }), 'Voice Room — в звонке');
+    assert.equal(describeCallTooltip(ACTIVE), 'VoiceRoom — Гостиная');
+    assert.equal(describeCallTooltip({ ...ACTIVE, roomName: '' }), 'VoiceRoom — в звонке');
   });
 });
 
@@ -150,7 +150,7 @@ describe('call controls controller', () => {
 
     assert.throws(
       () => handlers.get(STATE_CHANNEL)({ sender, senderFrame: { trusted: false } }, ACTIVE),
-      /Desktop call controls are only available for the configured Voice Room URL\./
+      /Desktop call controls are only available for the configured VoiceRoom URL\./
     );
     assert.equal(controller.getState().active, false);
     assert.deepEqual(handlers.get(STATE_CHANNEL)({ sender, senderFrame: { trusted: true } }, ACTIVE), ACTIVE);

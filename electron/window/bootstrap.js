@@ -18,12 +18,12 @@ function showRendererRecovery(window, details = {}, { log } = {}) {
 
 function loadMainApplication(window, appUrl, { dialog: dialogModule = dialog } = {}) {
   if (!appUrl) {
-    dialogModule.showErrorBox('Voice Room', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
+    dialogModule.showErrorBox('VoiceRoom', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
     return Promise.resolve();
   }
 
   return window.loadURL(appUrl).catch((error) => {
-    dialogModule.showErrorBox('Voice Room', `Не удалось открыть ${appUrl}\n\n${error.message}`);
+    dialogModule.showErrorBox('VoiceRoom', `Не удалось открыть ${appUrl}\n\n${error.message}`);
   });
 }
 
@@ -103,7 +103,7 @@ function createPickerPreviewWindow({ browserWindow = BrowserWindow, dialog: dial
     minHeight: 640,
     minWidth: 760,
     show: false,
-    title: 'Voice Room Stream Picker Preview',
+    title: 'VoiceRoom Stream Picker Preview',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       contextIsolation: true,
@@ -118,7 +118,7 @@ function createPickerPreviewWindow({ browserWindow = BrowserWindow, dialog: dial
   });
 
   previewWindow.loadFile(path.join(__dirname, '../ui/screen-picker-preview.html')).catch((error) => {
-    dialogModule.showErrorBox('Voice Room', `Не удалось открыть preview\n\n${error.message}`);
+    dialogModule.showErrorBox('VoiceRoom', `Не удалось открыть preview\n\n${error.message}`);
   });
 }
 

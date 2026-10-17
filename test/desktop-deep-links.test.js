@@ -401,7 +401,7 @@ describe('deep link controller', () => {
     const harness = createHarness();
     assert.throws(
       () => harness.ready(new FakeWebContents(), { trusted: false }),
-      /Desktop links are only available for the configured Voice Room URL\./
+      /Desktop links are only available for the configured VoiceRoom URL\./
     );
   });
 

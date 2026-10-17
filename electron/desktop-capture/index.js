@@ -49,7 +49,7 @@ const log = require('../logger');
 function configureDesktopCaptureIpc() {
   ipcMain.handle('desktop-capture:get-sources', async (event) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     const frameKey = getFrameScopeKey(event.senderFrame);
@@ -62,7 +62,7 @@ function configureDesktopCaptureIpc() {
   ipcMain.handle('desktop-capture:open-picker', async (event, options = {}) => {
     const frameKey = getFrameScopeKey(event.senderFrame);
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     const parentWindow = BrowserWindow.fromWebContents(event.sender);
@@ -112,7 +112,7 @@ function configureDesktopCaptureIpc() {
     const normalizedCaptureOptions = typeof captureOptions === 'object' && captureOptions !== null ? captureOptions : {};
     const frameKey = getFrameScopeKey(event.senderFrame);
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     const source = await getDesktopCaptureSourceForSelection(frameKey, sourceId);
@@ -136,7 +136,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('desktop-audio:get-capabilities', (event) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+      throw new Error('Desktop audio is only available for the configured VoiceRoom URL.');
     }
 
     return getDesktopAudioCapabilities();
@@ -144,7 +144,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('native-capture:prepare', (event) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     const pending = peekPendingDesktopCaptureSource(event.senderFrame);
@@ -172,7 +172,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('native-capture:commit-prepared', (event, sourceId = '') => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     clearPendingDesktopCaptureSource(String(sourceId || ''));
@@ -181,7 +181,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('native-capture:start', (event) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     const granted = takeGrantedDesktopCapture(event.senderFrame);
@@ -203,7 +203,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('native-capture:stop', (event, sessionId = '') => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     return stopNativeCaptureSession(String(sessionId || ''));
@@ -211,7 +211,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('desktop-capture:apply-profile', async (event, options = {}) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop capture is only available for the configured Voice Room URL.');
+      throw new Error('Desktop capture is only available for the configured VoiceRoom URL.');
     }
 
     const { fps, fpsId, maxHeight, maxWidth, qualityId } = normalizeApplyProfileRequest(options);
@@ -239,7 +239,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('desktop-audio:start-safe-system', (event, options = {}) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+      throw new Error('Desktop audio is only available for the configured VoiceRoom URL.');
     }
 
     // The page never chooses the app window itself: only the shell's picker does.
@@ -253,7 +253,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('desktop-audio:ensure-media-access', async (event) => {
     if (!isTrustedOrAppLoadingFrame(event.senderFrame)) {
-      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+      throw new Error('Desktop audio is only available for the configured VoiceRoom URL.');
     }
 
     return ensureMacMicrophoneAccess();
@@ -261,7 +261,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('desktop-audio:open-settings', (event, options = {}) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+      throw new Error('Desktop audio is only available for the configured VoiceRoom URL.');
     }
 
     if (process.platform === 'darwin') {
@@ -279,7 +279,7 @@ function configureDesktopCaptureIpc() {
 
   ipcMain.handle('desktop-audio:stop', (event, sessionId = '') => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop audio is only available for the configured Voice Room URL.');
+      throw new Error('Desktop audio is only available for the configured VoiceRoom URL.');
     }
 
     return stopSafeSystemAudioCapture(sessionId);

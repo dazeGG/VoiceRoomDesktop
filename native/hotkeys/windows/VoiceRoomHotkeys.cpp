@@ -1,4 +1,4 @@
-// Voice Room native global-hotkey helper for Windows.
+// VoiceRoom native global-hotkey helper for Windows.
 //
 // The helper deliberately uses WH_KEYBOARD_LL instead of RegisterHotKey:
 // RegisterHotKey cannot report key-up, which is required for push-to-talk.
@@ -639,7 +639,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM message, LPARAM data) {
     }
   }
 
-  // Voice Room observes global input but never reserves or swallows it.
+  // VoiceRoom observes global input but never reserves or swallows it.
   return CallNextHookEx(g_hook, code, message, data);
 }
 

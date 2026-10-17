@@ -295,7 +295,7 @@ function createDeepLinkController({
   function configureIpc({ ipcMain }) {
     ipcMain.handle(READY_CHANNEL, (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop links are only available for the configured Voice Room URL.');
+        throw new Error('Desktop links are only available for the configured VoiceRoom URL.');
       }
       const state = pageState(event.sender);
       state.subscribed = true;
@@ -309,7 +309,7 @@ function createDeepLinkController({
     // later links fall back to navigation instead of reaching no listener.
     ipcMain.handle(UNSUBSCRIBE_CHANNEL, (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop links are only available for the configured Voice Room URL.');
+        throw new Error('Desktop links are only available for the configured VoiceRoom URL.');
       }
       pageState(event.sender).subscribed = false;
       return { ok: true };

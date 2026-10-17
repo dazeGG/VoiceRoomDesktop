@@ -113,6 +113,6 @@ test('nothing installs without a downloaded release, without an updater or from 
   assert.throws(() => ipc.invoke(INSTALL_CHANNEL), /No downloaded update/);
 
   updater.state = { phase: 'ready', version: '1.5.0' };
-  assert.throws(() => ipc.invoke(INSTALL_CHANNEL, { url: 'https://evil.example/' }), /configured Voice Room URL/);
+  assert.throws(() => ipc.invoke(INSTALL_CHANNEL, { url: 'https://evil.example/' }), /configured VoiceRoom URL/);
   assert.deepEqual(updater.installs, []);
 });

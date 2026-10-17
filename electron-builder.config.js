@@ -34,7 +34,7 @@ module.exports = {
   // their own scheme so they never capture production links.
   protocols: [
     {
-      name: 'Voice Room',
+      name: 'VoiceRoom',
       schemes: [isDevBuild ? 'voiceroom-dev' : 'voiceroom']
     }
   ],
@@ -154,15 +154,15 @@ module.exports = {
           }
         ],
     extendInfo: {
-      NSMicrophoneUsageDescription: 'Voice Room использует микрофон для голосового чата.',
-      NSScreenCaptureDescription: 'Voice Room использует запись экрана для демонстрации экрана участникам комнаты.',
-      NSAudioCaptureUsageDescription: 'Voice Room использует системный звук во время демонстрации экрана, если он доступен.',
-      NSCameraUsageDescription: 'Voice Room не использует камеру, но системный WebRTC-диалог может запросить это разрешение.'
+      NSMicrophoneUsageDescription: 'VoiceRoom использует микрофон для голосового чата.',
+      NSScreenCaptureDescription: 'VoiceRoom использует запись экрана для демонстрации экрана участникам комнаты.',
+      NSAudioCaptureUsageDescription: 'VoiceRoom использует системный звук во время демонстрации экрана, если он доступен.',
+      NSCameraUsageDescription: 'VoiceRoom не использует камеру, но системный WebRTC-диалог может запросить это разрешение.'
     }
   },
   win: {
     icon: 'assets/logo/icon.ico',
-    legalTrademarks: 'Voice Room',
+    legalTrademarks: 'VoiceRoom',
     // Dev: single portable .exe (no auto-update; the dev channel skips the update
     // gate anyway). Stable: nsis installer (emits latest.yml + .blockmap so
     // electron-updater can auto-update in place) plus the portable .exe as a

@@ -2,9 +2,9 @@
   "name": "voice-room-desktop",
   "version": "1.4.6",
   "private": true,
-  "description": "Voice Room",
+  "description": "VoiceRoom",
   "author": {
-    "name": "Voice Room"
+    "name": "VoiceRoom"
   },
   "main": "electron/main.js",
   "scripts": {

@@ -67,8 +67,8 @@ function describeCallControls(state) {
 }
 
 function describeCallTooltip(state) {
-  if (!state?.active) return 'Voice Room';
-  return state.roomName ? `Voice Room — ${state.roomName}` : 'Voice Room — в звонке';
+  if (!state?.active) return 'VoiceRoom';
+  return state.roomName ? `VoiceRoom — ${state.roomName}` : 'VoiceRoom — в звонке';
 }
 
 function createCallControlsController({ log = console } = {}) {
@@ -146,7 +146,7 @@ function createCallControlsController({ log = console } = {}) {
   function configureIpc({ ipcMain, isTrustedFrame }) {
     ipcMain.handle(STATE_CHANNEL, (event, payload) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop call controls are only available for the configured Voice Room URL.');
+        throw new Error('Desktop call controls are only available for the configured VoiceRoom URL.');
       }
       return { ...setState(event.sender, payload) };
     });

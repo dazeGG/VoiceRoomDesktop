@@ -265,7 +265,7 @@ function createForegroundWatcher({
     try {
       proc.kill();
     } catch {
-      // The watcher is best-effort; the script also exits once Voice Room is gone.
+      // The watcher is best-effort; the script also exits once VoiceRoom is gone.
     }
   }
 

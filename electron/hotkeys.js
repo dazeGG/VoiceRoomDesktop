@@ -412,7 +412,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
 
   async function configure(event, payload = {}) {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop hotkeys are only available for the configured Voice Room URL.');
+      throw new Error('Desktop hotkeys are only available for the configured VoiceRoom URL.');
     }
 
     const nextGeneration = ++generation;
@@ -448,7 +448,7 @@ function createDesktopHotkeyController({ globalShortcut, isTrustedFrame, nativeH
 
   function setSuspended(event, nextSuspended) {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop hotkeys are only available for the configured Voice Room URL.');
+      throw new Error('Desktop hotkeys are only available for the configured VoiceRoom URL.');
     }
     if (event.sender !== owner || !voiceActive) return false;
     rendererSuspended = Boolean(nextSuspended);

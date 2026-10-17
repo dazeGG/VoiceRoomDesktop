@@ -46,11 +46,11 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     let configuration = SCStreamConfiguration()
     configuration.capturesAudio = true
     // TODO: excludesCurrentProcessAudio исключает аудио только самого процесса-хелпера,
-    // а не основного приложения Voice Room (это разные процессы), поэтому в захват может
+    // а не основного приложения VoiceRoom (это разные процессы), поэтому в захват может
     // попасть воспроизведение голосов других участников → возможное эхо. На Windows это
     // решено исключением дерева процессов; per-app-исключения чужого процесса в SCK (13.0)
     // нет. Чистое решение — выполнять SCK-захват внутри процесса, проигрывающего звук
-    // Voice Room. Отдельная задача, не блокер «нет звука».
+    // VoiceRoom. Отдельная задача, не блокер «нет звука».
     configuration.excludesCurrentProcessAudio = true
     configuration.sampleRate = defaultSampleRate
     configuration.channelCount = defaultChannelCount
@@ -223,8 +223,8 @@ final class SafeSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
 
 // MARK: - Core Audio process tap (macOS 14.4+)
 
-// Captures the system audio mix while EXCLUDING the entire Voice Room process tree, so the
-// stream does not re-capture other participants' voices played back by Voice Room (no echo).
+// Captures the system audio mix while EXCLUDING the entire VoiceRoom process tree, so the
+// stream does not re-capture other participants' voices played back by VoiceRoom (no echo).
 // This is the macOS equivalent of the Windows EXCLUDE_TARGET_PROCESS_TREE loopback. Mirrors
 // insidegui/AudioCap and Apple's "Capturing system audio with Core Audio taps".
 @available(macOS 14.4, *)
@@ -242,7 +242,7 @@ final class ProcessTapCapture {
   }
 
   func start() throws {
-    // 1. All PIDs of the Voice Room process tree (main Electron process + children, including
+    // 1. All PIDs of the VoiceRoom process tree (main Electron process + children, including
     //    the Chromium audio service process that actually plays participant audio).
     let treePids = collectProcessTree(root: excludePid)
 
@@ -490,7 +490,7 @@ struct VoiceRoomSafeSystemAudioMain {
       Foundation.exit(64)
     }
 
-    // macOS 14.4+: Core Audio process tap that excludes the Voice Room process tree (no echo).
+    // macOS 14.4+: Core Audio process tap that excludes the VoiceRoom process tree (no echo).
     if #available(macOS 14.4, *) {
       let tap = ProcessTapCapture(excludePid: parseExcludePid(arguments) ?? getppid())
       do {

@@ -63,13 +63,13 @@ function createUpdateBridge({ isTrustedUrl = () => true, log = console } = {}) {
   function configureIpc({ ipcMain, isTrustedFrame }) {
     ipcMain.handle(GET_STATE_CHANNEL, (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop update state is only available for the configured Voice Room URL.');
+        throw new Error('Desktop update state is only available for the configured VoiceRoom URL.');
       }
       return getState();
     });
     ipcMain.handle(INSTALL_CHANNEL, (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop updates can only be installed from the configured Voice Room URL.');
+        throw new Error('Desktop updates can only be installed from the configured VoiceRoom URL.');
       }
       // The page asks only outside a call; the updater still refuses unless a release is ready.
       const started = updater?.installNow?.({ startHidden: false }) === true;

@@ -191,7 +191,7 @@ int wmain(int argc, wchar_t** argv) {
   DWORD targetPid = ReadDWORDArg(argc, argv, L"--target-pid", GetCurrentProcessId());
   bool includeTarget = HasArg(argc, argv, L"--include-target");
   // --target-window captures only the app that owns the window. When it is gone the
-  // helper falls back to everything except --target-pid (Voice Room itself).
+  // helper falls back to everything except --target-pid (VoiceRoom itself).
   const uint64_t targetWindow = ReadUInt64Arg(argc, argv, L"--target-window");
   if (targetWindow != 0) {
     const DWORD windowPid = ResolveWindowProcess(reinterpret_cast<HWND>(static_cast<uintptr_t>(targetWindow)));
@@ -298,7 +298,7 @@ int wmain(int argc, wchar_t** argv) {
   }
 
   // A capture client that keeps failing never recovers by itself, and a closed
-  // stdout means Voice Room is gone. Exit in both cases instead of spinning
+  // stdout means VoiceRoom is gone. Exit in both cases instead of spinning
   // silently: a non-zero code lets the shell start a fresh helper.
   constexpr int kMaxConsecutiveFailures = 20;
   int consecutiveFailures = 0;

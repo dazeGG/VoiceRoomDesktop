@@ -7,11 +7,11 @@ function formatUpdateErrorMessage() {
 }
 
 function formatCheckingSiteMessage() {
-  return 'Проверяем доступ к Voice Room...';
+  return 'Проверяем доступ к VoiceRoom...';
 }
 
 function formatSiteUnavailableMessage() {
-  return 'Сайт Voice Room недоступен. Проверьте подключение к интернету.';
+  return 'Сайт VoiceRoom недоступен. Проверьте подключение к интернету.';
 }
 
 function isSiteAvailabilityStatus(status) {
@@ -64,7 +64,7 @@ function createUpdateErrorState({ canProceed = true } = {}) {
     canProceed,
     message: canProceed
       ? `${formatUpdateErrorMessage()} Можно войти в приложение без обновления.`
-      : `${formatUpdateErrorMessage()} Проверяем доступ к Voice Room...`,
+      : `${formatUpdateErrorMessage()} Проверяем доступ к VoiceRoom...`,
     phase: 'update-error',
     progress: null
   };

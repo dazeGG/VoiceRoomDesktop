@@ -15,7 +15,7 @@ const checklist = fs.readFileSync(checklistPath, 'utf8');
 const requiredChecks = [
   'Click the titlebar **X**',
   'Click the tray icon',
-  'Открыть Voice Room',
+  'Открыть VoiceRoom',
   'Alt+F4',
   'Выход',
   'VOICE_ROOM_PICKER_PREVIEW=1'

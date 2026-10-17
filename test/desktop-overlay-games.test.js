@@ -95,7 +95,7 @@ describe('overlay foreground script path', () => {
 });
 
 describe('overlay game candidates', () => {
-  it('offers games and unknown apps, never Voice Room, browsers or launchers', () => {
+  it('offers games and unknown apps, never VoiceRoom, browsers or launchers', () => {
     assert.equal(isGameCandidate(classifyForegroundApp({ exe: 'D:\\Games\\WeirdTitle\\weirdtitle.exe' })), true);
     assert.equal(isGameCandidate(classifyForegroundApp({
       exe: 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Dota 2\\game\\bin\\win64\\dota2.exe'

@@ -83,7 +83,7 @@ describe('update gate site availability policy', () => {
     assert.deepEqual(createUpdateErrorState({ canProceed: false }), {
       blocked: false,
       canProceed: false,
-      message: 'Не удалось проверить или загрузить обновление. Проверяем доступ к Voice Room...',
+      message: 'Не удалось проверить или загрузить обновление. Проверяем доступ к VoiceRoom...',
       phase: 'update-error',
       progress: null
     });
@@ -99,7 +99,7 @@ describe('update gate site availability policy', () => {
     assert.deepEqual(createSiteUnavailableState(), {
       blocked: true,
       canProceed: false,
-      message: 'Сайт Voice Room недоступен. Проверьте подключение к интернету.',
+      message: 'Сайт VoiceRoom недоступен. Проверьте подключение к интернету.',
       phase: 'site-unavailable',
       progress: null
     });

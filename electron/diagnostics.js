@@ -139,7 +139,7 @@ function formatStreamHealthLines(health) {
 // Plain "key: value" lines: easy to paste into a chat and to grep for.
 function formatDiagnosticsText(info) {
   return [
-    'Voice Room Desktop diagnostics',
+    'VoiceRoom Desktop diagnostics',
     `generated: ${info.generatedAt}`,
     `app: ${info.app.version} (${info.app.channel}, ${info.app.packageType})`,
     `electron: ${info.runtime.electron}, chromium: ${info.runtime.chromium}, node: ${info.runtime.node}`,
@@ -280,7 +280,7 @@ function createDiagnosticsController({
   function configureIpc({ ipcMain, isTrustedFrame }) {
     const trusted = (handler) => (event, ...args) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop diagnostics are only available for the configured Voice Room URL.');
+        throw new Error('Desktop diagnostics are only available for the configured VoiceRoom URL.');
       }
       return handler(...args);
     };

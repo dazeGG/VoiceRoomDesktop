@@ -1,4 +1,4 @@
-// ScreenCursorCapture: Windows screen/window capture helper for Voice Room.
+// ScreenCursorCapture: Windows screen/window capture helper for VoiceRoom.
 //
 // Why this exists: every capture backend available to Chromium gets the cursor
 // wrong when an application hides it. WGC lets the OS bake the cursor into the

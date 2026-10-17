@@ -109,7 +109,7 @@ async function run() {
 
   const relayEntry = path.join(__dirname, '..', '..', 'electron', 'native', 'capture-relay.js');
   relay = utilityProcess.fork(relayEntry, [], {
-    serviceName: 'Voice Room Native Capture Relay Termination Fixture',
+    serviceName: 'VoiceRoom Native Capture Relay Termination Fixture',
     stdio: 'ignore'
   });
   const channel = new MessageChannelMain();

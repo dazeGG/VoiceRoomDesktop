@@ -90,7 +90,7 @@ function startNativeCaptureSession(webContents, options = {}) {
   let relay = null;
   try {
     relay = utilityProcess.fork(path.join(__dirname, 'capture-relay.js'), [], {
-      serviceName: 'Voice Room Native Capture Relay',
+      serviceName: 'VoiceRoom Native Capture Relay',
       stdio: 'ignore'
     });
   } catch (error) {

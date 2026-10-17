@@ -64,7 +64,7 @@ function getMacScreenCaptureStatus() {
 
 function createMacScreenCaptureAccessError(cause) {
   const status = getMacScreenCaptureStatus();
-  const appName = app.getName() || 'Voice Room';
+  const appName = app.getName() || 'VoiceRoom';
   const devHint = process.defaultApp ? ' При запуске через npm run electron разрешение может называться Electron.' : '';
   const causeText = cause?.message ? `\nElectron: ${cause.message}` : '';
   const error = new Error(

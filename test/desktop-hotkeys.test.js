@@ -308,7 +308,7 @@ test('controller rejects untrusted frames and cleans up only after completed doc
   const untrusted = createController({ trusted: false }).controller;
   await assert.rejects(
     untrusted.configure({ sender: createSender(), senderFrame: {} }, { active: true }),
-    /configured Voice Room URL/
+    /configured VoiceRoom URL/
   );
 
   const { controller, globalShortcut } = createController();

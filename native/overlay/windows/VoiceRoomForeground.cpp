@@ -1,4 +1,4 @@
-// Voice Room foreground-window helper for the in-game overlay (Windows).
+// VoiceRoom foreground-window helper for the in-game overlay (Windows).
 //
 // Replaces the PowerShell poller (foreground.ps1) and prints the same JSON Lines:
 //   {"pid":1,"hwnd":2,"exe":"C:\\...\\game.exe","title":"...","minimized":false,
@@ -13,7 +13,7 @@
 //
 // CLI:
 //   VoiceRoomForeground.exe [--parent-pid <pid>] [--once]
-// --parent-pid exits the helper when Voice Room exits; --once prints the ready
+// --parent-pid exits the helper when VoiceRoom exits; --once prints the ready
 // line and one snapshot, then exits (used by the build smoke test).
 
 #define WIN32_LEAN_AND_MEAN
@@ -185,7 +185,7 @@ bool WriteLine(const std::string& line) {
   return std::fflush(stdout) == 0;
 }
 
-// Returns false once stdout is gone: Voice Room stopped listening.
+// Returns false once stdout is gone: VoiceRoom stopped listening.
 bool EmitIfChanged() {
   std::string json;
   if (!BuildSnapshot(&json) || json == g_lastJson) return true;

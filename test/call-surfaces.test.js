@@ -83,7 +83,7 @@ describe('call surfaces on Windows', () => {
     harness.surfaces.apply(ACTIVE);
     assert.equal(harness.callMenus.length, 1);
     assert.equal(harness.callMenus[0].inCall, true);
-    assert.equal(harness.callMenus[0].tooltip, 'Voice Room — Гостиная');
+    assert.equal(harness.callMenus[0].tooltip, 'VoiceRoom — Гостиная');
     assert.deepEqual(harness.callMenus[0].items.map(({ label }) => label), ['Включить микрофон', 'Выключить звук', 'Отключиться']);
     harness.callMenus[0].items[2].click();
     assert.deepEqual(harness.dispatched, ['disconnect']);
@@ -91,7 +91,7 @@ describe('call surfaces on Windows', () => {
     assert.deepEqual(harness.window.thumbarCalls.at(-1)[0].icon, { iconPath: path.join(CALL_ICONS_DIR, 'mic-off-light.png') });
 
     harness.surfaces.apply(INACTIVE_CALL_STATE);
-    assert.deepEqual(harness.callMenus.at(-1), { inCall: false, items: [], tooltip: 'Voice Room' });
+    assert.deepEqual(harness.callMenus.at(-1), { inCall: false, items: [], tooltip: 'VoiceRoom' });
     assert.deepEqual(harness.window.thumbarCalls.at(-1), []);
   });
 

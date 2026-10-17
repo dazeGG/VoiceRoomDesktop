@@ -290,7 +290,7 @@ function updateSourceSelection() {
 }
 
 // A window share can carry only that app's sound; a screen share always carries
-// everything except Voice Room.
+// everything except VoiceRoom.
 function canChooseAppAudio() {
   return state.appAudioSupported && state.sourceType === 'window' && elements.audioToggle.checked;
 }

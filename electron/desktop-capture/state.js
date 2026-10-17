@@ -295,7 +295,7 @@ function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
     resizable: false,
     show: false,
     skipTaskbar: true,
-    title: 'Voice Room Stream Picker',
+    title: 'VoiceRoom Stream Picker',
     transparent: Boolean(overlayBounds),
     webPreferences: {
       contextIsolation: true,

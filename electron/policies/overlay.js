@@ -43,7 +43,7 @@ function sanitizeAvatarUrl(value, baseUrl = '') {
   if (typeof value !== 'string' || !value || value.length > 512) return '';
   try {
     // The API hands out same-origin paths such as /api/avatars/<key>. The overlay page
-    // is a file:// document, so resolve them against the Voice Room URL.
+    // is a file:// document, so resolve them against the VoiceRoom URL.
     const relative = value.startsWith('/') && !value.startsWith('//');
     if (relative && !baseUrl) return '';
     const url = relative ? new URL(value, baseUrl) : new URL(value);

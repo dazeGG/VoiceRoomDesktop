@@ -57,7 +57,7 @@ describe('desktop idle bridge', () => {
 
     assert.throws(
       () => handlers.get(CHANNEL)(createEvent('https://evil.example')),
-      /Desktop idle time is only available for the configured Voice Room URL\./
+      /Desktop idle time is only available for the configured VoiceRoom URL\./
     );
     assert.equal(reads, 0);
   });

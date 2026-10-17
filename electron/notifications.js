@@ -52,7 +52,7 @@ function showDesktopNotification({ Notification, payload, restoreMainWindow, ope
   const notification = new Notification({
     body: sanitized.body || '',
     silent: true,
-    title: sanitized.title || 'Voice Room'
+    title: sanitized.title || 'VoiceRoom'
   });
 
   const replaced = tag ? notificationsByTag.get(tag) : null;
@@ -110,7 +110,7 @@ function showDesktopNotification({ Notification, payload, restoreMainWindow, ope
 function configureDesktopNotificationsIpc({ ipcMain, Notification, isTrustedFrame, restoreMainWindow, openRoute }) {
   ipcMain.handle(CHANNEL, (event, payload = {}) => {
     if (!isTrustedFrame(event.senderFrame)) {
-      throw new Error('Desktop notifications are only available for the configured Voice Room URL.');
+      throw new Error('Desktop notifications are only available for the configured VoiceRoom URL.');
     }
 
     if (!Notification?.isSupported?.()) {

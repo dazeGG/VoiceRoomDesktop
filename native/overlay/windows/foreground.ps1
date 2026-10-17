@@ -137,7 +137,7 @@ while ($true) {
     }
   }
   if ($parentHandle -ne [IntPtr]::Zero) {
-    # Doubles as the poll delay: returns early only when Voice Room exits.
+    # Doubles as the poll delay: returns early only when VoiceRoom exits.
     if ([VoiceRoomForeground]::WaitForSingleObject($parentHandle, [uint32]$delay) -eq $WAIT_OBJECT_0) { break }
   } else {
     if ($ParentPid -gt 0 -and -not (Get-Process -Id $ParentPid)) { break }

@@ -91,7 +91,7 @@ function createSystemEventsController({ isTrustedUrl = () => true, log = console
   function configureIpc({ ipcMain, isTrustedFrame }) {
     ipcMain.handle(GET_STATE_CHANNEL, (event) => {
       if (!isTrustedFrame(event.senderFrame)) {
-        throw new Error('Desktop system state is only available for the configured Voice Room URL.');
+        throw new Error('Desktop system state is only available for the configured VoiceRoom URL.');
       }
       return getState();
     });

@@ -8,22 +8,22 @@ const outputDir = (process.env.VOICE_ROOM_DIST_DIR || 'dist').trim();
 // targets (mac .zip, Windows nsis installer) plus their latest*.yml + .blockmap.
 const isDevBuild = (process.env.VOICE_ROOM_DEV_BUILD || '') === '1';
 
-// Base artifact name shared by every target.
-//
-// The product slug is hard-coded as "Voice-Room" instead of ${productName}
-// on purpose: productName is "Voice Room" (with a space), and a space in the
-// filename breaks auto-update. electron-builder rewrites the space to a hyphen
-// in latest.yml, while GitHub rewrites it to a dot in the uploaded asset name —
-// so the URL in latest.yml (Voice-Room-…) never matches the asset (Voice.Room-…)
-// and electron-updater 404s on download. A space-free slug keeps all three
-// (on-disk file, GitHub asset, latest.yml url) identical.
+// Base artifact name shared by every target. The slug must stay free of
+// spaces: electron-builder rewrites a space to a hyphen in latest.yml while
+// GitHub rewrites it to a dot in the uploaded asset name, so the URL in
+// latest.yml would never match the asset and electron-updater 404s. It was
+// "Voice-Room" up to 1.4.6; the site picks assets by their suffix
+// (-mac-arm64.dmg, -win-x64-setup.exe), not by the slug.
 const artifactBase = buildHash
-  ? `Voice-Room-\${version}-${buildHash}-\${os}-\${arch}`
-  : 'Voice-Room-${version}-${os}-${arch}';
+  ? `VoiceRoom-\${version}-${buildHash}-\${os}-\${arch}`
+  : 'VoiceRoom-${version}-${os}-${arch}';
 
 module.exports = {
   appId: 'ru.dazinho.voiceroom',
-  productName: 'Voice Room',
+  // "Voice Room" up to 1.4.6. It names the user data folder, the executable
+  // and the .app bundle; electron/app/legacy-product-name.js moves the old
+  // folders and the Windows autostart entry over on the first launch.
+  productName: 'VoiceRoom',
   publish: {
     provider: 'github',
     owner: 'dazeGG',
@@ -34,7 +34,7 @@ module.exports = {
   // their own scheme so they never capture production links.
   protocols: [
     {
-      name: 'Voice Room',
+      name: 'VoiceRoom',
       schemes: [isDevBuild ? 'voiceroom-dev' : 'voiceroom']
     }
   ],
@@ -61,6 +61,7 @@ module.exports = {
     'electron/window/state.js',
     'electron/app/bootstrap.js',
     'electron/app/launch-mode.js',
+    'electron/app/legacy-product-name.js',
     'electron/build-profile.json',
     'electron/desktop-capture/index.js',
     'electron/desktop-capture/state.js',
@@ -154,15 +155,15 @@ module.exports = {
           }
         ],
     extendInfo: {
-      NSMicrophoneUsageDescription: 'Voice Room использует микрофон для голосового чата.',
-      NSScreenCaptureDescription: 'Voice Room использует запись экрана для демонстрации экрана участникам комнаты.',
-      NSAudioCaptureUsageDescription: 'Voice Room использует системный звук во время демонстрации экрана, если он доступен.',
-      NSCameraUsageDescription: 'Voice Room не использует камеру, но системный WebRTC-диалог может запросить это разрешение.'
+      NSMicrophoneUsageDescription: 'VoiceRoom использует микрофон для голосового чата.',
+      NSScreenCaptureDescription: 'VoiceRoom использует запись экрана для демонстрации экрана участникам комнаты.',
+      NSAudioCaptureUsageDescription: 'VoiceRoom использует системный звук во время демонстрации экрана, если он доступен.',
+      NSCameraUsageDescription: 'VoiceRoom не использует камеру, но системный WebRTC-диалог может запросить это разрешение.'
     }
   },
   win: {
     icon: 'assets/logo/icon.ico',
-    legalTrademarks: 'Voice Room',
+    legalTrademarks: 'VoiceRoom',
     // Dev: single portable .exe (no auto-update; the dev channel skips the update
     // gate anyway). Stable: nsis installer (emits latest.yml + .blockmap so
     // electron-updater can auto-update in place) plus the portable .exe as a

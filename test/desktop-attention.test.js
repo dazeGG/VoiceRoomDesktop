@@ -96,8 +96,8 @@ describe('desktop attention badge', () => {
     for (const platform of ['win32', 'darwin']) {
       const harness = createHarness({ platform, trusted: false });
 
-      assert.throws(() => harness.setBadgeCount(3), /Desktop attention is only available for the configured Voice Room URL\./);
-      assert.throws(() => harness.requestAttention(), /Desktop attention is only available for the configured Voice Room URL\./);
+      assert.throws(() => harness.setBadgeCount(3), /Desktop attention is only available for the configured VoiceRoom URL\./);
+      assert.throws(() => harness.requestAttention(), /Desktop attention is only available for the configured VoiceRoom URL\./);
       assert.deepEqual(harness.badgeCounts, []);
       assert.deepEqual(harness.bounces, []);
       assert.deepEqual(harness.window.overlayCalls, []);

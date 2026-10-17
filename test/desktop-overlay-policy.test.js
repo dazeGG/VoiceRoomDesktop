@@ -65,7 +65,7 @@ describe('overlay snapshot', () => {
     }).participants[0].avatarUrl, '');
   });
 
-  it('resolves same-origin avatar paths against the Voice Room URL', () => {
+  it('resolves same-origin avatar paths against the VoiceRoom URL', () => {
     const baseUrl = 'https://voiceroom.ru';
     const avatarOf = (avatarUrl, options) => sanitizeOverlaySnapshot({
       participants: [{ avatarUrl, id: 'a', name: 'Ann' }]

@@ -43,7 +43,7 @@ function createUpdateSplashWindow() {
     minimizable: false,
     resizable: false,
     show: false,
-    title: 'Voice Room',
+    title: 'VoiceRoom',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       contextIsolation: true,

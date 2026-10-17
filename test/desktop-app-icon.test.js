@@ -173,7 +173,7 @@ describe('app icon controller', () => {
       supported: true,
       theme: 'graphite-ice'
     });
-    assert.throws(() => handlers.get(SET_CHANNEL)({ senderFrame: 'other' }, 'graphite-coral'), /configured Voice Room URL/);
+    assert.throws(() => handlers.get(SET_CHANNEL)({ senderFrame: 'other' }, 'graphite-coral'), /configured VoiceRoom URL/);
     assert.equal(controller.getTheme(), 'graphite-ice');
   });
 });

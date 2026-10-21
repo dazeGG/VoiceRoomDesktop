@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
 const { ADMIN_WINDOW_TITLE, createAdminWindowController } = require('../electron/window/admin-window');
 const { classifyAppUrl } = require('../electron/security/origin');
+const { WINDOW_BACKGROUND } = require('../electron/shell-theme');
 
 const SITE = 'https://voiceroom.ru';
 const ADMIN = 'https://admin.voiceroom.ru';
@@ -88,6 +89,7 @@ describe('admin window', () => {
     const [window] = windows;
     assert.deepEqual(window.loaded, [`${ADMIN}/accounts`]);
     assert.equal(window.options.title, ADMIN_WINDOW_TITLE);
+    assert.equal(window.options.backgroundColor, WINDOW_BACKGROUND);
     assert.deepEqual(window.options.webPreferences, {
       contextIsolation: true,
       nodeIntegration: false,

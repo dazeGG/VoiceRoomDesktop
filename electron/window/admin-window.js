@@ -1,5 +1,7 @@
 'use strict';
 
+const { WINDOW_BACKGROUND } = require('../shell-theme');
+
 const ADMIN_WINDOW_TITLE = 'VoiceRoom — Админка';
 
 /**
@@ -44,6 +46,7 @@ function createAdminWindowController({
 
   function createWindow() {
     const window = new BrowserWindow({
+      backgroundColor: WINDOW_BACKGROUND,
       height: 820,
       minHeight: 560,
       minWidth: 800,

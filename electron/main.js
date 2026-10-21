@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, clipboard, dialog, globalShortcut, ipcMain, shell, nativeImage, nativeTheme, Notification, powerMonitor, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, Menu, Tray, clipboard, dialog, globalShortcut, ipcMain, session, shell, nativeImage, nativeTheme, Notification, powerMonitor, powerSaveBlocker } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -40,7 +40,7 @@ const {
   takePendingDesktopCaptureSource
 } = require('./desktop-capture');
 const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture');
-const { createAdminWindowController } = require('./window/admin-window');
+const { openAdminInBrowser } = require('./window/open-admin');
 const { createWindowLifecycleController } = require('./window/lifecycle');
 const { createWindowStateController } = require('./window/state');
 const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
@@ -54,6 +54,7 @@ const { createDesktopHotkeyController } = require('./hotkeys');
 const { createNativeHotkeyBackend } = require('./native/hotkeys');
 const {
   classifyAppUrl,
+  getAdminOrigin,
   ensureMacMicrophoneAccess,
   grantMacMediaPermission,
   isPermissionContextTrusted,
@@ -355,20 +356,27 @@ function configureWindowIpc() {
   });
 }
 
-const adminWindow = createAdminWindowController({
-  BrowserWindow,
-  classifyUrl: classifyAppUrl,
-  log,
-  onWindowCreated: (window) => {
-    appIcon.attachWindow(window);
-    installContextMenu(window, { Menu, clipboard, log });
-  },
-  restoreMainWindow: () => windowLifecycle.restoreMainWindow(),
-  shell
-});
+function openAdmin(url) {
+  return openAdminInBrowser({
+    adminUrl: url,
+    siteOrigin: TRUSTED_ORIGIN,
+    adminOrigin: getAdminOrigin(TRUSTED_ORIGIN),
+    fetchEntry: async (entryUrl) => {
+      const response = await session.defaultSession.fetch(entryUrl, {
+        headers: { accept: 'application/json' },
+        redirect: 'manual'
+      });
+      if (!response.ok) return null;
+      return response.json();
+    },
+    openExternal: (target) => shell.openExternal(target),
+    log
+  });
+}
 
 const appBootstrap = createAppBootstrap({
-  adminWindow,
+  openAdmin,
+  classifyAppUrl,
   app,
   BrowserWindow,
   dialog,

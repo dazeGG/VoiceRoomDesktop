@@ -13,6 +13,8 @@ const HIDDEN_LOAD_RETRY_MS = 30_000;
 
 function createAppBootstrap({
   app,
+  openAdmin,
+  classifyAppUrl,
   BrowserWindow,
   dialog,
   shell,
@@ -246,20 +248,28 @@ function createAppBootstrap({
 
     installDesktopLayoutCss(mainWindow.webContents, desktopLayoutCss, { log });
 
-    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (isTrustedUrl(url)) return { action: 'allow' };
+    // The main window stays on the site, so a call is not dropped. The admin
+    // app opens in the system browser, and only for a staff session.
+    const leaveSite = (url) => {
+      if (classifyAppUrl(url) === 'admin') {
+        void openAdmin(url);
+        return;
+      }
       shell.openExternal(url).catch((error) => {
         log.warn('Failed to open external URL:', url, error);
       });
+    };
+
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (isTrustedUrl(url)) return { action: 'allow' };
+      leaveSite(url);
       return { action: 'deny' };
     });
 
     mainWindow.webContents.on('will-navigate', (event, url) => {
       if (isTrustedUrl(url)) return;
       event.preventDefault();
-      shell.openExternal(url).catch((error) => {
-        log.warn('Failed to open external URL:', url, error);
-      });
+      leaveSite(url);
     });
 
     mainWindow.webContents.on('render-process-gone', (_event, details) => {

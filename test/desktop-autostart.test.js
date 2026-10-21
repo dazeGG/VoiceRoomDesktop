@@ -187,7 +187,7 @@ describe('desktop autostart controller', () => {
       const { app, controller } = createHarness(t, { execPath: NEW_EXE });
       app.runEntry = { approved: undefined, args: ['--hidden'], path: SPACED_EXE };
 
-      assert.equal(controller.migrateLegacyLoginItem('Voice Room.exe'), true);
+      assert.equal(controller.migrateLegacyLoginItem(), true);
       assert.deepEqual(app.runEntry, { approved: undefined, args: ['--hidden'], path: NEW_EXE });
     });
 
@@ -195,18 +195,18 @@ describe('desktop autostart controller', () => {
       const { app, controller } = createHarness(t, { execPath: NEW_EXE });
       app.runEntry = { approved: false, args: [], path: SPACED_EXE };
 
-      assert.equal(controller.migrateLegacyLoginItem('Voice Room.exe'), true);
+      assert.equal(controller.migrateLegacyLoginItem(), true);
       assert.deepEqual(app.runEntry, { approved: false, args: [], path: NEW_EXE });
     });
 
     it('does nothing when autostart was never on or already points here', (t) => {
       const off = createHarness(t, { execPath: NEW_EXE });
-      assert.equal(off.controller.migrateLegacyLoginItem('Voice Room.exe'), false);
+      assert.equal(off.controller.migrateLegacyLoginItem(), false);
       assert.equal(off.app.setCalls.length, 0);
 
       const current = createHarness(t, { execPath: NEW_EXE });
       current.app.runEntry = { approved: undefined, args: [], path: NEW_EXE };
-      assert.equal(current.controller.migrateLegacyLoginItem('Voice Room.exe'), false);
+      assert.equal(current.controller.migrateLegacyLoginItem(), false);
       assert.equal(current.app.setCalls.length, 0);
     });
   });

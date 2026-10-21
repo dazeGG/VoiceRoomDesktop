@@ -20,9 +20,10 @@ const artifactBase = buildHash
 
 module.exports = {
   appId: 'ru.dazinho.voiceroom',
-  // "Voice Room" up to 1.4.6. It names the user data folder, the executable
-  // and the .app bundle; electron/app/legacy-product-name.js moves the old
-  // folders and the Windows autostart entry over on the first launch.
+  // "Voice Room" up to 1.4.6. It names the executable and the .app bundle,
+  // not the user data folder: Electron takes that from package.json `name`
+  // (voice-room-desktop), which never changed. electron/autostart.js moves
+  // the Windows autostart entry from the old executable.
   productName: 'VoiceRoom',
   publish: {
     provider: 'github',
@@ -61,7 +62,6 @@ module.exports = {
     'electron/window/state.js',
     'electron/app/bootstrap.js',
     'electron/app/launch-mode.js',
-    'electron/app/legacy-product-name.js',
     'electron/build-profile.json',
     'electron/desktop-capture/index.js',
     'electron/desktop-capture/state.js',
@@ -95,6 +95,7 @@ module.exports = {
     'electron/policies/native-capture.js',
     'electron/policies/native-capture-restart.js',
     'electron/policies/windows-capture.js',
+    'electron/window/open-admin.js',
     'electron/window/app-topbar-view.js',
     'electron/window/bootstrap.js',
     'electron/window/context-menu.js',

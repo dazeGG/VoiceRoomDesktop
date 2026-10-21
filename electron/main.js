@@ -1,14 +1,9 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, clipboard, dialog, globalShortcut, ipcMain, shell, nativeImage, nativeTheme, Notification, powerMonitor, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, Menu, Tray, clipboard, dialog, globalShortcut, ipcMain, session, shell, nativeImage, nativeTheme, Notification, powerMonitor, powerSaveBlocker } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { LEGACY_EXECUTABLE, migrateLegacyProductFolders } = require('./app/legacy-product-name');
-
-// Before anything opens the profile; see app/legacy-product-name.js.
-const legacyFolderMoves = migrateLegacyProductFolders({ app, fs, homedir: os.homedir(), path });
-
 const { configureDesktopAttentionIpc } = require('./attention');
 const { createAppIconController } = require('./app-icon');
 const { createAutostartController } = require('./autostart');
@@ -45,6 +40,7 @@ const {
   takePendingDesktopCaptureSource
 } = require('./desktop-capture');
 const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture');
+const { openAdminInBrowser } = require('./window/open-admin');
 const { createWindowLifecycleController } = require('./window/lifecycle');
 const { createWindowStateController } = require('./window/state');
 const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
@@ -57,6 +53,8 @@ const { configureDesktopIdleIpc } = require('./idle');
 const { createDesktopHotkeyController } = require('./hotkeys');
 const { createNativeHotkeyBackend } = require('./native/hotkeys');
 const {
+  classifyAppUrl,
+  getAdminOrigin,
   ensureMacMicrophoneAccess,
   grantMacMediaPermission,
   isPermissionContextTrusted,
@@ -358,7 +356,27 @@ function configureWindowIpc() {
   });
 }
 
+function openAdmin(url) {
+  return openAdminInBrowser({
+    adminUrl: url,
+    siteOrigin: TRUSTED_ORIGIN,
+    adminOrigin: getAdminOrigin(TRUSTED_ORIGIN),
+    fetchEntry: async (entryUrl) => {
+      const response = await session.defaultSession.fetch(entryUrl, {
+        headers: { accept: 'application/json' },
+        redirect: 'manual'
+      });
+      if (!response.ok) return null;
+      return response.json();
+    },
+    openExternal: (target) => shell.openExternal(target),
+    log
+  });
+}
+
 const appBootstrap = createAppBootstrap({
+  openAdmin,
+  classifyAppUrl,
   app,
   BrowserWindow,
   dialog,
@@ -400,11 +418,6 @@ const appBootstrap = createAppBootstrap({
   windowLifecycle,
   windowState
 });
-
-for (const move of legacyFolderMoves) {
-  if (move.result === 'none') continue;
-  log[move.result === 'failed' ? 'warn' : 'info']('Legacy "Voice Room" folder:', move);
-}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -530,7 +543,7 @@ if (!gotLock) {
     // Process-wide IPC handlers and power-monitor listeners must be installed
     // once. On macOS, closing the last window keeps the app alive and a later
     // dock activation only needs to recreate the BrowserWindow.
-    if (autostart.migrateLegacyLoginItem(LEGACY_EXECUTABLE)) {
+    if (autostart.migrateLegacyLoginItem()) {
       log.info('Autostart moved from the old "Voice Room.exe" entry');
     }
     try {

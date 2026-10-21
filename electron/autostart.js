@@ -3,6 +3,9 @@
 const { HIDDEN_LAUNCH_ARG } = require('./app/launch-mode');
 const { SETTINGS_FILE, createDesktopSettingsStore } = require('./desktop-settings');
 
+// The executable's name up to 1.4.6, when productName was "Voice Room".
+const LEGACY_EXECUTABLE = 'Voice Room.exe';
+
 const GET_CHANNEL = 'desktop-autostart:get-settings';
 const SET_CHANNEL = 'desktop-autostart:set-settings';
 
@@ -123,9 +126,9 @@ function createAutostartController({
   // Run entry keeps its name (the app id) but still points at the old file,
   // which the update removed: register it for this executable with the same
   // hidden-launch flag and Task Manager state.
-  function migrateLegacyLoginItem(legacyFileName) {
+  function migrateLegacyLoginItem() {
     if (!isSupported() || platform !== 'win32' || env.PORTABLE_EXECUTABLE_FILE) return false;
-    const legacyExecutable = path.win32.join(path.win32.dirname(execPath), legacyFileName);
+    const legacyExecutable = path.win32.join(path.win32.dirname(execPath), LEGACY_EXECUTABLE);
     if (legacyExecutable.toLowerCase() === execPath.toLowerCase()) return false;
 
     try {

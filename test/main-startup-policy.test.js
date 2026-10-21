@@ -125,6 +125,8 @@ test('main process wires window bootstrap installers into app bootstrap', () => 
     assert.equal(typeof capturedOptions.installNativeCaptureBridge, 'function');
     assert.equal(typeof capturedOptions.installBuildLabel, 'function');
     assert.equal(typeof capturedOptions.showRendererRecovery, 'function');
+    assert.equal(typeof capturedOptions.adminWindow.open, 'function');
+    assert.equal(typeof capturedOptions.adminWindow.isAdminWebContents, 'function');
   } finally {
     delete require.cache[require.resolve(mainPath)];
     Module._load = originalLoad;

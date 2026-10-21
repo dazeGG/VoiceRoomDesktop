@@ -13,6 +13,7 @@ const HIDDEN_LOAD_RETRY_MS = 30_000;
 
 function createAppBootstrap({
   app,
+  adminWindow,
   BrowserWindow,
   dialog,
   shell,
@@ -53,7 +54,7 @@ function createAppBootstrap({
         return;
       }
 
-      if (!isPermissionContextTrusted(webContents, details)) {
+      if (adminWindow.isAdminWebContents(webContents) || !isPermissionContextTrusted(webContents, details)) {
         log.warn(
           'Denied permission request from untrusted page:',
           permission,
@@ -81,7 +82,7 @@ function createAppBootstrap({
     });
 
     defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details = {}) => {
-      if (!allowedSessionPermissions.has(permission)) {
+      if (!allowedSessionPermissions.has(permission) || adminWindow.isAdminWebContents(webContents)) {
         return false;
       }
       return isPermissionContextTrusted(webContents, details, requestingOrigin);
@@ -242,12 +243,16 @@ function createAppBootstrap({
     appTopbarView.attach(mainWindow);
     mainWindow.once('closed', () => {
       appTopbarView.destroy();
+      adminWindow.close();
     });
 
     installDesktopLayoutCss(mainWindow.webContents, desktopLayoutCss, { log });
 
+    // The admin app opens in its own window: the main one never leaves the
+    // site, which would drop a call.
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       if (isTrustedUrl(url)) return { action: 'allow' };
+      if (adminWindow.open(url)) return { action: 'deny' };
       shell.openExternal(url).catch((error) => {
         log.warn('Failed to open external URL:', url, error);
       });
@@ -257,6 +262,7 @@ function createAppBootstrap({
     mainWindow.webContents.on('will-navigate', (event, url) => {
       if (isTrustedUrl(url)) return;
       event.preventDefault();
+      if (adminWindow.open(url)) return;
       shell.openExternal(url).catch((error) => {
         log.warn('Failed to open external URL:', url, error);
       });

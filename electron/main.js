@@ -40,6 +40,7 @@ const {
   takePendingDesktopCaptureSource
 } = require('./desktop-capture');
 const { getWindowsCaptureFeaturePolicy } = require('./policies/windows-capture');
+const { createAdminWindowController } = require('./window/admin-window');
 const { createWindowLifecycleController } = require('./window/lifecycle');
 const { createWindowStateController } = require('./window/state');
 const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
@@ -52,6 +53,7 @@ const { configureDesktopIdleIpc } = require('./idle');
 const { createDesktopHotkeyController } = require('./hotkeys');
 const { createNativeHotkeyBackend } = require('./native/hotkeys');
 const {
+  classifyAppUrl,
   ensureMacMicrophoneAccess,
   grantMacMediaPermission,
   isPermissionContextTrusted,
@@ -353,7 +355,20 @@ function configureWindowIpc() {
   });
 }
 
+const adminWindow = createAdminWindowController({
+  BrowserWindow,
+  classifyUrl: classifyAppUrl,
+  log,
+  onWindowCreated: (window) => {
+    appIcon.attachWindow(window);
+    installContextMenu(window, { Menu, clipboard, log });
+  },
+  restoreMainWindow: () => windowLifecycle.restoreMainWindow(),
+  shell
+});
+
 const appBootstrap = createAppBootstrap({
+  adminWindow,
   app,
   BrowserWindow,
   dialog,

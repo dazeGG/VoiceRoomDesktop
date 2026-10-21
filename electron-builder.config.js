@@ -95,6 +95,7 @@ module.exports = {
     'electron/policies/native-capture.js',
     'electron/policies/native-capture-restart.js',
     'electron/policies/windows-capture.js',
+    'electron/window/admin-window.js',
     'electron/window/app-topbar-view.js',
     'electron/window/bootstrap.js',
     'electron/window/context-menu.js',

@@ -49,6 +49,37 @@ function isTrustedUrl(rawUrl, trustedOrigin) {
   }
 }
 
+/**
+ * The admin app lives on the `admin.` subdomain of the trusted origin, with the
+ * same scheme and port (https://voiceroom.ru → https://admin.voiceroom.ru). No
+ * trusted origin, or one whose host takes no subdomain (an IP address), gives ''.
+ */
+function getAdminOrigin(trustedOrigin) {
+  const resolvedTrustedOrigin = resolveTrustedOrigin(trustedOrigin);
+  try {
+    const trusted = new URL(resolvedTrustedOrigin);
+    if (trusted.protocol !== 'https:' && trusted.protocol !== 'http:') return '';
+    const admin = new URL(`${trusted.protocol}//admin.${trusted.host}`);
+    return admin.hostname === `admin.${trusted.hostname}` ? admin.origin : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Where a URL belongs: the VoiceRoom site, its admin app, or anywhere else. */
+function classifyAppUrl(rawUrl, trustedOrigin) {
+  const resolvedTrustedOrigin = resolveTrustedOrigin(trustedOrigin);
+  const origin = getOriginFromUrl(rawUrl);
+  if (!resolvedTrustedOrigin || !origin || origin === 'null') return 'external';
+  if (origin === resolvedTrustedOrigin) return 'site';
+  if (origin === getAdminOrigin(resolvedTrustedOrigin)) return 'admin';
+  return 'external';
+}
+
+function isAdminUrl(rawUrl, trustedOrigin) {
+  return classifyAppUrl(rawUrl, trustedOrigin) === 'admin';
+}
+
 function isTrustedFrame(frame, trustedOrigin) {
   return Boolean(frame?.url && isTrustedUrl(frame.url, trustedOrigin));
 }
@@ -114,9 +145,12 @@ function getFrameScopeKey(frame) {
 }
 
 module.exports = {
+  classifyAppUrl,
+  getAdminOrigin,
   getFrameKey,
   getFrameScopeKey,
   getOriginFromUrl,
+  isAdminUrl,
   isPermissionContextTrusted,
   isTrustedDisplayMediaRequest,
   isTrustedFrame,

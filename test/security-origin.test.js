@@ -5,9 +5,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { afterEach, describe, it } = require('node:test');
 const {
+  classifyAppUrl,
+  getAdminOrigin,
   getFrameKey,
   getFrameScopeKey,
   getOriginFromUrl,
+  isAdminUrl,
   isPermissionContextTrusted,
   isTrustedDisplayMediaRequest,
   isTrustedFrame,
@@ -33,6 +36,48 @@ describe('security-origin', () => {
     assert.equal(isTrustedOrigin('https://voice.example'), true);
     assert.equal(isTrustedUrl('https://voice.example/app'), true);
     assert.equal(isTrustedUrl('https://other.example/app'), false);
+  });
+
+  it('derives the admin origin from the trusted origin, failing closed', () => {
+    assert.equal(getAdminOrigin('https://voiceroom.ru'), 'https://admin.voiceroom.ru');
+    assert.equal(getAdminOrigin('https://dev.voiceroom.ru'), 'https://admin.dev.voiceroom.ru');
+    assert.equal(getAdminOrigin('http://localhost:5173'), 'http://admin.localhost:5173');
+    assert.equal(getAdminOrigin(''), '');
+    assert.equal(getAdminOrigin('null'), '');
+    assert.equal(getAdminOrigin('not a valid url'), '');
+    assert.equal(getAdminOrigin('file:///C:/voiceroom'), '');
+    // An IP address takes no subdomain.
+    assert.equal(getAdminOrigin('http://127.0.0.1:5173'), '');
+    assert.equal(getAdminOrigin('http://[::1]:5173'), '');
+
+    setTrustedOrigin('https://voiceroom.ru');
+    assert.equal(getAdminOrigin(), 'https://admin.voiceroom.ru');
+  });
+
+  it('classifies URLs as the site, its admin app or external', () => {
+    setTrustedOrigin('https://voiceroom.ru');
+
+    assert.equal(classifyAppUrl('https://voiceroom.ru/rooms/abc'), 'site');
+    assert.equal(classifyAppUrl('https://voiceroom.ru/api/staff/handoff?state=x'), 'site');
+    assert.equal(classifyAppUrl('https://admin.voiceroom.ru/'), 'admin');
+    assert.equal(classifyAppUrl('https://admin.voiceroom.ru/api/staff/callback?code=1'), 'admin');
+    assert.equal(classifyAppUrl('http://admin.voiceroom.ru/'), 'external');
+    assert.equal(classifyAppUrl('https://admin.voiceroom.ru:8443/'), 'external');
+    assert.equal(classifyAppUrl('https://evil.admin.voiceroom.ru/'), 'external');
+    assert.equal(classifyAppUrl('https://admin.voiceroom.ru.evil.example/'), 'external');
+    assert.equal(classifyAppUrl('https://dev.voiceroom.ru/'), 'external');
+    assert.equal(classifyAppUrl('about:blank'), 'external');
+    assert.equal(classifyAppUrl('not a valid url'), 'external');
+
+    assert.equal(isAdminUrl('https://admin.voiceroom.ru/accounts'), true);
+    assert.equal(isAdminUrl('https://voiceroom.ru/'), false);
+    assert.equal(isAdminUrl('https://admin.dev.voiceroom.ru/', 'https://dev.voiceroom.ru'), true);
+  });
+
+  it('treats every URL as external without a trusted origin', () => {
+    assert.equal(classifyAppUrl('https://voiceroom.ru/'), 'external');
+    assert.equal(classifyAppUrl('https://admin.voiceroom.ru/'), 'external');
+    assert.equal(isAdminUrl('https://admin.voiceroom.ru/'), false);
   });
 
   it('identifies trusted frames and display-media requests', () => {

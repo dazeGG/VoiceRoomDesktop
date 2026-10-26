@@ -117,6 +117,10 @@ contextBridge.exposeInMainWorld('voiceRoomDesktopIdle', {
   getSystemIdleTime: () => ipcRenderer.invoke('desktop-idle:get-system-idle-time')
 });
 
+contextBridge.exposeInMainWorld('voiceRoomDesktopLoad', {
+  read: () => ipcRenderer.invoke('desktop-load:get')
+});
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopAutostart', {
   getSettings: () => ipcRenderer.invoke('desktop-autostart:get-settings'),
   setSettings: (settings) => ipcRenderer.invoke('desktop-autostart:set-settings', settings)

@@ -50,6 +50,7 @@ const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
 const { configureDesktopNotificationsIpc } = require('./notifications');
 const { configureDesktopIdleIpc } = require('./idle');
+const { configureProcessLoadIpc } = require('./process-load');
 const { createDesktopHotkeyController } = require('./hotkeys');
 const { createNativeHotkeyBackend } = require('./native/hotkeys');
 const {
@@ -553,6 +554,7 @@ if (!gotLock) {
         powerMonitor,
         isTrustedFrame
       });
+      configureProcessLoadIpc({ ipcMain, app, os, isTrustedFrame });
       configureDesktopNotificationsIpc({
         ipcMain,
         Notification,

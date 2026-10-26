@@ -73,6 +73,7 @@ module.exports = {
     'electron/hotkeys.js',
     'electron/native/hotkeys.js',
     'electron/idle.js',
+    'electron/process-load.js',
     'electron/attention.js',
     'electron/app-icon.js',
     'electron/autostart.js',

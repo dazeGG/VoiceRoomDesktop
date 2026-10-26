@@ -102,6 +102,11 @@ test('preload installs desktop markers without native capture contract modules',
   idle.getSystemIdleTime();
   assert.deepEqual(invoked.at(-1), ['desktop-idle:get-system-idle-time']);
 
+  const load = exposed.get('voiceRoomDesktopLoad');
+  assert.deepEqual(Object.keys(load), ['read']);
+  load.read();
+  assert.deepEqual(invoked.at(-1), ['desktop-load:get']);
+
   const overlay = exposed.get('voiceRoomDesktopOverlay');
   assert.deepEqual(Object.keys(overlay), [
     'addGame',

@@ -29,8 +29,10 @@ const {
   installMediaDeviceFilter,
   installNativeCaptureBridge,
   loadMainApplication,
+  showConnectionLost,
   showRendererRecovery
 } = require('./window/bootstrap');
+const { retryConnectionNow } = require('./window/connection-recovery');
 const log = require('./logger');
 const { WINDOW_BACKGROUND, buildDesktopLayoutCss } = require('./shell-theme');
 const {
@@ -346,14 +348,16 @@ function configureWindowIpc() {
 
   ipcMain.handle('window:reload-main', (event) => {
     const frameUrl = event.senderFrame?.url || '';
-    if (!frameUrl.includes('renderer-recovery.html')) {
+    const fromConnectionScreen = frameUrl.includes('connection-lost.html');
+    if (!fromConnectionScreen && !frameUrl.includes('renderer-recovery.html')) {
       throw new Error('Reload is only available from the recovery screen.');
     }
 
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window || window.isDestroyed()) return { ok: false };
 
-    return loadMainApplication(window, APP_URL, { dialog }).then(() => ({ ok: true }));
+    if (fromConnectionScreen) return retryConnectionNow(window).then(() => ({ ok: true }));
+    return loadMainApplication(window, APP_URL, { dialog, log }).then(() => ({ ok: true }));
   });
 }
 
@@ -392,6 +396,7 @@ const appBootstrap = createAppBootstrap({
   installNativeCaptureBridge,
   log,
   loadMainApplication,
+  showConnectionLost,
   readBuildProfile,
   showRendererRecovery,
   recordGrantedDesktopCapture,

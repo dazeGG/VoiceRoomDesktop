@@ -1,6 +1,6 @@
 'use strict';
 
-const { session } = require('electron');
+const { net, session } = require('electron');
 const path = require('node:path');
 const { WINDOW_BACKGROUND, getMainWindowChromeOptions } = require('../shell-theme');
 const { MIN_WINDOW_SIZE } = require('../window/state');
@@ -9,7 +9,8 @@ const {
   installDesktopLayoutCss
 } = require('../window/app-topbar-view');
 
-const HIDDEN_LOAD_RETRY_MS = 30_000;
+const { createConnectionRecovery, createOutageReporter } = require('../window/connection-recovery');
+const { checkSiteAvailability } = require('../policies/update-gate-state');
 
 function createAppBootstrap({
   app,
@@ -31,6 +32,7 @@ function createAppBootstrap({
   recordGrantedDesktopCapture,
   takePendingDesktopCaptureSource,
   loadMainApplication,
+  showConnectionLost,
   installMediaDeviceFilter,
   installNativeCaptureBridge,
   installBuildLabel,
@@ -116,51 +118,6 @@ function createAppBootstrap({
       },
       { useSystemPicker: false }
     );
-  }
-
-  // A hidden launch (autostart to tray) often races the network at login. Retry
-  // quietly while the window stays in the tray instead of popping an error box;
-  // once the user opens the window, fall back to the regular loud load.
-  function loadMainApplicationInBackground(mainWindow, launchUrl) {
-    let retryTimer = null;
-    let settled = false;
-
-    const loadVisibly = () => {
-      settled = true;
-      mainWindow.removeListener('show', onShow);
-      loadMainApplication(mainWindow, launchUrl, { dialog });
-    };
-
-    function onShow() {
-      if (settled || !retryTimer) return;
-      clearTimeout(retryTimer);
-      retryTimer = null;
-      loadVisibly();
-    }
-
-    const attempt = () => {
-      retryTimer = null;
-      if (mainWindow.isDestroyed()) return;
-      mainWindow.loadURL(launchUrl).then(() => {
-        settled = true;
-        mainWindow.removeListener('show', onShow);
-      }).catch((error) => {
-        if (mainWindow.isDestroyed() || settled) return;
-        if (mainWindow.isVisible()) {
-          loadVisibly();
-          return;
-        }
-        log.warn('VoiceRoom is not reachable yet, retrying in the background:', error?.message || error);
-        retryTimer = setTimeout(attempt, HIDDEN_LOAD_RETRY_MS);
-      });
-    };
-
-    mainWindow.on('show', onShow);
-    mainWindow.once('closed', () => {
-      if (retryTimer) clearTimeout(retryTimer);
-      retryTimer = null;
-    });
-    attempt();
   }
 
   function createWindow({ startHidden = false } = {}) {
@@ -276,12 +233,21 @@ function createAppBootstrap({
       showRendererRecovery(mainWindow, details, { log });
     });
 
-    const launchUrl = resolveLaunchUrl();
-    if (startHidden) {
-      loadMainApplicationInBackground(mainWindow, launchUrl);
-    } else {
-      loadMainApplication(mainWindow, launchUrl, { dialog });
-    }
+    // Also what a launch to the tray relies on when it races the network at
+    // login: the window stays hidden and keeps checking.
+    const fetchFromSession = (...args) => session.defaultSession.fetch(...args);
+    createConnectionRecovery({
+      window: mainWindow,
+      appUrl,
+      isTrustedUrl,
+      checkSite: () => checkSiteAvailability(appUrl, { fetchImpl: fetchFromSession }),
+      showUnavailablePage: () => showConnectionLost(mainWindow),
+      reportOutage: createOutageReporter({ appUrl, fetchImpl: fetchFromSession, log }),
+      isOnline: () => net.isOnline(),
+      log
+    });
+
+    loadMainApplication(mainWindow, resolveLaunchUrl(), { dialog, log });
   }
 
   async function launchApplication({ startHidden = false } = {}) {

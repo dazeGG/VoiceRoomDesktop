@@ -16,9 +16,9 @@ const REPORTED_FROM_MS = 30_000;
 // Longer than any wait between two checks (the delay, then two requests of 15
 // seconds): such a gap is a computer that slept, and it does not count at all.
 const SLEEP_GAP_MS = 75_000;
-// Loads that failed although the check before each one passed. One is a network
-// flap, and giving up on it would lose a room or a one-time link; this many means
-// the page itself is broken.
+// Loads of one page that failed although the check before each one passed. One is
+// a network flap, and giving up on it would lose a room or a one-time link; this
+// many means the page itself is broken.
 const FAILED_LOADS_BEFORE_START_PAGE = 3;
 
 const recoveries = new WeakMap();
@@ -67,6 +67,24 @@ function createConnectionRecovery({
     retryTimer = setTimeout(retry, delay);
   }
 
+  function noteFailedLoad(url) {
+    const followedCheck = loadingAfterCheck;
+    loadingAfterCheck = false;
+    if (url && isTrustedUrl(url) && url !== target) {
+      // Another page, a deep link say, has its own tries.
+      target = url;
+      failedLoadsAfterCheck = 0;
+      return;
+    }
+    if (!followedCheck) return;
+    failedLoadsAfterCheck += 1;
+    if (failedLoadsAfterCheck < FAILED_LOADS_BEFORE_START_PAGE) return;
+    // The site is up and this page still will not load, so it is the page: the
+    // start page gets the user out instead of a screen about their internet.
+    target = appUrl;
+    failedLoadsAfterCheck = 0;
+  }
+
   function loadTarget() {
     // What comes of this load arrives as navigation events: did-navigate ends
     // the outage, and a failure or a stall comes back to markUnreachable.
@@ -102,12 +120,7 @@ function createConnectionRecovery({
 
   function markUnreachable(reason, url) {
     clearStallTimer();
-    if (loadingAfterCheck) failedLoadsAfterCheck += 1;
-    loadingAfterCheck = false;
-    // The site is up and this page still will not load, so it is the page: the
-    // start page gets the user out instead of a screen about their internet.
-    if (failedLoadsAfterCheck >= FAILED_LOADS_BEFORE_START_PAGE) target = appUrl;
-    else if (url && isTrustedUrl(url)) target = url;
+    noteFailedLoad(url);
     if (!outage) {
       const at = now();
       outage = { lastSeenAt: at, unreachableMs: 0, attempts: 0, reason, online: isOnline() };
@@ -149,12 +162,15 @@ function createConnectionRecovery({
   // was refused, window.stop(). A load that is really stuck never gets here.
   webContents.on('did-stop-loading', () => {
     clearStallTimer();
+    if (loadingAfterCheck) noteFailedLoad();
     // A load during an outage ended that way, and nothing else would try again.
     if (outage && !retryTimer && !checking) scheduleRetry();
   });
 
   webContents.on('did-navigate', (_event, url, httpResponseCode) => {
-    clearStallTimer();
+    // A local screen can commit just after the next load started, and that
+    // load's timer is the only thing watching it.
+    if (!String(url).startsWith('file:')) clearStallTimer();
     if (!isTrustedUrl(url)) return;
     if (httpResponseCode >= 500) markUnreachable(`http-${httpResponseCode}`, url);
     else markReachable();

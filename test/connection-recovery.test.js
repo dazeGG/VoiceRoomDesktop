@@ -316,6 +316,87 @@ describe('connection recovery', () => {
     assert.equal(loads.length, 2);
   });
 
+  it('a deep link gets its own tries after another page used up most of them', async () => {
+    const { loads, commit, fail } = setup({ siteAvailable: true });
+    const room = `${APP_URL}r/broken`;
+    const link = `${APP_URL}r/from-a-link`;
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+    await advance(3_000);
+    commit(room, 502);
+    await advance(6_000);
+    commit(room, 502);
+
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', link);
+    await advance(12_000);
+    commit(link, 502);
+    await advance(30_000);
+    assert.deepEqual(loads, [room, room, link, link]);
+  });
+
+  it('a deep link that fails after the fall back to the start page is still returned to', async () => {
+    const { loads, commit, fail } = setup({ siteAvailable: true });
+    const room = `${APP_URL}r/broken`;
+    const link = `${APP_URL}r/from-a-link`;
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+    await advance(3_000);
+    commit(room, 502);
+    await advance(6_000);
+    commit(room, 502);
+    await advance(12_000);
+    commit(room, 502);
+
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', link);
+    await advance(30_000);
+    assert.deepEqual(loads, [room, room, room, link]);
+  });
+
+  it('a load that ended without committing does not count against the next page', async () => {
+    const { state, loads, stopLoading, startNavigation, commit, fail } = setup({ siteAvailable: true });
+    const room = `${APP_URL}r/abc`;
+    const link = `${APP_URL}r/from-a-link`;
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+    await advance(3_000);
+    stopLoading();
+    state.siteAvailable = false;
+    await advance(6_000);
+
+    startNavigation(link);
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', link);
+    state.siteAvailable = true;
+    await advance(12_000);
+    commit(link, 502);
+    await advance(30_000);
+    commit(link, 502);
+    await advance(30_000);
+    assert.deepEqual(loads, [room, link, link, link]);
+  });
+
+  it('a page that never commits gives way to the start page too', async () => {
+    const { loads, stopLoading, fail } = setup({ siteAvailable: true });
+    const room = `${APP_URL}r/download`;
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+    await advance(3_000);
+    stopLoading();
+    await advance(6_000);
+    stopLoading();
+    await advance(12_000);
+    stopLoading();
+    await advance(30_000);
+    assert.deepEqual(loads, [room, room, room, APP_URL]);
+  });
+
+  it('a local screen that commits after the next load started leaves that load watched', async () => {
+    const { state, startNavigation, commit, fail } = setup({ siteAvailable: true });
+    fail();
+    await advance(3_000);
+    assert.equal(state.pages, 1);
+
+    startNavigation();
+    commit('file:///connection-lost.html');
+    await advance(15_000);
+    assert.equal(state.pages, 2);
+  });
+
   it('a page that failed for lack of a site is still returned to after more failures', async () => {
     const { state, loads, fail } = setup();
     const room = `${APP_URL}r/abc`;

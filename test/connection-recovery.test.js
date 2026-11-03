@@ -262,7 +262,58 @@ describe('connection recovery', () => {
 
     commit(room, 502);
     await advance(6_000);
-    assert.deepEqual(loads, [room, APP_URL]);
+    assert.deepEqual(loads, [room, room], 'one failure may be a network flap');
+
+    commit(room, 502);
+    await advance(12_000);
+    assert.deepEqual(loads, [room, room, room]);
+
+    commit(room, 502);
+    await advance(30_000);
+    assert.deepEqual(loads, [room, room, room, APP_URL]);
+  });
+
+  it('a commit forgives the failed loads before it', async () => {
+    const { loads, startNavigation, commit, fail } = setup({ siteAvailable: true });
+    const room = `${APP_URL}r/abc`;
+    for (let round = 0; round < 2; round += 1) {
+      startNavigation(room);
+      fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+      await advance(3_000);
+      commit(room, 502);
+      await advance(6_000);
+      commit(room, 502);
+      await advance(12_000);
+      commit(room);
+    }
+    assert.deepEqual(loads, [room, room, room, room, room, room]);
+  });
+
+  it('a passed check does not cancel a load that is already on its way', async () => {
+    const { state, loads, startNavigation, commit, fail } = setup({ siteAvailable: true });
+    fail();
+    const link = `${APP_URL}r/from-a-link`;
+    startNavigation(link);
+
+    await advance(3_000);
+    assert.equal(state.checks, 1);
+    assert.deepEqual(loads, []);
+
+    commit(link);
+    await advance(120_000);
+    assert.deepEqual(loads, []);
+    assert.equal(state.checks, 1);
+  });
+
+  it('a load during an outage that ends without committing is tried again', async () => {
+    const { loads, stopLoading, fail } = setup({ siteAvailable: true });
+    fail();
+    await advance(3_000);
+    assert.equal(loads.length, 1);
+
+    stopLoading();
+    await advance(6_000);
+    assert.equal(loads.length, 2);
   });
 
   it('a page that failed for lack of a site is still returned to after more failures', async () => {

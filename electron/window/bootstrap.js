@@ -16,15 +16,20 @@ function showRendererRecovery(window, details = {}, { log } = {}) {
   });
 }
 
-function loadMainApplication(window, appUrl, { dialog: dialogModule = dialog } = {}) {
+function loadMainApplication(window, appUrl, { dialog: dialogModule = dialog, log } = {}) {
   if (!appUrl) {
     dialogModule.showErrorBox('VoiceRoom', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
     return Promise.resolve();
   }
 
+  // A failure here is also a did-fail-load, which brings up the connection screen.
   return window.loadURL(appUrl).catch((error) => {
-    dialogModule.showErrorBox('VoiceRoom', `Не удалось открыть ${appUrl}\n\n${error.message}`);
+    log?.warn?.('Failed to load VoiceRoom:', error?.message || error);
   });
+}
+
+function showConnectionLost(window) {
+  return window.loadFile(path.join(__dirname, '../ui/connection-lost.html'));
 }
 
 function installMediaDeviceFilter(webContents, { log } = {}) {
@@ -128,5 +133,6 @@ module.exports = {
   installMediaDeviceFilter,
   installNativeCaptureBridge,
   loadMainApplication,
+  showConnectionLost,
   showRendererRecovery
 };

@@ -1,5 +1,12 @@
 'use strict';
 
-document.querySelector('#recoveryReload')?.addEventListener('click', () => {
-  window.voiceRoomRecovery?.reload?.().catch(() => {});
+const button = document.querySelector('#recoveryReload');
+
+button?.addEventListener('click', () => {
+  button.disabled = true;
+  Promise.resolve(window.voiceRoomRecovery?.reload?.())
+    .catch(() => {})
+    .finally(() => {
+      button.disabled = false;
+    });
 });

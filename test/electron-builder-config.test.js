@@ -17,6 +17,7 @@ const requiredStartupAssets = [
   'electron/native/capture-relay.js',
   'electron/ui/app-topbar.css',
   'electron/ui/app-topbar.html',
+  'electron/ui/connection-lost.html',
   'electron/ui/renderer-recovery.css',
   'electron/ui/renderer-recovery.html',
   'electron/ui/renderer-recovery.js',
@@ -212,6 +213,7 @@ describe('electron-builder config', () => {
 
   it('packages startup assets loaded outside the require graph', () => {
     const htmlAssets = [
+      'electron/ui/connection-lost.html',
       'electron/ui/renderer-recovery.html',
       'electron/ui/screen-picker-preview.html',
       'electron/ui/update-splash.html',

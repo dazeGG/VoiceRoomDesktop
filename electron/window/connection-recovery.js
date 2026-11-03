@@ -13,8 +13,9 @@ const RETRY_DELAYS_MS = [3_000, 6_000, 12_000, 30_000];
 const ERR_ABORTED = -3;
 // Shorter than this is not worth a line in the server's logs.
 const REPORTED_FROM_MS = 30_000;
-// The computer may have slept between two checks, so at most this much of a gap counts.
-const COUNTED_GAP_MS = 45_000;
+// Longer than any wait between two checks (the delay, then two requests of 15
+// seconds): such a gap is a computer that slept, and it does not count at all.
+const SLEEP_GAP_MS = 75_000;
 
 const recoveries = new WeakMap();
 
@@ -35,6 +36,8 @@ function createConnectionRecovery({
   let stallTimer = null;
   let retryTimer = null;
   let checking = false;
+  // The site answered the check and this load followed from it.
+  let loadingAfterCheck = false;
 
   function clearStallTimer() {
     if (stallTimer) clearTimeout(stallTimer);
@@ -48,7 +51,8 @@ function createConnectionRecovery({
 
   function countElapsed() {
     const at = now();
-    outage.unreachableMs += Math.min(at - outage.lastSeenAt, COUNTED_GAP_MS);
+    const gap = at - outage.lastSeenAt;
+    if (gap <= SLEEP_GAP_MS) outage.unreachableMs += gap;
     outage.lastSeenAt = at;
   }
 
@@ -56,6 +60,12 @@ function createConnectionRecovery({
     clearRetryTimer();
     const delay = RETRY_DELAYS_MS[Math.min(outage.attempts, RETRY_DELAYS_MS.length - 1)];
     retryTimer = setTimeout(retry, delay);
+  }
+
+  function loadTarget() {
+    // What comes of this load arrives as navigation events: did-navigate ends
+    // the outage, and a failure or a stall comes back to markUnreachable.
+    window.loadURL(target).catch(() => {});
   }
 
   async function retry() {
@@ -76,27 +86,34 @@ function createConnectionRecovery({
       scheduleRetry();
       return;
     }
-    // What comes of this load arrives as navigation events: did-navigate ends
-    // the outage, and a failure or a stall comes back to markUnreachable.
-    window.loadURL(target).catch(() => {});
+    loadingAfterCheck = true;
+    loadTarget();
   }
 
   function markUnreachable(reason, url) {
     clearStallTimer();
-    if (url && isTrustedUrl(url)) target = url;
+    // The site is up and this page still will not load, so it is the page: the
+    // start page gets the user out instead of a screen about their internet.
+    if (loadingAfterCheck) target = appUrl;
+    else if (url && isTrustedUrl(url)) target = url;
+    loadingAfterCheck = false;
     if (!outage) {
       const at = now();
-      outage = { startedAt: at, lastSeenAt: at, unreachableMs: 0, attempts: 0, reason, online: isOnline() };
+      outage = { lastSeenAt: at, unreachableMs: 0, attempts: 0, reason, online: isOnline() };
       log?.warn?.('VoiceRoom is unreachable:', reason);
     }
-    showUnavailablePage().catch((error) => {
+    showUnavailablePage().then(() => {
+      // The load it was replacing got through first, so nothing would ever
+      // leave this screen.
+      if (!outage && !window.isDestroyed()) loadTarget();
+    }).catch((error) => {
       log?.error?.('Failed to open the connection screen:', error);
     });
     if (!checking) scheduleRetry();
   }
 
   function markReachable() {
-    clearStallTimer();
+    loadingAfterCheck = false;
     if (!outage) return;
     clearRetryTimer();
     countElapsed();
@@ -107,16 +124,21 @@ function createConnectionRecovery({
   }
 
   webContents.on('did-start-navigation', (details) => {
-    if (!details?.isMainFrame || details.isSameDocument || !isTrustedUrl(details.url)) return;
+    if (!details?.isMainFrame || details.isSameDocument) return;
     clearStallTimer();
-    target = details.url;
+    if (!isTrustedUrl(details.url)) return;
     stallTimer = setTimeout(() => {
       stallTimer = null;
       markUnreachable('stalled', details.url);
     }, STALLED_LOAD_MS);
   });
 
+  // A navigation may end without committing: a download, a 204, a redirect that
+  // was refused, window.stop(). A load that is really stuck never gets here.
+  webContents.on('did-stop-loading', clearStallTimer);
+
   webContents.on('did-navigate', (_event, url, httpResponseCode) => {
+    clearStallTimer();
     if (!isTrustedUrl(url)) return;
     if (httpResponseCode >= 500) markUnreachable(`http-${httpResponseCode}`, url);
     else markReachable();

@@ -42,6 +42,7 @@ function setup({ siteAvailable = false } = {}) {
     startNavigation: (url = APP_URL) =>
       window.webContents.emit('did-start-navigation', { url, isMainFrame: true, isSameDocument: false }),
     commit: (url = APP_URL, code = 200) => window.webContents.emit('did-navigate', {}, url, code),
+    stopLoading: () => window.webContents.emit('did-stop-loading', {}),
     fail: (code = -118, description = 'ERR_CONNECTION_TIMED_OUT', url = APP_URL, isMainFrame = true) =>
       window.webContents.emit('did-fail-load', {}, code, description, url, isMainFrame)
   };
@@ -198,12 +199,105 @@ describe('connection recovery', () => {
     assert.deepEqual(state.reports, []);
   });
 
-  it('does not count hours of sleep as hours of outage', async () => {
+  it('does not count sleep as outage', async () => {
     const { state, fail, commit } = setup();
     fail();
     mock.timers.setTime(Date.now() + 8 * 60 * 60 * 1000);
     commit();
-    assert.equal(state.reports[0].durationMs, 45_000);
+    assert.deepEqual(state.reports, []);
+  });
+
+  it('counts the longest real wait between two checks', async () => {
+    const { state, fail, commit } = setup();
+    fail();
+    await advance(3_000);
+    await advance(6_000);
+    await advance(12_000);
+    // The last delay of 30 seconds, then both requests of the check timing out.
+    mock.timers.setTime(Date.now() + 60_000);
+    commit();
+    assert.equal(state.reports[0].durationMs, 81_000);
+  });
+
+  it('a navigation that ends without committing leaves the working page alone', async () => {
+    const { state, recovery, loads, startNavigation, stopLoading } = setup({ siteAvailable: true });
+    startNavigation(`${APP_URL}api/media/attachments/1/processed?download=1`);
+    await advance(1_000);
+    stopLoading();
+    await advance(120_000);
+    assert.equal(state.pages, 0);
+    assert.equal(recovery.isUnreachable(), false);
+    assert.deepEqual(loads, []);
+  });
+
+  it('a redirect to another site leaves the working page alone', async () => {
+    const { state, startNavigation, commit } = setup();
+    startNavigation();
+    commit('https://elsewhere.example/');
+    await advance(120_000);
+    assert.equal(state.pages, 0);
+  });
+
+  it('a local screen opened during a load is not replaced by the stall', async () => {
+    const { state, window, startNavigation } = setup();
+    startNavigation();
+    await advance(1_000);
+    window.webContents.emit('did-start-navigation', {
+      url: 'file:///renderer-recovery.html',
+      isMainFrame: true,
+      isSameDocument: false
+    });
+    await advance(120_000);
+    assert.equal(state.pages, 0);
+  });
+
+  it('a page that keeps failing while the site is up gives way to the start page', async () => {
+    const { loads, startNavigation, commit, fail } = setup({ siteAvailable: true });
+    const room = `${APP_URL}r/broken`;
+    startNavigation(room);
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+
+    await advance(3_000);
+    assert.deepEqual(loads, [room], 'the page that failed gets the first try');
+
+    commit(room, 502);
+    await advance(6_000);
+    assert.deepEqual(loads, [room, APP_URL]);
+  });
+
+  it('a page that failed for lack of a site is still returned to after more failures', async () => {
+    const { state, loads, fail } = setup();
+    const room = `${APP_URL}r/abc`;
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+    fail(-118, 'ERR_CONNECTION_TIMED_OUT', room);
+    await advance(3_000);
+    state.siteAvailable = true;
+    await advance(6_000);
+    assert.deepEqual(loads, [room]);
+  });
+
+  it('leaves the screen when the load it replaced committed first', async () => {
+    const window = new EventEmitter();
+    window.webContents = new EventEmitter();
+    window.isDestroyed = () => false;
+    const loads = [];
+    window.loadURL = async (url) => loads.push(url);
+    let screenShown;
+    createConnectionRecovery({
+      window,
+      appUrl: APP_URL,
+      isTrustedUrl,
+      checkSite: async () => false,
+      showUnavailablePage: () => new Promise((resolve) => {
+        screenShown = resolve;
+      })
+    });
+
+    window.webContents.emit('did-fail-load', {}, -118, 'ERR_CONNECTION_TIMED_OUT', APP_URL, true);
+    window.webContents.emit('did-navigate', {}, APP_URL, 200);
+    screenShown();
+    await advance(0);
+    assert.deepEqual(loads, [APP_URL]);
   });
 
   it('stops everything when the window closes', async () => {

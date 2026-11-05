@@ -25,7 +25,8 @@ Before creating a stable tag, the exact release commit must have a successful
 `Desktop CI` run. The workflow runs checks and tests, builds the complete macOS
 and Windows release artifact sets, starts the native hotkey helper on each host,
 and uploads the artifacts for inspection. It runs for pull requests to `main`
-or `develop`, pushes to `develop`, and manual dispatches.
+and manual dispatches. Pull requests to `develop` run the same workflow without
+the macOS build, so run it by hand on a branch that might break macOS.
 
 Do not create the release tag while either platform build is missing or failed.
 The tag-triggered `Release` workflow uses the same platform build commands and

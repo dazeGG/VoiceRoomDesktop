@@ -204,14 +204,28 @@ h1 {
   box-shadow: inset 0 0 0 1px var(--accent-soft);
 }
 
+/* The tabpanel occupies the panel's flexible row; it must pass that bounded
+   height down so the options list scrolls instead of spilling under the footer. */
+#screenSourceTabpanel {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .screen-source-options {
   display: grid;
   min-height: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
   align-content: start;
-  overflow: auto;
-  padding-right: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Room for the focus ring (outline-offset 2px) and the scrollbar gutter. */
+  padding: 3px;
+  margin: -3px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-soft) transparent;
 }
 
 .screen-source-option {

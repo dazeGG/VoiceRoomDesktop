@@ -1,0 +1,88 @@
+#include "../../native/capture/windows/CaptureTelemetry.h"
+
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <string>
+
+using voiceroom::capture::CaptureTelemetry;
+
+static bool Expect(bool condition, const char* message) {
+  if (!condition) std::cerr << message << '\n';
+  return condition;
+}
+
+int main() {
+  bool ok = true;
+  // 10 MHz clock: one tick is 100 ns, 10 ticks are one microsecond.
+  const int64_t hz = 10000000;
+  const int64_t ms = hz / 1000;
+
+  CaptureTelemetry dxgi;
+  dxgi.Begin(true, hz, 0);
+  dxgi.RecordAcquired(33 * ms, 1);
+  dxgi.RecordAcquired(66 * ms, 3);
+  dxgi.RecordPacingSkip();
+  dxgi.RecordPausedSkip();
+  dxgi.RecordPausedSkip();
+  dxgi.RecordMap(2 * ms);
+  dxgi.RecordMap(5 * ms);
+  dxgi.RecordWrite(4 * ms);
+  dxgi.RecordWrite(1 * ms);
+  auto first = dxgi.Take(70 * ms);
+  ok &= Expect(first.seq == 1, "first report has seq 1");
+  ok &= Expect(first.acquired == 2 && first.accumulated == 4, "acquired and accumulated are summed");
+  ok &= Expect(first.pacingSkips == 1 && first.pausedSkips == 2, "skips are counted separately");
+  ok &= Expect(first.written == 2, "written counts flushed frames");
+  ok &= Expect(first.sumMapUs == 7000 && first.maxMapUs == 5000, "map time is sum and max in microseconds");
+  ok &= Expect(first.sumWriteUs == 5000 && first.maxWriteUs == 4000, "write time is sum and max in microseconds");
+  ok &= Expect(first.maxGapUs == 33000, "max gap is the longest acquire interval, first measured from Begin");
+
+  // Counters are cumulative, max values restart after Take.
+  dxgi.RecordAcquired(100 * ms, 1);
+  dxgi.RecordMap(1 * ms);
+  auto second = dxgi.Take(101 * ms);
+  ok &= Expect(second.seq == 2, "seq increments per report");
+  ok &= Expect(second.acquired == 3 && second.accumulated == 5, "counters stay cumulative");
+  ok &= Expect(second.maxMapUs == 1000 && second.maxWriteUs == 0, "max values are per window");
+  ok &= Expect(second.maxGapUs == 34000, "the gap spanning two windows is attributed to the acquire that ends it");
+
+  // A stall is visible while it is still going on, without any new frame.
+  auto stall1 = dxgi.Take(600 * ms);
+  auto stall2 = dxgi.Take(1600 * ms);
+  ok &= Expect(stall1.maxGapUs == 500000, "ongoing gap is reported before the next frame");
+  ok &= Expect(stall2.maxGapUs == 1500000, "ongoing gap keeps growing across windows");
+  ok &= Expect(stall2.acquired == second.acquired, "no frames were counted during the stall");
+
+  // A source that never delivers is also visible, measured from Begin.
+  CaptureTelemetry silent;
+  silent.Begin(false, hz, 5 * hz);
+  ok &= Expect(silent.Take(7 * hz).maxGapUs == 2000000, "gap before the first frame counts");
+
+  char line[512];
+  const int n = CaptureTelemetry::Format(line, sizeof(line), first);
+  const std::string text(line);
+  ok &= Expect(n > 0 && static_cast<size_t>(n) == text.size(), "format fits the buffer");
+  ok &= Expect(text.find("\"backend\":\"dxgi\"") != std::string::npos, "dxgi backend named");
+  ok &= Expect(text.find("\"accumulated\":4") != std::string::npos, "dxgi reports accumulated");
+  ok &= Expect(text.find("\"event\":\"pipeline\",\"seq\":1,") == 1, "event and seq lead the line");
+  ok &= Expect(text.find('\n') == std::string::npos, "single line");
+
+  CaptureTelemetry wgc;
+  wgc.Begin(false, hz, 0);
+  wgc.RecordAcquired(10 * ms, 0);
+  wgc.RecordWrite(1 * ms);
+  CaptureTelemetry::Format(line, sizeof(line), wgc.Take(20 * ms));
+  const std::string wgcText(line);
+  ok &= Expect(wgcText.find("\"backend\":\"wgc\"") != std::string::npos, "wgc backend named");
+  ok &= Expect(wgcText.find("accumulated") == std::string::npos, "wgc omits accumulated instead of reporting 0");
+  ok &= Expect(wgcText.find("\"written\":1,\"sumMapUs\":0,") != std::string::npos, "field order is stable");
+
+  // Restart: Begin clears everything so the consumer sees a fresh session.
+  dxgi.Begin(true, hz, 0);
+  auto restarted = dxgi.Take(1 * ms);
+  ok &= Expect(restarted.seq == 1 && restarted.acquired == 0, "Begin resets counters and seq");
+
+  std::cout << text << '\n' << wgcText << '\n';
+  return ok ? 0 : 1;
+}

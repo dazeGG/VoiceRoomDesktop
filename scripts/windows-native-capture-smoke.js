@@ -327,6 +327,20 @@ async function runCaptureLifecycle(helperPath, sourceId, iteration) {
       return state.stdout.frames.length >= settledPausedCount + 2;
     }, `resumed frame flow for iteration ${iteration}`, 1500);
 
+    // The helper reports once a second from its own thread.
+    const expectedBackend = sourceId.startsWith('window:') ? 'wgc' : 'dxgi';
+    const pipeline = await waitFor(() => {
+      assertCaptureAlive(state);
+      return state.stderr.events.find((event) => event.event === 'pipeline'
+        && Number.isInteger(event.seq) && event.seq >= 1
+        && event.backend === expectedBackend
+        && Number.isInteger(event.acquired) && event.acquired > 0);
+    }, `pipeline telemetry for iteration ${iteration}`, 4000);
+    if (expectedBackend === 'wgc' && 'accumulated' in pipeline) {
+      fail('WGC pipeline telemetry must omit accumulated', JSON.stringify(pipeline));
+    }
+    console.log(`pipeline telemetry: ${JSON.stringify(pipeline)}`);
+
     await stopThroughFramePipe(state);
     return {
       balanced: `${balancedFrame.width}x${balancedFrame.height}`,

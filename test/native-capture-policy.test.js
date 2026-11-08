@@ -147,6 +147,7 @@ describe('getNativeCaptureInjectScript', () => {
     let resolveWrite;
     let writerDesiredSize = 0;
     const portMessages = [];
+    const relayPipeline = { acquired: 9, backend: 'wgc', maxGapUs: 1200, seq: 4, written: 7 };
     const frameDispatched = new Promise((resolve) => { frameDispatchedResolve = resolve; });
     const writerReady = new Promise((resolve) => { resolveReady = resolve; });
     const writeAccepted = new Promise((resolve) => { resolveWrite = resolve; });
@@ -172,6 +173,9 @@ describe('getNativeCaptureInjectScript', () => {
               type: 'format',
               width: 1920
             }
+          });
+          this.onmessage?.({
+            data: { framesPosted: 3, pipeline: relayPipeline, type: 'stats' }
           });
           statsAfterFormat = window.__voiceRoomNativeCaptureStats?.();
           this.onmessage?.({
@@ -254,6 +258,7 @@ describe('getNativeCaptureInjectScript', () => {
     assert.equal(result.getVideoTracks().length, 1);
     assert.deepEqual(portMessages, [{ type: 'frame-ack' }, { type: 'frame-ack' }]);
     assert.equal(statsAfterFormat?.pixelFormat, 'NV12');
+    assert.deepEqual(statsAfterFormat?.relay.pipeline, relayPipeline);
     assert.equal(window.__voiceRoomNativeCaptureStats().pixelFormat, 'BGRX');
   });
 

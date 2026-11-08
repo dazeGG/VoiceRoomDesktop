@@ -40,6 +40,8 @@
 #include <windows.h>
 
 #include "CaptureGeometry.h"
+#include "CapturePacing.h"
+#include "CaptureTelemetry.h"
 
 #include <d3d11.h>
 #include <dwmapi.h>
@@ -190,6 +192,12 @@ static void LogReconfigured(uint32_t requestId,
                "{\"event\":\"reconfigured\",\"requestId\":%u,\"fps\":%u,\"maxWidth\":%u,\"maxHeight\":%u}\n",
                requestId, fps, maxWidth, maxHeight);
   std::fflush(stderr);
+}
+
+static int64_t QpcNow() {
+  LARGE_INTEGER now = {};
+  QueryPerformanceCounter(&now);
+  return now.QuadPart;
 }
 
 static void RegisterMmcssCaptureThread() {
@@ -352,6 +360,8 @@ enum class FrameWriteResult {
 
 class FrameWriter {
  public:
+  void SetTelemetry(voiceroom::capture::CaptureTelemetry* telemetry) { telemetry_ = telemetry; }
+
   void Initialize(ID3D11Device* device, ID3D11DeviceContext* context) {
     d3dDevice_ = device;
     d3dContext_ = context;
@@ -782,10 +792,13 @@ class FrameWriter {
 
     d3dContext_->CopyResource(nv12StagingTexture_.get(), nv12Texture_.get());
     D3D11_MAPPED_SUBRESOURCE mapped = {};
+    const int64_t mapStart = QpcNow();
     hr = d3dContext_->Map(nv12StagingTexture_.get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (telemetry_) telemetry_->RecordMap(QpcNow() - mapStart);
     if (FAILED(hr)) return WriteStatus::kFailedBeforeWrite;
 
     const uint32_t flags = (cursorDrawn ? kFrameFlagCursorDrawn : 0u) | kFrameFlagFormatNv12;
+    const int64_t writeStart = QpcNow();
     bool ok = WriteFrameHeader(width, height, flags);
     const size_t yPlaneBytes = static_cast<size_t>(width) * height;
     const size_t payload = yPlaneBytes + yPlaneBytes / 2;
@@ -798,6 +811,7 @@ class FrameWriter {
     d3dContext_->Unmap(nv12StagingTexture_.get(), 0);
     if (!ok) return WriteStatus::kPipeClosed;
     std::fflush(stdout);
+    if (telemetry_) telemetry_->RecordWrite(QpcNow() - writeStart);
     return WriteStatus::kWrote;
   }
 
@@ -908,11 +922,14 @@ class FrameWriter {
                              bool cursorDrawn) {
     d3dContext_->CopyResource(bgraStagingTexture_.get(), bgraTexture_.get());
     D3D11_MAPPED_SUBRESOURCE mapped = {};
+    const int64_t mapStart = QpcNow();
     if (FAILED(d3dContext_->Map(bgraStagingTexture_.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
       return WriteStatus::kFailedBeforeWrite;
     }
+    if (telemetry_) telemetry_->RecordMap(QpcNow() - mapStart);
 
     const uint32_t flags = cursorDrawn ? kFrameFlagCursorDrawn : 0u;
+    const int64_t writeStart = QpcNow();
     bool ok = WriteFrameHeader(outputWidth, outputHeight, flags);
     const size_t rowBytes = static_cast<size_t>(outputWidth) * 4;
     if (ok && sourceWidth == outputWidth && sourceHeight == outputHeight) {
@@ -930,7 +947,10 @@ class FrameWriter {
       ok = std::fwrite(bgrx_.data(), 1, bgrx_.size(), stdout) == bgrx_.size();
     }
     d3dContext_->Unmap(bgraStagingTexture_.get(), 0);
-    if (ok) std::fflush(stdout);
+    if (ok) {
+      std::fflush(stdout);
+      if (telemetry_) telemetry_->RecordWrite(QpcNow() - writeStart);
+    }
     return ok ? WriteStatus::kWrote : WriteStatus::kPipeClosed;
   }
 
@@ -1014,6 +1034,7 @@ class FrameWriter {
   uint32_t videoOutputHeight_ = 0;
   VideoProcessorInputMode inputMode_ = VideoProcessorInputMode::kNone;
   bool gpuFallbackLogged_ = false;
+  voiceroom::capture::CaptureTelemetry* telemetry_ = nullptr;
   bool directInputFallbackLogged_ = false;
   bool videoProcessorUnavailable_ = false;
   uint32_t unavailableVideoInputWidth_ = 0;
@@ -1041,12 +1062,15 @@ class CaptureSession {
     maxWidth_.store(maxWidth >= 2 && maxWidth <= 16384 ? maxWidth : 1920);
     maxHeight_.store(maxHeight >= 2 && maxHeight <= 16384 ? maxHeight : 1080);
     minFrameIntervalQpc_.store(0);
+    framePacer_.Reset();
     formatTelemetryEpoch_.store(0);
 
     LARGE_INTEGER frequency = {};
     if (QueryPerformanceFrequency(&frequency)) {
       minFrameIntervalQpc_.store(frequency.QuadPart / fps_.load());
     }
+    telemetry_.Begin(!target_.isWindow, frequency.QuadPart, QpcNow());
+    writer_.SetTelemetry(&telemetry_);
 
     // Screens use DXGI Desktop Duplication, windows use WGC. Duplication is the
     // only backend that does not paint the OS capture border (WGC draws a yellow
@@ -1054,7 +1078,9 @@ class CaptureSession {
     // not exist). It also hands us the desktop image *without* the cursor, so
     // FrameWriter::DrawCursor keeps compositing a cursor that honours
     // CURSOR_SHOWING — same correct hiding behaviour as the WGC path.
-    return target_.isWindow ? StartWindowCapture() : StartScreenCapture();
+    const bool started = target_.isWindow ? StartWindowCapture() : StartScreenCapture();
+    if (started) telemetryThread_ = std::thread([this]() { TelemetryLoop(); });
+    return started;
   }
 
   bool IsUnsupported() const { return unsupported_; }
@@ -1098,6 +1124,7 @@ class CaptureSession {
 
     // Desktop Duplication path: signal already set via g_running; join the loop.
     if (duplicationThread_.joinable()) duplicationThread_.join();
+    if (telemetryThread_.joinable()) telemetryThread_.join();
     duplication_ = nullptr;
 
     // WGC path.
@@ -1288,6 +1315,18 @@ class CaptureSession {
     return SUCCEEDED(output1->DuplicateOutput(d3dDevice_.get(), duplication_.put()));
   }
 
+  // Reports once a second from its own thread: it takes no frame lock, so it
+  // keeps talking while the source is stalled and no frame callback runs.
+  void TelemetryLoop() {
+    char line[512];
+    while (WaitForSingleObject(g_stopEvent, 1000) == WAIT_TIMEOUT) {
+      const auto snapshot = telemetry_.Take(QpcNow());
+      if (voiceroom::capture::CaptureTelemetry::Format(line, sizeof(line), snapshot) <= 0) continue;
+      std::fprintf(stderr, "%s\n", line);
+      std::fflush(stderr);
+    }
+  }
+
   void DuplicationLoop() {
     RegisterMmcssCaptureThread();
     // Cursor coordinates are translated against the monitor origin, matching the
@@ -1308,26 +1347,15 @@ class CaptureSession {
         SignalRuntimeFailure("AcquireNextFrame failed.", hr);
         break;
       }
+      telemetry_.RecordAcquired(QpcNow(), info.AccumulatedFrames);
 
       bool keepRunning = true;
       {
         // Shares the same lock as ApplyReconfigure so an ACK cannot overtake a
         // frame that was produced with the previous profile.
         std::lock_guard<std::mutex> guard(frameMutex_);
-        const int64_t frameIntervalQpc = minFrameIntervalQpc_.load();
-        bool emit = true;
-        if (frameIntervalQpc > 0) {
-          LARGE_INTEGER now = {};
-          QueryPerformanceCounter(&now);
-          if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < frameIntervalQpc) {
-            emit = false;
-          } else {
-            lastFrameQpc_ = now.QuadPart;
-          }
-        }
-
         FrameWriteResult writeResult = FrameWriteResult::kSkipped;
-        if (emit && !outputPaused_.load()) {
+        if (ShouldEmitFrame()) {
           auto texture = resource.try_as<ID3D11Texture2D>();
           if (texture) {
             D3D11_TEXTURE2D_DESC desc = {};
@@ -1378,6 +1406,19 @@ class CaptureSession {
     }
   }
 
+  // Called only while holding frameMutex_, by either capture backend.
+  bool ShouldEmitFrame() {
+    // Paused capture must not consume deadlines. Short relay pauses preserve
+    // the rate cap; after a long pause the pacer discards missed deadlines.
+    if (outputPaused_.load()) {
+      telemetry_.RecordPausedSkip();
+      return false;
+    }
+    if (framePacer_.ShouldEmit(QpcNow(), minFrameIntervalQpc_.load())) return true;
+    telemetry_.RecordPacingSkip();
+    return false;
+  }
+
   void OnFrameArrived(wgc::Direct3D11CaptureFramePool const& pool) {
     RegisterMmcssCaptureThread();
     std::lock_guard<std::mutex> guard(frameMutex_);
@@ -1385,17 +1426,8 @@ class CaptureSession {
 
     auto frame = pool.TryGetNextFrame();
     if (!frame) return;
-    if (outputPaused_.load()) return;
-
-    const int64_t frameIntervalQpc = minFrameIntervalQpc_.load();
-    if (frameIntervalQpc > 0) {
-      LARGE_INTEGER now = {};
-      QueryPerformanceCounter(&now);
-      if (lastFrameQpc_ != 0 && now.QuadPart - lastFrameQpc_ < frameIntervalQpc) {
-        return;
-      }
-      lastFrameQpc_ = now.QuadPart;
-    }
+    telemetry_.RecordAcquired(QpcNow(), 0);
+    if (!ShouldEmitFrame()) return;
 
     const auto frameSize = frame.ContentSize();
     if (frameSize.Width <= 0 || frameSize.Height <= 0) return;
@@ -1452,7 +1484,8 @@ class CaptureSession {
   std::atomic<bool> outputPaused_{false};
   std::atomic<bool> runtimeFailed_{false};
   std::atomic<bool> stopped_{false};
-  int64_t lastFrameQpc_ = 0;
+  voiceroom::capture::FramePacer framePacer_;
+  voiceroom::capture::CaptureTelemetry telemetry_;
   uint32_t consecutiveFrameWriteFailures_ = 0;
   bool unsupported_ = false;
 
@@ -1470,6 +1503,7 @@ class CaptureSession {
 
   winrt::com_ptr<IDXGIOutputDuplication> duplication_;
   std::thread duplicationThread_;
+  std::thread telemetryThread_;
 
   std::mutex frameMutex_;
   FrameWriter writer_;

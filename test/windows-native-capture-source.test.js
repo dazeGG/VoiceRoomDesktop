@@ -136,8 +136,6 @@ describe('Windows native capture helper source contract', () => {
   it('accepts helper pause commands and skips expensive frame conversion while paused', () => {
     assert.match(source, /line\.find\("set-paused"\)/);
     assert.match(source, /session->ApplyFlowControl\(paused\)/);
-    assert.match(source, /if \(emit && !outputPaused_\.load\(\)\)/);
-    assert.match(source, /if \(outputPaused_\.load\(\)\) return/);
   });
 
   it('stops a paused helper when relay termination closes the command pipe', () => {

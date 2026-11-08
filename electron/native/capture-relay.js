@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const { performance } = require('node:perf_hooks');
 
 const {
   appendFrameChunk,
@@ -81,8 +82,24 @@ function writeChildCommand(session, payload) {
 function setHelperPaused(session, paused) {
   if (!session || session.stopped || session.helperPaused === paused) return true;
   if (!writeChildCommand(session, { cmd: 'set-paused', paused })) return false;
-  session.helperPaused = paused;
+  recordHelperPause(session, paused);
   return true;
+}
+
+// Time the relay requested the helper to pause, not an acknowledgement from the
+// native process. A bounded queue can stall without dropping a single frame.
+function getHelperPausedMs(session, now = performance.now()) {
+  const ongoing = session.helperPaused && session.helperPausedAt != null
+    ? Math.max(0, now - session.helperPausedAt)
+    : 0;
+  return (session.helperPausedMs ?? 0) + ongoing;
+}
+
+function recordHelperPause(session, paused) {
+  const now = performance.now();
+  session.helperPausedMs = getHelperPausedMs(session, now);
+  session.helperPausedAt = paused ? now : null;
+  session.helperPaused = paused;
 }
 
 function handleRendererMessage(session, event) {
@@ -233,8 +250,46 @@ function parseHelperStderrChunk(state, chunk, options = {}) {
   return events;
 }
 
+const PIPELINE_BACKENDS = new Set(['wgc', 'dxgi']);
+const PIPELINE_CUMULATIVE_FIELDS = [
+  'acquired', 'pacingSkips', 'pausedSkips', 'written', 'accumulated', 'sumMapUs', 'sumWriteUs'
+];
+const PIPELINE_MAX_FIELDS = ['maxGapUs', 'maxMapUs', 'maxWriteUs'];
+
+function readPipelineNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+// The helper reports once a second, stats go out every two: cumulative values
+// keep the latest report, max* values keep the peak until the next stats post.
+function recordHelperPipeline(session, event) {
+  const seq = readPipelineNumber(event.seq);
+  if (seq === undefined || !PIPELINE_BACKENDS.has(event.backend)) return;
+  const next = { backend: event.backend, seq };
+  for (const field of PIPELINE_CUMULATIVE_FIELDS) {
+    const value = readPipelineNumber(event[field]);
+    if (value !== undefined) next[field] = value;
+  }
+  for (const field of PIPELINE_MAX_FIELDS) {
+    const peaks = [session.pipeline?.[field], readPipelineNumber(event[field])]
+      .filter((value) => value !== undefined);
+    if (peaks.length > 0) next[field] = Math.max(...peaks);
+  }
+  session.pipeline = next;
+}
+
+function takeHelperPipeline(session) {
+  const current = session.pipeline;
+  if (!current) return undefined;
+  const snapshot = { ...current };
+  for (const field of PIPELINE_MAX_FIELDS) delete current[field];
+  return snapshot;
+}
+
 function handleHelperEvent(session, event) {
-  if (event.event === 'format') {
+  if (event.event === 'pipeline') {
+    recordHelperPipeline(session, event);
+  } else if (event.event === 'format') {
     postToRenderer(session, {
       fps: Number(event.fps) || session.fps,
       height: Number(event.height) || 0,
@@ -264,12 +319,15 @@ function startStatsTimer(session) {
   stopStatsTimer(session);
   session.statsTimer = setInterval(() => {
     if (activeSession !== session || session.stopped) return;
+    const pipeline = takeHelperPipeline(session);
     postToRenderer(session, {
       framesParsed: session.framesParsed,
       framesDroppedBackpressure: session.framesDroppedBackpressure,
       framesInFlight: session.framesInFlight,
       framesPosted: session.framesPosted,
       helperPaused: session.helperPaused,
+      helperPausedMs: Math.round(getHelperPausedMs(session)),
+      ...(pipeline ? { pipeline } : {}),
       restartPending: Boolean(session.restartTimer),
       restarts: session.restarts,
       type: 'stats'
@@ -292,7 +350,9 @@ function stopStatsTimer(session) {
 
 function attachChild(session, child) {
   session.child = child;
-  session.helperPaused = false;
+  // Counters restart with a new helper process; do not mix them with the old one.
+  session.pipeline = null;
+  recordHelperPause(session, false);
   const stderrState = { buffer: '' };
 
   // A reconfigure write racing the child's death surfaces EPIPE as an async
@@ -333,6 +393,9 @@ function attachChild(session, child) {
 
   child.on('exit', (code, signal) => {
     if (activeSession !== session || session.child !== child) return;
+    // Restart backoff is not renderer backpressure. Close the old pause before
+    // scheduling a replacement; its own pause is counted if backlog persists.
+    recordHelperPause(session, false);
     if (session.forceKillTimer) clearTimeout(session.forceKillTimer);
     for (const event of parseHelperStderrChunk(stderrState, null, { flush: true })) {
       handleHelperEvent(session, event);
@@ -432,9 +495,12 @@ function startSession(options, port) {
     framesParsed: 0,
     framesPosted: 0,
     helperPaused: false,
+    helperPausedAt: null,
+    helperPausedMs: 0,
     helperPath: options.helperPath,
     maxHeight,
     maxWidth,
+    pipeline: null,
     port,
     pendingReconfigures: new Map(),
     restartAfterExit: null,
@@ -468,6 +534,7 @@ function startSession(options, port) {
 
 function stopSession(session, options = {}) {
   if (!session || session.stopped) return false;
+  recordHelperPause(session, false);
   session.stopped = true;
   stopStatsTimer(session);
   clearRestartTimer(session);
@@ -527,10 +594,12 @@ if (!parentPort) {
 module.exports = {
   failPendingReconfigures,
   finishPendingReconfigure,
+  getHelperPausedMs,
   handleChildStdinError,
   handleHelperEvent,
   handleReconfigure,
   handleRendererMessage,
   parseHelperStderrChunk,
-  postToRenderer
+  postToRenderer,
+  takeHelperPipeline
 };

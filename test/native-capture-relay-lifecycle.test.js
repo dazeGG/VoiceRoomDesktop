@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const Module = require('node:module');
+const { performance } = require('node:perf_hooks');
 const { describe, it } = require('node:test');
 
 const {
@@ -174,6 +175,9 @@ function loadRelayHarness() {
       immediateCount: () => immediateCallbacks.length,
       parentMessages,
       port: () => port,
+      runIntervals() {
+        for (const timer of [...intervals]) timer.callback();
+      },
       runTimeouts(delay) {
         const due = [...timeouts].filter((timer) => timer.delay === delay);
         for (const timer of due) {
@@ -224,6 +228,172 @@ function loadRelayHarness() {
 }
 
 describe('native capture relay child lifecycle', { concurrency: false }, () => {
+  it('reports cumulative pause time across helper restarts but excludes restart backoff', (t) => {
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    const harness = loadRelayHarness();
+    try {
+      const port = harness.start();
+      harness.children[0].stdout.emit('data', Buffer.concat([makeBgrxFrame(), makeBgrxFrame()]));
+      now = 100;
+      harness.runIntervals();
+      const stats = () => port.messages.filter((message) => message.type === 'stats').at(-1);
+      assert.equal(stats().helperPausedMs, 100);
+      assert.equal(stats().framesDroppedBackpressure, 0);
+      for (let index = 0; index < 4; index += 1) harness.exitChild(index, 1);
+      now = 1100;
+      harness.runIntervals();
+      assert.equal(stats().helperPaused, false);
+      assert.equal(stats().helperPausedMs, 100);
+      harness.runTimeouts(1000);
+      now = 1150;
+      harness.runIntervals();
+      assert.equal(stats().helperPausedMs, 150);
+      port.emit('message', { data: { type: 'frame-ack' } });
+      now = 2000;
+      harness.runIntervals();
+      assert.equal(stats().helperPausedMs, 150);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  describe('helper pipeline telemetry', () => {
+    const pipelineLine = (overrides = {}) => Buffer.from(`${JSON.stringify({
+      acquired: 10,
+      accumulated: 12,
+      backend: 'dxgi',
+      event: 'pipeline',
+      maxGapUs: 40000,
+      maxMapUs: 3000,
+      maxWriteUs: 2000,
+      pacingSkips: 4,
+      pausedSkips: 1,
+      seq: 1,
+      sumMapUs: 20000,
+      sumWriteUs: 15000,
+      written: 5,
+      ...overrides
+    })}\n`);
+    const lastStats = (port) => port.messages.filter((message) => message.type === 'stats').at(-1);
+
+    it('forwards the latest cumulative values and the peak of max values since the previous stats', () => {
+      const harness = loadRelayHarness();
+      try {
+        const port = harness.start();
+        const stderr = harness.children[0].stderr;
+        harness.runIntervals();
+        assert.equal('pipeline' in lastStats(port), false, 'an older helper sends no pipeline events');
+
+        stderr.emit('data', pipelineLine({ maxGapUs: 40000, maxMapUs: 3000, maxWriteUs: 2000, seq: 1 }));
+        stderr.emit('data', pipelineLine({
+          acquired: 25, maxGapUs: 900000, maxMapUs: 1000, maxWriteUs: 8000, seq: 2, written: 20
+        }));
+        harness.runIntervals();
+        assert.deepEqual(lastStats(port).pipeline, {
+          accumulated: 12,
+          acquired: 25,
+          backend: 'dxgi',
+          maxGapUs: 900000,
+          maxMapUs: 3000,
+          maxWriteUs: 8000,
+          pacingSkips: 4,
+          pausedSkips: 1,
+          seq: 2,
+          sumMapUs: 20000,
+          sumWriteUs: 15000,
+          written: 20
+        });
+
+        // Stats without a new helper report repeat the cumulative values but not stale peaks.
+        harness.runIntervals();
+        const repeated = lastStats(port).pipeline;
+        assert.equal(repeated.seq, 2);
+        assert.equal(repeated.acquired, 25);
+        for (const field of ['maxGapUs', 'maxMapUs', 'maxWriteUs']) assert.equal(field in repeated, false);
+
+        stderr.emit('data', pipelineLine({ maxGapUs: 100, maxMapUs: 7, maxWriteUs: 9, seq: 3 }));
+        harness.runIntervals();
+        assert.deepEqual(
+          [lastStats(port).pipeline.maxGapUs, lastStats(port).pipeline.maxMapUs, lastStats(port).pipeline.maxWriteUs],
+          [100, 7, 9]
+        );
+      } finally {
+        harness.cleanup();
+      }
+    });
+
+    it('does not log pipeline events', () => {
+      const harness = loadRelayHarness();
+      try {
+        harness.start();
+        harness.children[0].stderr.emit('data', pipelineLine());
+        assert.deepEqual(harness.parentMessages.filter((message) => message.type === 'log'), []);
+      } finally {
+        harness.cleanup();
+      }
+    });
+
+    it('drops non-numeric values and ignores reports without a valid seq or backend', () => {
+      const harness = loadRelayHarness();
+      try {
+        const port = harness.start();
+        const stderr = harness.children[0].stderr;
+        stderr.emit('data', pipelineLine({ seq: '1' }));
+        stderr.emit('data', pipelineLine({ backend: 'gdi', seq: 2 }));
+        harness.runIntervals();
+        assert.equal('pipeline' in lastStats(port), false);
+
+        stderr.emit('data', pipelineLine({
+          acquired: 'many',
+          accumulated: null,
+          backend: 'wgc',
+          maxGapUs: -5,
+          maxMapUs: Number.MAX_VALUE * 2,
+          pausedSkips: { nested: true },
+          seq: 3,
+          written: 7,
+          path: 'C:\\secret'
+        }));
+        harness.runIntervals();
+        const { pipeline } = lastStats(port);
+        assert.deepEqual(pipeline, {
+          backend: 'wgc',
+          maxWriteUs: 2000,
+          pacingSkips: 4,
+          seq: 3,
+          sumMapUs: 20000,
+          sumWriteUs: 15000,
+          written: 7
+        });
+      } finally {
+        harness.cleanup();
+      }
+    });
+
+    it('omits accumulated for WGC and starts clean after a helper restart', () => {
+      const harness = loadRelayHarness();
+      try {
+        const port = harness.start({ sourceId: 'window:1:0' });
+        harness.children[0].stderr.emit('data', pipelineLine({ accumulated: undefined, backend: 'wgc', seq: 5 }));
+        harness.runIntervals();
+        assert.equal('accumulated' in lastStats(port).pipeline, false);
+
+        harness.exitChild(0, 1);
+        assert.equal(harness.children.length, 2);
+        harness.runIntervals();
+        assert.equal('pipeline' in lastStats(port), false, 'old helper counters must not leak into the new process');
+
+        harness.children[1].stderr.emit('data', pipelineLine({ acquired: 3, backend: 'wgc', seq: 1 }));
+        harness.runIntervals();
+        assert.equal(lastStats(port).pipeline.seq, 1);
+        assert.equal(lastStats(port).pipeline.acquired, 3);
+      } finally {
+        harness.cleanup();
+      }
+    });
+  });
+
   it('restarts with the same profile, resets partial frame parsing, and reapplies pause state', () => {
     const harness = loadRelayHarness();
     try {

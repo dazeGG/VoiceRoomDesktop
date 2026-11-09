@@ -323,6 +323,36 @@ describe('native capture relay child lifecycle', { concurrency: false }, () => {
       }
     });
 
+    it('forwards optional diagnostics, aggregates waits, rejects invalid values and clears them on restart', () => {
+      const harness = loadRelayHarness();
+      try {
+        const port = harness.start();
+        const stderr = harness.children[0].stderr;
+        stderr.emit('data', pipelineLine({ acquireAttempts: 3, acquireEmpty: 2, callbackArrivals: 4, maxLockWaitUs: 900 }));
+        stderr.emit('data', pipelineLine({ seq: 2, acquireAttempts: 5, acquireEmpty: 3, callbackArrivals: 6, maxLockWaitUs: 100 }));
+        harness.runIntervals();
+        const pipeline = lastStats(port).pipeline;
+        assert.deepEqual([pipeline.acquireAttempts, pipeline.acquireEmpty, pipeline.callbackArrivals, pipeline.maxLockWaitUs], [5, 3, 6, 900]);
+        harness.runIntervals();
+        assert.equal('maxLockWaitUs' in lastStats(port).pipeline, false);
+        stderr.emit('data', pipelineLine({ seq: 3, acquireAttempts: -1, acquireEmpty: '2', callbackArrivals: null, maxLockWaitUs: -1 }));
+        harness.runIntervals();
+        for (const field of ['acquireAttempts', 'acquireEmpty', 'callbackArrivals', 'maxLockWaitUs']) {
+          assert.equal(field in lastStats(port).pipeline, false);
+        }
+        stderr.emit('data', pipelineLine({ seq: 4, acquireAttempts: 99, maxLockWaitUs: 999 }));
+        harness.exitChild(0, 1);
+        harness.runIntervals();
+        assert.equal('pipeline' in lastStats(port), false);
+        harness.children[1].stderr.emit('data', pipelineLine({ seq: 1, acquireAttempts: 1, maxLockWaitUs: 1 }));
+        harness.runIntervals();
+        assert.equal(lastStats(port).pipeline.acquireAttempts, 1);
+        assert.equal(lastStats(port).pipeline.maxLockWaitUs, 1);
+      } finally {
+        harness.cleanup();
+      }
+    });
+
     it('does not log pipeline events', () => {
       const harness = loadRelayHarness();
       try {

@@ -37,6 +37,13 @@ test('compiled native pipeline telemetry counts frames and exposes stalls', (con
     const run = spawnSync(outputPath, [], { encoding: 'utf8', windowsHide: true });
     assert.equal(run.error, undefined, run.error?.message);
     assert.equal(run.status, 0, run.stderr || run.stdout);
+    const reports = run.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.equal(reports.length, 3);
+    assert.equal(reports[0].acquireAttempts, 2);
+    assert.equal(reports[0].acquireEmpty, 1);
+    assert.equal('callbackArrivals' in reports[0], false);
+    assert.equal(reports[1].callbackArrivals, 2);
+    assert.equal(reports[2].event, 'pipeline');
     context.diagnostic(run.stdout.trim());
   } finally {
     fs.rmSync(tempDir, { force: true, recursive: true });

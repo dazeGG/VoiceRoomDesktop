@@ -252,9 +252,9 @@ function parseHelperStderrChunk(state, chunk, options = {}) {
 
 const PIPELINE_BACKENDS = new Set(['wgc', 'dxgi']);
 const PIPELINE_CUMULATIVE_FIELDS = [
-  'acquired', 'pacingSkips', 'pausedSkips', 'written', 'accumulated', 'sumMapUs', 'sumWriteUs'
+  'acquireAttempts', 'acquireEmpty', 'callbackArrivals', 'acquired', 'pacingSkips', 'pausedSkips', 'written', 'accumulated', 'sumMapUs', 'sumWriteUs'
 ];
-const PIPELINE_MAX_FIELDS = ['maxGapUs', 'maxMapUs', 'maxWriteUs'];
+const PIPELINE_MAX_FIELDS = ['maxGapUs', 'maxMapUs', 'maxWriteUs', 'maxLockWaitUs'];
 
 function readPipelineNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;

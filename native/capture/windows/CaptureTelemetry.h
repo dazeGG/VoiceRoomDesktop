@@ -18,6 +18,10 @@ class CaptureTelemetry {
     uint64_t seq = 0;
     bool dxgi = false;
     uint64_t acquired = 0;
+    uint64_t acquireAttempts = 0;
+    uint64_t acquireEmpty = 0;
+    uint64_t callbackArrivals = 0;
+    uint64_t maxLockWaitUs = 0;
     uint64_t pacingSkips = 0;
     uint64_t pausedSkips = 0;
     uint64_t written = 0;
@@ -45,6 +49,14 @@ class CaptureTelemetry {
     data_.accumulated += accumulatedFrames;
     data_.maxGapUs = std::max(data_.maxGapUs, ToMicros(now - lastAcquired_));
     lastAcquired_ = now;
+  }
+
+  void RecordAcquireAttempt() { std::lock_guard<std::mutex> guard(mutex_); ++data_.acquireAttempts; }
+  void RecordAcquireEmpty() { std::lock_guard<std::mutex> guard(mutex_); ++data_.acquireEmpty; }
+  void RecordCallbackArrival() { std::lock_guard<std::mutex> guard(mutex_); ++data_.callbackArrivals; }
+  void RecordLockWait(int64_t ticks) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    data_.maxLockWaitUs = std::max(data_.maxLockWaitUs, ToMicros(ticks));
   }
 
   void RecordPacingSkip() {
@@ -82,6 +94,7 @@ class CaptureTelemetry {
     data_.maxGapUs = 0;
     data_.maxMapUs = 0;
     data_.maxWriteUs = 0;
+    data_.maxLockWaitUs = 0;
     return out;
   }
 
@@ -92,12 +105,18 @@ class CaptureTelemetry {
       std::snprintf(accumulated, sizeof(accumulated), ",\"accumulated\":%llu",
                     static_cast<unsigned long long>(s.accumulated));
     }
-    return std::snprintf(
-        buffer, size,
+    char callback[64] = "";
+    if (!s.dxgi) {
+      std::snprintf(callback, sizeof(callback), ",\"callbackArrivals\":%llu",
+                    static_cast<unsigned long long>(s.callbackArrivals));
+    }
+    char formatted[1024];
+    const int required = std::snprintf(
+        formatted, sizeof(formatted),
         "{\"event\":\"pipeline\",\"seq\":%llu,\"backend\":\"%s\",\"acquired\":%llu,"
         "\"pacingSkips\":%llu,\"pausedSkips\":%llu,\"written\":%llu%s,"
         "\"sumMapUs\":%llu,\"sumWriteUs\":%llu,\"maxGapUs\":%llu,\"maxMapUs\":%llu,"
-        "\"maxWriteUs\":%llu}",
+        "\"maxWriteUs\":%llu,\"acquireAttempts\":%llu,\"acquireEmpty\":%llu%s,\"maxLockWaitUs\":%llu}",
         static_cast<unsigned long long>(s.seq), s.dxgi ? "dxgi" : "wgc",
         static_cast<unsigned long long>(s.acquired),
         static_cast<unsigned long long>(s.pacingSkips),
@@ -107,7 +126,17 @@ class CaptureTelemetry {
         static_cast<unsigned long long>(s.sumWriteUs),
         static_cast<unsigned long long>(s.maxGapUs),
         static_cast<unsigned long long>(s.maxMapUs),
-        static_cast<unsigned long long>(s.maxWriteUs));
+        static_cast<unsigned long long>(s.maxWriteUs),
+        static_cast<unsigned long long>(s.acquireAttempts),
+        static_cast<unsigned long long>(s.acquireEmpty), callback,
+        static_cast<unsigned long long>(s.maxLockWaitUs));
+    if (required < 0 || static_cast<size_t>(required) >= sizeof(formatted) ||
+        static_cast<size_t>(required) >= size || !buffer) {
+      if (buffer && size) buffer[0] = '\0';
+      return -1;
+    }
+    std::copy_n(formatted, static_cast<size_t>(required) + 1, buffer);
+    return required;
   }
 
  private:

@@ -1318,7 +1318,7 @@ class CaptureSession {
   // Reports once a second from its own thread: it takes no frame lock, so it
   // keeps talking while the source is stalled and no frame callback runs.
   void TelemetryLoop() {
-    char line[512];
+    char line[1024];
     while (WaitForSingleObject(g_stopEvent, 1000) == WAIT_TIMEOUT) {
       const auto snapshot = telemetry_.Take(QpcNow());
       if (voiceroom::capture::CaptureTelemetry::Format(line, sizeof(line), snapshot) <= 0) continue;
@@ -1335,8 +1335,12 @@ class CaptureSession {
     while (g_running) {
       DXGI_OUTDUPL_FRAME_INFO info = {};
       winrt::com_ptr<IDXGIResource> resource;
+      telemetry_.RecordAcquireAttempt();
       HRESULT hr = duplication_->AcquireNextFrame(250, &info, resource.put());
-      if (hr == DXGI_ERROR_WAIT_TIMEOUT) continue;
+      if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+        telemetry_.RecordAcquireEmpty();
+        continue;
+      }
       if (hr == DXGI_ERROR_ACCESS_LOST) {
         // Resolution/mode change, UAC desktop switch, etc. Rebuild and retry.
         if (RecreateDuplication()) continue;
@@ -1353,7 +1357,9 @@ class CaptureSession {
       {
         // Shares the same lock as ApplyReconfigure so an ACK cannot overtake a
         // frame that was produced with the previous profile.
+        const int64_t lockStart = QpcNow();
         std::lock_guard<std::mutex> guard(frameMutex_);
+        telemetry_.RecordLockWait(QpcNow() - lockStart);
         FrameWriteResult writeResult = FrameWriteResult::kSkipped;
         if (ShouldEmitFrame()) {
           auto texture = resource.try_as<ID3D11Texture2D>();
@@ -1420,12 +1426,19 @@ class CaptureSession {
   }
 
   void OnFrameArrived(wgc::Direct3D11CaptureFramePool const& pool) {
+    telemetry_.RecordCallbackArrival();
     RegisterMmcssCaptureThread();
+    const int64_t lockStart = QpcNow();
     std::lock_guard<std::mutex> guard(frameMutex_);
+    telemetry_.RecordLockWait(QpcNow() - lockStart);
     if (!g_running) return;
 
+    telemetry_.RecordAcquireAttempt();
     auto frame = pool.TryGetNextFrame();
-    if (!frame) return;
+    if (!frame) {
+      telemetry_.RecordAcquireEmpty();
+      return;
+    }
     telemetry_.RecordAcquired(QpcNow(), 0);
     if (!ShouldEmitFrame()) return;
 

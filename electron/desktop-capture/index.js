@@ -1,5 +1,7 @@
 'use strict';
 
+const { t } = require('../localization');
+
 const { BrowserWindow, ipcMain } = require('electron');
 const {
   createScreenProfileId,
@@ -68,7 +70,7 @@ function configureDesktopCaptureIpc() {
     const parentWindow = BrowserWindow.fromWebContents(event.sender);
     const sources = await getDesktopCaptureSources();
     if (!sources.length) {
-      throw new Error('Нет доступных источников экрана');
+      throw new Error(t('noSources'));
     }
 
     const selection = await openDesktopCapturePickerWindow(parentWindow, sources, options);

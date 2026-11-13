@@ -1,5 +1,7 @@
 'use strict';
 
+const { t } = require('../localization');
+
 const { app, shell, systemPreferences } = require('electron');
 const log = require('../logger');
 
@@ -65,15 +67,15 @@ function getMacScreenCaptureStatus() {
 function createMacScreenCaptureAccessError(cause) {
   const status = getMacScreenCaptureStatus();
   const appName = app.getName() || 'VoiceRoom';
-  const devHint = process.defaultApp ? ' При запуске через npm run electron разрешение может называться Electron.' : '';
+  const devHint = process.defaultApp ? t('macDevHint') : '';
   const causeText = cause?.message ? `\nElectron: ${cause.message}` : '';
   const error = new Error(
     [
-      'macOS не дала приложению доступ к записи экрана.',
-      `Статус Screen Recording: ${status}.`,
-      `Откройте System Settings -> Privacy & Security -> Screen & System Audio Recording и включите ${appName}.${devHint}`,
-      'Если переключатель уже включён, удалите старую запись приложения кнопкой «−» и добавьте текущее приложение кнопкой «+».',
-      'После изменения полностью закройте и снова откройте приложение.'
+      t('macCaptureDenied'),
+      t('macCaptureStatus', { status }),
+      t('macCaptureSettings', { appName, devHint }),
+      t('macCaptureReadd'),
+      t('macCaptureRestart')
     ].join('\n') + causeText
   );
   error.name = 'ScreenCapturePermissionError';

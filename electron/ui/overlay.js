@@ -1,5 +1,8 @@
 'use strict';
 
+const t = window.voiceRoomI18n.t;
+let lastState = null;
+
 const people = document.querySelector('#overlayPeople');
 
 // Hues of the avatar colour keys, as in the web app: a pastel fill and a dark
@@ -74,7 +77,7 @@ function icon(name, label) {
 }
 
 function participantLabel(participant) {
-  return participant.name || (participant.self ? 'Вы' : 'Участник');
+  return participant.name || (participant.self ? t('you') : t('participant'));
 }
 
 function avatarHue(participant) {
@@ -99,10 +102,10 @@ function createPerson() {
   const initial = element('span', 'overlay-initial');
   avatar.append(image, initial);
   const name = element('span', 'overlay-name');
-  const micOff = icon('micOff', 'Микрофон выключен');
-  const outputOff = icon('outputOff', 'Звук выключен');
+  const micOff = icon('micOff', t('micMuted'));
+  const outputOff = icon('outputOff', t('soundMuted'));
   const stream = element('span', 'overlay-stream');
-  stream.textContent = 'Стрим';
+  stream.textContent = t('stream');
   item.append(avatar, name, micOff, outputOff, stream);
 
   const node = { avatar, failedSrc: '', image, initial, item, micOff, name, outputOff, stream };
@@ -116,6 +119,9 @@ function createPerson() {
 }
 
 function updatePerson(node, participant, showNames) {
+  node.micOff.setAttribute('aria-label', t('micMuted'));
+  node.outputOff.setAttribute('aria-label', t('soundMuted'));
+  node.stream.textContent = t('stream');
   const label = participantLabel(participant);
   const src = typeof participant.avatarUrl === 'string' && participant.avatarUrl.startsWith('https://')
     ? participant.avatarUrl
@@ -142,6 +148,7 @@ function updatePerson(node, participant, showNames) {
 }
 
 function render(state) {
+  lastState = state;
   if (!people) return;
   const participants = Array.isArray(state?.participants) ? state.participants : [];
   const settings = state?.settings || {};
@@ -190,3 +197,5 @@ if (window.ResizeObserver && people) {
 }
 
 window.voiceRoomOverlay?.ready?.().catch(() => {});
+
+window.voiceRoomI18n.subscribe(() => { render(lastState); requestAnimationFrame(reportSize); });

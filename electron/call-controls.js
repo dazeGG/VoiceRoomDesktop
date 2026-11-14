@@ -1,5 +1,7 @@
 'use strict';
 
+const { t } = require('./localization');
+
 const STATE_CHANNEL = 'desktop-call:set-state';
 const ACTION_CHANNEL = 'desktop-call:action';
 const CALL_ACTIONS = Object.freeze(['toggle-mic', 'toggle-output', 'disconnect']);
@@ -51,24 +53,24 @@ function describeCallControls(state) {
     {
       action: 'toggle-mic',
       icon: state.micMuted ? 'mic-off' : 'mic',
-      label: state.micMuted ? 'Включить микрофон' : 'Выключить микрофон'
+      label: state.micMuted ? t('micOn') : t('micOff')
     },
     {
       action: 'toggle-output',
       icon: state.outputMuted ? 'headphone-off' : 'headphones',
-      label: state.outputMuted ? 'Включить звук' : 'Выключить звук'
+      label: state.outputMuted ? t('soundOn') : t('soundOff')
     },
     {
       action: 'disconnect',
       icon: 'phone-off',
-      label: 'Отключиться'
+      label: t('leave')
     }
   ];
 }
 
 function describeCallTooltip(state) {
   if (!state?.active) return 'VoiceRoom';
-  return state.roomName ? `VoiceRoom — ${state.roomName}` : 'VoiceRoom — в звонке';
+  return state.roomName ? `VoiceRoom — ${state.roomName}` : t('inCall');
 }
 
 function createCallControlsController({ log = console } = {}) {

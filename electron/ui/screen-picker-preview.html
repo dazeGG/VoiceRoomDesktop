@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; font-src 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>VoiceRoom Stream Picker</title>
+    <title data-i18n="previewTitle">VoiceRoom Stream Picker</title>
     <link rel="stylesheet" href="../shell-tokens.css">
     <link rel="stylesheet" href="./screen-picker-preview.css">
   </head>
@@ -12,25 +12,25 @@
     <main class="screen-picker-shell">
       <section class="screen-source-panel" aria-labelledby="pickerTitle">
         <header class="screen-source-heading">
-          <h1 id="pickerTitle">Выберите, что показать</h1>
-          <button class="screen-source-close" id="screenSourceClose" type="button" aria-label="Закрыть">
+          <h1 id="pickerTitle" data-i18n="pickerTitle">Выберите, что показать</h1>
+          <button class="screen-source-close" id="screenSourceClose" type="button" aria-label="Закрыть" data-i18n-aria="close">
             <i data-lucide="x" data-icon-size="md" aria-hidden="true"></i>
           </button>
         </header>
 
-        <nav class="screen-source-tabs" aria-label="Тип источника" role="tablist">
+        <nav class="screen-source-tabs" aria-label="Тип источника" data-i18n-aria="sourceType" role="tablist">
           <button class="screen-source-tab" id="screenSourceScreensTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="true">
             <i data-lucide="monitor" data-icon-size="sm" aria-hidden="true"></i>
-            Экраны
+            <span data-i18n="screens">Экраны</span>
           </button>
           <button class="screen-source-tab" id="screenSourceWindowsTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="false">
             <i data-lucide="app-window" data-icon-size="sm" aria-hidden="true"></i>
-            Окна
+            <span data-i18n="windows">Окна</span>
           </button>
         </nav>
 
         <div id="screenSourceTabpanel" role="tabpanel" aria-labelledby="screenSourceScreensTab">
-          <div class="screen-source-options" id="screenSourceOptions" role="radiogroup" aria-label="Источники"></div>
+          <div class="screen-source-options" id="screenSourceOptions" role="radiogroup" aria-label="Источники" data-i18n-aria="sources"></div>
         </div>
 
         <footer class="screen-source-footer">
@@ -40,34 +40,34 @@
               <i data-lucide="monitor" data-icon-size="sm"></i>
             </span>
             <div class="screen-source-summary-text">
-              <div class="screen-source-summary-name" id="screenSummaryName">Не выбрано</div>
+              <div class="screen-source-summary-name" id="screenSummaryName" data-i18n="notSelected">Не выбрано</div>
               <div class="screen-source-summary-detail" id="screenSummaryDetail">SD · 720p · 30 к/с · звук</div>
             </div>
           </div>
 
           <div class="screen-source-footer-actions">
             <!-- SD / HD toggle -->
-            <div class="screen-source-res-toggle" id="screenResToggle" role="group" aria-label="Качество">
+            <div class="screen-source-res-toggle" id="screenResToggle" role="group" aria-label="Качество" data-i18n-aria="quality">
               <button type="button" data-quality-preset="sd" aria-pressed="true">SD</button>
               <button type="button" data-quality-preset="hd" aria-pressed="false">HD</button>
             </div>
 
             <!-- Gear + popover -->
             <div class="screen-source-gear-wrap">
-              <button class="screen-source-gear" id="screenSettingsGear" type="button" title="Настройки стрима" aria-pressed="false" aria-controls="screenSettingsPopover">
+              <button class="screen-source-gear" id="screenSettingsGear" type="button" title="Настройки стрима" data-i18n-title="streamSettings" aria-pressed="false" aria-controls="screenSettingsPopover">
                 <i data-lucide="settings" data-icon-size="md" aria-hidden="true"></i>
               </button>
 
-              <div class="screen-settings-popover" id="screenSettingsPopover" hidden role="dialog" aria-label="Настройки стрима">
-                <div class="screen-settings-label">Режим стрима</div>
+              <div class="screen-settings-popover" id="screenSettingsPopover" hidden role="dialog" aria-label="Настройки стрима" data-i18n-aria="streamSettings">
+                <div class="screen-settings-label" data-i18n="streamMode">Режим стрима</div>
                 <div class="screen-settings-presets">
                   <button class="screen-settings-preset" id="screenModeGames" type="button" data-mode="games" aria-pressed="true">
                     <span class="screen-settings-icon">
                       <i data-lucide="play" data-icon-size="sm" aria-hidden="true"></i>
                     </span>
                     <span class="screen-settings-info">
-                      <span class="screen-settings-title">Плавное видео</span>
-                      <span class="screen-settings-desc">30 к/с · для игр и видео</span>
+                      <span class="screen-settings-title" data-i18n="smoothVideo">Плавное видео</span>
+                      <span class="screen-settings-desc" data-i18n="smoothDetail">30 к/с · для игр и видео</span>
                     </span>
                     <span class="screen-settings-radio" aria-hidden="true">
                       <span class="screen-settings-dot"></span>
@@ -78,8 +78,8 @@
                       <i data-lucide="type" data-icon-size="sm" aria-hidden="true"></i>
                     </span>
                     <span class="screen-settings-info">
-                      <span class="screen-settings-title">Чёткая картинка</span>
-                      <span class="screen-settings-desc">5 к/с · для текста и кода</span>
+                      <span class="screen-settings-title" data-i18n="sharpPicture">Чёткая картинка</span>
+                      <span class="screen-settings-desc" data-i18n="sharpDetail">5 к/с · для текста и кода</span>
                     </span>
                     <span class="screen-settings-radio" aria-hidden="true"></span>
                   </button>
@@ -89,13 +89,13 @@
 
                 <label class="screen-audio-toggle">
                   <input id="screenAudioToggle" type="checkbox" checked>
-                  <span class="screen-audio-label">Звук стрима</span>
+                  <span class="screen-audio-label" data-i18n="streamAudio">Звук стрима</span>
                   <span class="screen-audio-switch" aria-hidden="true"></span>
                 </label>
 
                 <label class="screen-audio-toggle screen-audio-app-toggle" id="screenAppAudioRow" hidden>
                   <input id="screenAppAudioToggle" type="checkbox" checked>
-                  <span class="screen-audio-label">Только звук этого окна</span>
+                  <span class="screen-audio-label" data-i18n="windowAudioOnly">Только звук этого окна</span>
                   <span class="screen-audio-switch" aria-hidden="true"></span>
                 </label>
               </div>
@@ -103,12 +103,14 @@
 
             <button class="screen-source-launch" id="screenSourceStart" type="button" disabled>
               <i data-lucide="play" data-icon-size="sm" data-icon-fill="true" aria-hidden="true"></i>
-              Запустить
+              <span data-i18n="start">Запустить</span>
             </button>
           </div>
         </footer>
       </section>
     </main>
+    <script src="../localization/catalog.js"></script>
+    <script src="./localization.js"></script>
     <script src="../../node_modules/lucide/dist/umd/lucide.min.js"></script>
     <script src="./screen-picker-icons.js"></script>
     <script src="./screen-picker.js"></script>

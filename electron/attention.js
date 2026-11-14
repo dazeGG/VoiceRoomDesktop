@@ -1,5 +1,7 @@
 'use strict';
 
+const { getLocale, t } = require('./localization');
+
 const BADGE_CHANNEL = 'desktop-attention:set-badge-count';
 const REQUEST_CHANNEL = 'desktop-attention:request';
 const MAX_BADGE_COUNT = 9999;
@@ -39,7 +41,7 @@ function formatBadgeLabel(count) {
 }
 
 function describeBadgeCount(count) {
-  return count > 0 ? `Непрочитанных: ${count}` : '';
+  return count > 0 ? t('unread', { count: new Intl.NumberFormat(getLocale()).format(count) }) : '';
 }
 
 function layoutLabel(label, size) {

@@ -1,5 +1,7 @@
 'use strict';
 
+const { t } = require('./localization');
+
 const path = require('node:path');
 
 const STABLE_PROTOCOL_SCHEME = 'voiceroom';
@@ -214,11 +216,11 @@ function createDeepLinkController({
       return;
     }
     Promise.resolve(dialog.showMessageBox(window, {
-      buttons: ['Перейти', 'Отмена'],
+      buttons: [t('followLink'), t('cancel')],
       cancelId: 1,
       defaultId: 0,
-      detail: 'Текущий звонок прервётся.',
-      message: 'Перейти по ссылке?',
+      detail: t('linkDetail'),
+      message: t('linkQuestion'),
       noLink: true,
       type: 'question'
     })).then(({ response }) => {

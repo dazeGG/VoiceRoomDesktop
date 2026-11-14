@@ -1,5 +1,7 @@
 'use strict';
 
+const { getLocale, t } = require('../localization');
+
 const { net, session } = require('electron');
 const path = require('node:path');
 const { WINDOW_BACKGROUND, getMainWindowChromeOptions } = require('../shell-theme');
@@ -128,7 +130,7 @@ function createAppBootstrap({
         minHeight: 640,
         minWidth: 760,
         show: false,
-        title: 'VoiceRoom Stream Picker Preview',
+        title: t('previewTitle'),
         titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
         webPreferences: {
           contextIsolation: true,
@@ -142,14 +144,14 @@ function createAppBootstrap({
         previewWindow.show();
       });
 
-      previewWindow.loadFile(path.join(__dirname, '../ui/screen-picker-preview.html')).catch((error) => {
-        dialog.showErrorBox('VoiceRoom', `Не удалось открыть preview\n\n${error.message}`);
+      previewWindow.loadFile(path.join(__dirname, '../ui/screen-picker-preview.html'), { query: { locale: getLocale() } }).catch((error) => {
+        dialog.showErrorBox('VoiceRoom', t('previewError', { error: error.message }));
       });
       return;
     }
 
     if (!appUrl) {
-      dialog.showErrorBox('VoiceRoom', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
+      dialog.showErrorBox('VoiceRoom', t('missingUrl'));
       app.quit();
       return;
     }

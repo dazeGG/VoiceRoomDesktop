@@ -1,5 +1,7 @@
 'use strict';
 
+const { t } = require('../localization');
+
 const {
   isAltF4Input,
   shouldHideToTrayOnClose,
@@ -60,7 +62,7 @@ function createWindowLifecycleController({
   function buildTrayMenu() {
     const template = [
       {
-        label: 'Открыть VoiceRoom',
+        label: t('open'),
         click: restoreMainWindow
       }
     ];
@@ -72,15 +74,15 @@ function createWindowLifecycleController({
     }
     if (diagnosticsActions) {
       template.push({
-        label: 'Диагностика',
+        label: t('diagnostics'),
         submenu: [
-          { label: 'Открыть папку логов', click: diagnosticsActions.openLogsFolder },
-          { label: 'Скопировать информацию о системе', click: diagnosticsActions.copyInfo }
+          { label: t('openLogs'), click: diagnosticsActions.openLogsFolder },
+          { label: t('copySystem'), click: diagnosticsActions.copyInfo }
         ]
       });
     }
     template.push({
-      label: 'Выход',
+      label: t('quit'),
       click: () => {
         requestQuit();
         app.quit();
@@ -91,7 +93,7 @@ function createWindowLifecycleController({
 
   function setUpdateAction(action) {
     updateAction = action && typeof action.click === 'function'
-      ? { label: String(action.label || 'Обновить и перезапустить'), click: action.click }
+      ? { label: String(action.label || t('restartUpdate')), click: action.click }
       : null;
     if (tray) tray.setContextMenu(buildTrayMenu());
   }
@@ -181,6 +183,7 @@ function createWindowLifecycleController({
     isMainWindowVisible,
     isQuitRequested,
     refreshTrayIcon,
+    refreshLocale: () => { if (tray) tray.setContextMenu(buildTrayMenu()); },
     requestQuit,
     restoreMainWindow,
     setCallMenu,

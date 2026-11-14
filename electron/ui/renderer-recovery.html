@@ -10,10 +10,12 @@
   <body>
     <main class="recovery-shell">
       <p class="recovery-eyebrow">VoiceRoom</p>
-      <h1>Что-то пошло не так</h1>
-      <p class="recovery-message">Интерфейс VoiceRoom неожиданно остановился. Перезагрузите приложение, чтобы продолжить.</p>
-      <button class="recovery-reload" id="recoveryReload" type="button">Перезагрузить</button>
+      <h1 data-i18n="recoveryTitle">Что-то пошло не так</h1>
+      <p class="recovery-message" data-i18n="recoveryMessage">Интерфейс VoiceRoom неожиданно остановился. Перезагрузите приложение, чтобы продолжить.</p>
+      <button class="recovery-reload" id="recoveryReload" data-i18n="reload" type="button">Перезагрузить</button>
     </main>
+    <script src="../localization/catalog.js"></script>
+    <script src="./localization.js"></script>
     <script src="./renderer-recovery.js"></script>
   </body>
 </html>

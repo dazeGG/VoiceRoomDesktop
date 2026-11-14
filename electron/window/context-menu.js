@@ -1,5 +1,7 @@
 'use strict';
 
+const { t } = require('../localization');
+
 const MAX_SPELLING_SUGGESTIONS = 5;
 // Checked alongside the OS locale so mixed Russian/English chat is not flagged.
 const PREFERRED_SPELLCHECK_LANGUAGES = Object.freeze(['ru', 'en-US']);
@@ -27,29 +29,29 @@ function buildContextMenuTemplate(params = {}, actions) {
     groups.push([
       ...(suggestions.length > 0
         ? suggestions.map((suggestion) => ({ click: () => actions.replaceMisspelling(suggestion), label: suggestion }))
-        : [{ enabled: false, label: 'Нет вариантов' }]),
-      { click: () => actions.addWordToDictionary(params.misspelledWord), label: 'Добавить в словарь' }
+        : [{ enabled: false, label: t('noSuggestions') }]),
+      { click: () => actions.addWordToDictionary(params.misspelledWord), label: t('addDictionary') }
     ]);
   }
 
   if (isWebLink(params.linkURL)) {
-    groups.push([{ click: () => actions.writeText(params.linkURL), label: 'Копировать ссылку' }]);
+    groups.push([{ click: () => actions.writeText(params.linkURL), label: t('copyLink') }]);
   }
 
   if (params.mediaType === 'image' && params.hasImageContents) {
-    groups.push([{ click: () => actions.copyImageAt(params.x, params.y), label: 'Копировать изображение' }]);
+    groups.push([{ click: () => actions.copyImageAt(params.x, params.y), label: t('copyImage') }]);
   }
 
   if (params.isEditable) {
     groups.push([
-      { click: actions.cut, enabled: editFlags.canCut === true, label: 'Вырезать' },
-      { click: actions.copy, enabled: editFlags.canCopy === true, label: 'Копировать' },
-      { click: actions.paste, enabled: editFlags.canPaste === true, label: 'Вставить' }
+      { click: actions.cut, enabled: editFlags.canCut === true, label: t('cut') },
+      { click: actions.copy, enabled: editFlags.canCopy === true, label: t('copy') },
+      { click: actions.paste, enabled: editFlags.canPaste === true, label: t('paste') }
     ], [
-      { click: actions.selectAll, enabled: editFlags.canSelectAll === true, label: 'Выделить всё' }
+      { click: actions.selectAll, enabled: editFlags.canSelectAll === true, label: t('selectAll') }
     ]);
   } else if (typeof params.selectionText === 'string' && params.selectionText.trim()) {
-    groups.push([{ click: actions.copy, label: 'Копировать' }]);
+    groups.push([{ click: actions.copy, label: t('copy') }]);
   }
 
   return joinGroups(groups);

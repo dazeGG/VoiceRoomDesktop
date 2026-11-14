@@ -1,5 +1,7 @@
 'use strict';
 
+const { getLocale, t } = require('../localization');
+
 const { BrowserWindow, dialog } = require('electron');
 const path = require('node:path');
 const { getNativeCaptureCapabilities } = require('../native/capture');
@@ -11,14 +13,14 @@ function showRendererRecovery(window, details = {}, { log } = {}) {
   if (!window || window.isDestroyed()) return;
 
   log?.error?.('Renderer process gone:', details);
-  window.loadFile(path.join(__dirname, '../ui/renderer-recovery.html')).catch((error) => {
+  window.loadFile(path.join(__dirname, '../ui/renderer-recovery.html'), { query: { locale: getLocale() } }).catch((error) => {
     log?.error?.('Failed to open recovery screen:', error);
   });
 }
 
 function loadMainApplication(window, appUrl, { dialog: dialogModule = dialog, log } = {}) {
   if (!appUrl) {
-    dialogModule.showErrorBox('VoiceRoom', 'Не задан VOICE_ROOM_URL. Создайте .env или electron/runtime-config.json.');
+    dialogModule.showErrorBox('VoiceRoom', t('missingUrl'));
     return Promise.resolve();
   }
 
@@ -29,7 +31,7 @@ function loadMainApplication(window, appUrl, { dialog: dialogModule = dialog, lo
 }
 
 function showConnectionLost(window) {
-  return window.loadFile(path.join(__dirname, '../ui/connection-lost.html'));
+  return window.loadFile(path.join(__dirname, '../ui/connection-lost.html'), { query: { locale: getLocale() } });
 }
 
 function installMediaDeviceFilter(webContents, { log } = {}) {
@@ -108,7 +110,7 @@ function createPickerPreviewWindow({ browserWindow = BrowserWindow, dialog: dial
     minHeight: 640,
     minWidth: 760,
     show: false,
-    title: 'VoiceRoom Stream Picker Preview',
+    title: t('previewTitle'),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       contextIsolation: true,
@@ -122,8 +124,8 @@ function createPickerPreviewWindow({ browserWindow = BrowserWindow, dialog: dial
     previewWindow.show();
   });
 
-  previewWindow.loadFile(path.join(__dirname, '../ui/screen-picker-preview.html')).catch((error) => {
-    dialogModule.showErrorBox('VoiceRoom', `Не удалось открыть preview\n\n${error.message}`);
+  previewWindow.loadFile(path.join(__dirname, '../ui/screen-picker-preview.html'), { query: { locale: getLocale() } }).catch((error) => {
+    dialogModule.showErrorBox('VoiceRoom', t('previewError', { error: error.message }));
   });
 }
 

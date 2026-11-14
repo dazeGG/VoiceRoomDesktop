@@ -4,12 +4,16 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 const path = require('node:path');
 const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const userDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-room-main-policy-'));
+test.after(() => fs.rmSync(userDataRoot, { recursive: true, force: true }));
 
 function createElectronMock() {
   const app = {
     commandLine: { appendSwitch() {} },
     getAppPath: () => path.join(__dirname, '..'),
-    getPath: () => path.join(__dirname, 'fixtures', 'missing-user-data'),
+    getPath: () => userDataRoot,
     getVersion: () => '0.0.0-test',
     isPackaged: false,
     on() {},
@@ -193,7 +197,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 1);
-    assert.equal(handleCalls, 34);
+    assert.equal(handleCalls, 36);
     assert.deepEqual([...handledChannels].sort(), [
       'desktop-app-icon:get',
       'desktop-app-icon:set-theme',
@@ -226,6 +230,8 @@ test('main process installs IPC services once when macOS recreates its window', 
       'desktop-system:get-state',
       'desktop-update:get-state',
       'desktop-update:install',
+      'locale:get',
+      'locale:set',
       'window:is-fullscreen',
       'window:reload-main',
       'window:set-fullscreen'
@@ -244,7 +250,7 @@ test('main process installs IPC services once when macOS recreates its window', 
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(launchCalls, 3);
-    assert.equal(handleCalls, 34);
+    assert.equal(handleCalls, 36);
   } finally {
     delete require.cache[require.resolve(mainPath)];
     Module._load = originalLoad;

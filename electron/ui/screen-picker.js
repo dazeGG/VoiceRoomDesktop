@@ -1,5 +1,7 @@
 'use strict';
 
+const t = window.voiceRoomI18n.t;
+
 const elements = {
   appAudioRow: document.querySelector('#screenAppAudioRow'),
   appAudioToggle: document.querySelector('#screenAppAudioToggle'),
@@ -29,7 +31,7 @@ const fallbackState = {
   defaultQualityId: 'balanced',
   defaultStreamAudioEnabled: true,
   sources: [
-    { id: 'screen:1:0', name: 'Весь экран', thumbnail: '', type: 'screen' },
+    { id: 'screen:1:0', name: t('entireScreen'), thumbnail: '', type: 'screen' },
     { id: 'window:1:0', name: 'Cursor - VoiceRoom', thumbnail: '', type: 'window' },
     { id: 'window:2:0', name: 'voiceroom.ru', thumbnail: '', type: 'window' },
     { id: 'window:3:0', name: 'Telegram', thumbnail: '', type: 'window' }
@@ -60,7 +62,7 @@ function assertPickerElements() {
 function showInitError(error) {
   console.error(error);
   if (elements.options) {
-    elements.options.textContent = 'Не удалось открыть выбор источника. Закройте окно и попробуйте снова.';
+    elements.options.textContent = t('pickerError');
     elements.options.setAttribute('role', 'alert');
   }
   if (elements.startButton) elements.startButton.disabled = true;
@@ -301,13 +303,13 @@ function isAppAudioOnly() {
 
 function updateSummary() {
   const source = state.sources.find((s) => s.id === state.selectedSourceId);
-  const fpsLabel = state.mode === 'text' ? '5 к/с' : '30 к/с';
+  const fpsLabel = t('fps', { count: state.mode === 'text' ? 5 : 30 });
   elements.appAudioRow.hidden = !canChooseAppAudio();
-  const audioLabel = !elements.audioToggle.checked ? '' : isAppAudioOnly() ? ' · звук окна' : ' · звук';
+  const audioLabel = !elements.audioToggle.checked ? '' : isAppAudioOnly() ? t('windowAudioDetail') : t('audioDetail');
 
-  elements.summaryName.textContent = source?.name ?? 'Не выбрано';
+  elements.summaryName.textContent = source?.name ?? t('notSelected');
   if (state.mode === 'text') {
-    elements.summaryDetail.textContent = `Источник · ${fpsLabel}${audioLabel}`;
+    elements.summaryDetail.textContent = `${t('sourceDetail')} · ${fpsLabel}${audioLabel}`;
     return;
   }
 
@@ -350,7 +352,7 @@ function syncSourceButton(button, source) {
 
   if (source.thumbnail) {
     const image = document.createElement('img');
-    image.alt = `Превью: ${source.name}`;
+    image.alt = t('preview', { name: source.name });
     image.src = source.thumbnail;
     preview.append(image);
   } else {
@@ -521,3 +523,16 @@ function cancelPicker() {
     console.error('Picker cancel failed:', error);
   });
 }
+
+window.voiceRoomI18n.subscribe(() => {
+  if (!window.voiceRoomScreenPicker) fallbackState.sources[0].name = t('entireScreen');
+  for (const source of state.sources) {
+    const button = sourceButtons.get(source.id);
+    if (button) {
+      syncSourceButton(button, source);
+      const image = button.querySelector('.screen-source-preview img');
+      if (image) image.alt = t('preview', { name: source.name });
+    }
+  }
+  if (state.sources.length) updateSummary();
+});

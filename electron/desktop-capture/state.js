@@ -1,5 +1,7 @@
 'use strict';
 
+const { getLocale, t } = require('../localization');
+
 const { BrowserWindow, desktopCapturer } = require('electron');
 const path = require('node:path');
 const { getNativeAudioCapabilities } = require('../native/audio');
@@ -53,7 +55,7 @@ function serializeDesktopSource(source) {
 function getDesktopAudioCapabilities() {
   const nativeCapabilities = getNativeAudioCapabilities();
   return {
-    label: 'Звук стрима',
+    label: t('streamAudio'),
     ...nativeCapabilities
   };
 }
@@ -295,7 +297,7 @@ function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
     resizable: false,
     show: false,
     skipTaskbar: true,
-    title: 'VoiceRoom Stream Picker',
+    title: t('previewTitle'),
     transparent: Boolean(overlayBounds),
     webPreferences: {
       contextIsolation: true,
@@ -342,7 +344,7 @@ function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
       }
     });
     pickerWindow.loadFile(path.join(__dirname, '../ui/screen-picker-preview.html'), {
-      query: { sessionId }
+      query: { sessionId, locale: getLocale() }
     }).catch((error) => {
       rejectDesktopCapturePickerSession(session, error);
     });
@@ -372,7 +374,7 @@ function resolveDesktopCapturePickerSession(session, selection) {
   desktopCapturePickerSessions.delete(session.sessionId);
 
   if (!session.sources.some((source) => source.id === selection.sourceId)) {
-    session.reject(new Error('Выбранный источник больше недоступен.'));
+    session.reject(new Error(t('sourceGone')));
   } else {
     session.resolve(selection);
   }

@@ -1,5 +1,8 @@
 'use strict';
 
+const t = window.voiceRoomI18n.t;
+let lastState = null;
+
 const elements = {
   message: document.querySelector('#updateMessage'),
   progress: document.querySelector('#updateProgress'),
@@ -11,12 +14,12 @@ const elements = {
 };
 
 const phaseTitles = {
-  blocked: 'Нет доступа',
-  checking: 'Запуск',
-  downloading: 'Обновление',
-  installing: 'Установка',
-  'site-unavailable': 'Сайт недоступен',
-  'update-error': 'Ошибка обновления'
+  blocked: 'phaseBlocked',
+  checking: 'phaseChecking',
+  downloading: 'phaseDownloading',
+  installing: 'phaseInstalling',
+  'site-unavailable': 'phaseSiteUnavailable',
+  'update-error': 'phaseUpdateError'
 };
 
 elements.proceed.addEventListener('click', () => {
@@ -32,9 +35,13 @@ if (window.voiceRoomUpdateGate?.onState) {
 }
 
 function renderState(state) {
+  lastState = state;
   const phase = state?.phase || 'checking';
-  elements.title.textContent = phaseTitles[phase] || 'Запуск';
-  elements.message.textContent = state?.message || 'Проверка обновлений...';
+  elements.title.textContent = t(phaseTitles[phase] || 'phaseChecking');
+  const messages = { checking: 'checkingUpdate', downloading: 'downloadingUpdate', installing: 'installingUpdate', 'site-unavailable': 'siteUnavailable' };
+  elements.message.textContent = phase === 'update-error'
+    ? `${t('updateError')} ${t(state?.canProceed ? 'proceedWithoutUpdate' : 'checkingSite')}`
+    : messages[phase] ? t(messages[phase]) : state?.message || t('checkingUpdate');
   elements.message.classList.toggle('is-error', Boolean(state?.blocked));
 
   const showProgress = phase === 'downloading' || phase === 'installing';
@@ -50,3 +57,4 @@ function renderState(state) {
   elements.proceed.hidden = !state?.canProceed;
   elements.quit.hidden = !state?.blocked;
 }
+window.voiceRoomI18n.subscribe(() => renderState(lastState));

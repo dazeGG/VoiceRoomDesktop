@@ -10,10 +10,12 @@
   <body>
     <main class="recovery-shell">
       <p class="recovery-eyebrow">VoiceRoom</p>
-      <h1>Нет связи с сервером</h1>
-      <p class="recovery-message">Не удаётся подключиться к VoiceRoom. Проверьте интернет. Приложение само откроется, когда связь появится.</p>
-      <button class="recovery-reload" id="recoveryReload" type="button">Проверить сейчас</button>
+      <h1 data-i18n="connectionTitle">Нет связи с сервером</h1>
+      <p class="recovery-message" data-i18n="connectionMessage">Не удаётся подключиться к VoiceRoom. Проверьте интернет. Приложение само откроется, когда связь появится.</p>
+      <button class="recovery-reload" id="recoveryReload" data-i18n="checkNow" type="button">Проверить сейчас</button>
     </main>
+    <script src="../localization/catalog.js"></script>
+    <script src="./localization.js"></script>
     <script src="./renderer-recovery.js"></script>
   </body>
 </html>

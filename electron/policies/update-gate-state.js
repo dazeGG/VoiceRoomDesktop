@@ -1,17 +1,19 @@
 'use strict';
 
+const { t } = require('../localization');
+
 const SITE_CHECK_TIMEOUT_MS = 15_000;
 
 function formatUpdateErrorMessage() {
-  return 'Не удалось проверить или загрузить обновление.';
+  return t('updateError');
 }
 
 function formatCheckingSiteMessage() {
-  return 'Проверяем доступ к VoiceRoom...';
+  return t('checkingSite');
 }
 
 function formatSiteUnavailableMessage() {
-  return 'Сайт VoiceRoom недоступен. Проверьте подключение к интернету.';
+  return t('siteUnavailable');
 }
 
 function isSiteAvailabilityStatus(status) {
@@ -63,8 +65,8 @@ function createUpdateErrorState({ canProceed = true } = {}) {
     blocked: false,
     canProceed,
     message: canProceed
-      ? `${formatUpdateErrorMessage()} Можно войти в приложение без обновления.`
-      : `${formatUpdateErrorMessage()} Проверяем доступ к VoiceRoom...`,
+      ? `${formatUpdateErrorMessage()} ${t('proceedWithoutUpdate')}`
+      : `${formatUpdateErrorMessage()} ${t('checkingSite')}`,
     phase: 'update-error',
     progress: null
   };

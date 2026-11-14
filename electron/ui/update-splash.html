@@ -10,17 +10,19 @@
   <body>
     <main class="update-shell">
       <p class="update-eyebrow">VoiceRoom</p>
-      <h1 id="updateTitle">Запуск</h1>
-      <p class="update-message" id="updateMessage">Проверка обновлений...</p>
+      <h1 id="updateTitle" data-i18n="phaseChecking">Запуск</h1>
+      <p class="update-message" id="updateMessage" data-i18n="checkingUpdate">Проверка обновлений...</p>
       <div class="update-progress" id="updateProgress" hidden>
         <div class="update-progress-bar" id="updateProgressBar"></div>
       </div>
       <p class="update-progress-label" id="updateProgressLabel" hidden></p>
       <div class="update-actions">
-        <button class="update-proceed" id="updateProceed" type="button" hidden>Войти в приложение</button>
-        <button class="update-quit" id="updateQuit" type="button" hidden>Закрыть</button>
+        <button class="update-proceed" id="updateProceed" data-i18n="enterApp" type="button" hidden>Войти в приложение</button>
+        <button class="update-quit" id="updateQuit" data-i18n="close" type="button" hidden>Закрыть</button>
       </div>
     </main>
+    <script src="../localization/catalog.js"></script>
+    <script src="./localization.js"></script>
     <script src="./update-splash.js"></script>
   </body>
 </html>

@@ -1,5 +1,7 @@
 'use strict';
 
+const { getLocale, t } = require('../localization');
+
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const { shouldRunUpdateGateState } = require('./update-gate-policy');
@@ -184,7 +186,7 @@ function runUpdateGate(options = {}) {
       'checking-for-update': () => {
         sendState(splash, {
           blocked: false,
-          message: 'Проверка обновлений...',
+          message: t('checkingUpdate'),
           phase: 'checking',
           progress: null
         });
@@ -197,7 +199,7 @@ function runUpdateGate(options = {}) {
         }
         sendState(splash, {
           blocked: false,
-          message: 'Загрузка обновления...',
+          message: t('downloadingUpdate'),
           phase: 'downloading',
           progress: 0
         });
@@ -216,7 +218,7 @@ function runUpdateGate(options = {}) {
       'download-progress': (progress) => {
         sendState(splash, {
           blocked: false,
-          message: 'Загрузка обновления...',
+          message: t('downloadingUpdate'),
           phase: 'downloading',
           progress: Math.max(0, Math.min(100, Math.round(progress.percent || 0)))
         });
@@ -225,7 +227,7 @@ function runUpdateGate(options = {}) {
         clearTimers();
         sendState(splash, {
           blocked: false,
-          message: 'Установка обновления...',
+          message: t('installingUpdate'),
           phase: 'installing',
           progress: 100
         });
@@ -259,14 +261,14 @@ function runUpdateGate(options = {}) {
       splash.show();
       sendState(splash, {
         blocked: false,
-        message: 'Проверка обновлений...',
+        message: t('checkingUpdate'),
         phase: 'checking',
         progress: null
       });
       startCheck();
     });
 
-    splash.loadFile(path.join(__dirname, '../ui/update-splash.html')).catch((error) => {
+    splash.loadFile(path.join(__dirname, '../ui/update-splash.html'), { query: { locale: getLocale() } }).catch((error) => {
       log.error('Failed to open update splash:', error);
       handleUpdateFailure(error);
     });

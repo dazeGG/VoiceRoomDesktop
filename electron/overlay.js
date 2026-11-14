@@ -1,5 +1,7 @@
 'use strict';
 
+const { getLocale } = require('./localization');
+
 const path = require('node:path');
 const { createDesktopSettingsStore } = require('./desktop-settings');
 const { createForegroundWatcher } = require('./overlay-foreground');
@@ -39,8 +41,8 @@ const MIN_OVERLAY_WIDTH = 48;
 const MIN_OVERLAY_HEIGHT = 40;
 const PREVIEW_PARTICIPANTS = sanitizeOverlaySnapshot({
   participants: [
-    { id: 'preview-self', name: 'Вы', self: true, speaking: true },
-    { id: 'preview-friend', name: 'Участник', speaking: false }
+    { id: 'preview-self', name: '', self: true, speaking: true },
+    { id: 'preview-friend', name: '', speaking: false }
   ]
 }).participants;
 
@@ -268,7 +270,7 @@ function createOverlayController({
       overlayWindow = null;
     });
 
-    overlayWindow.loadFile(pathModule.join(__dirname, 'ui/overlay.html')).catch((error) => {
+    overlayWindow.loadFile(pathModule.join(__dirname, 'ui/overlay.html'), { query: { locale: getLocale() } }).catch((error) => {
       log.warn?.('Failed to load overlay window:', error);
     });
     return overlayWindow;

@@ -8,6 +8,7 @@ const { configureDesktopAttentionIpc } = require('./attention');
 const { createAppIconController } = require('./app-icon');
 const { createAutostartController } = require('./autostart');
 const { createDesktopSettingsStore } = require('./desktop-settings');
+const { createLocaleController, t } = require('./localization');
 const { createCallControlsController } = require('./call-controls');
 const { createOverlayController } = require('./overlay');
 const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
@@ -47,7 +48,7 @@ const { createWindowLifecycleController } = require('./window/lifecycle');
 const { createWindowStateController } = require('./window/state');
 const { resolveWindowsTrayIconPath } = require('./window/tray-icon');
 const { configureSpellChecker, installContextMenu } = require('./window/context-menu');
-const { disableWindowsApplicationMenu } = require('./window/menu-policy');
+const { configureMacApplicationMenu, disableWindowsApplicationMenu } = require('./window/menu-policy');
 const { createDevDiagnosticsController } = require('./dev/diagnostics');
 const { createAppBootstrap } = require('./app/bootstrap');
 const { configureDesktopNotificationsIpc } = require('./notifications');
@@ -217,13 +218,17 @@ const keepAwake = createKeepAwakeController({ powerSaveBlocker, log });
 desktopHotkeys.onVoiceActiveChange((active) => keepAwake.setVoiceActive(active));
 
 const autostart = createAutostartController({ app, fs, log, path });
+const desktopSettings = createDesktopSettingsStore({ app, fs, log, path });
+const localeController = createLocaleController({
+  app, settingsStore: desktopSettings, getWindows: () => BrowserWindow.getAllWindows(), isTrustedFrame, log
+});
 const appIcon = createAppIconController({
   app,
   getMainWindow: () => windowLifecycle.getMainWindow(),
   log,
   nativeImage,
   refreshTray: () => windowLifecycle.refreshTrayIcon(),
-  settingsStore: createDesktopSettingsStore({ app, fs, log, path })
+  settingsStore: desktopSettings
 });
 let backgroundUpdates = null;
 let launchInProgress = null;
@@ -274,6 +279,18 @@ const callSurfaces = createCallSurfaces({
   windowLifecycle
 });
 callControls.onStateChange((state) => callSurfaces.apply(state));
+localeController.subscribe(() => {
+  windowLifecycle.refreshLocale();
+  configureMacApplicationMenu({ menu: Menu });
+  callSurfaces.apply(callControls.getState());
+  const update = backgroundUpdates?.getState?.();
+  if (update?.phase === 'ready') {
+    windowLifecycle.setUpdateAction({
+      click: () => backgroundUpdates?.installNow({ startHidden: false }),
+      label: update.version ? t('installVersion', { version: update.version }) : t('installUpdate')
+    });
+  }
+});
 
 const diagnostics = createDiagnosticsController({
   app,
@@ -515,7 +532,7 @@ if (!gotLock) {
         windowLifecycle.setUpdateAction(phase === 'ready'
           ? {
               click: () => backgroundUpdates?.installNow({ startHidden: false }),
-              label: version ? `Установить обновление ${version}` : 'Установить обновление'
+              label: version ? t('installVersion', { version }) : t('installUpdate')
             }
           : null);
         // The page shows the same update in its own notice.
@@ -546,6 +563,9 @@ if (!gotLock) {
   deepLinks.captureInitialArgv(process.argv);
 
   app.whenReady().then(() => {
+    localeController.initialize();
+    configureMacApplicationMenu({ menu: Menu });
+    localeController.configureIpc(ipcMain);
     // Process-wide IPC handlers and power-monitor listeners must be installed
     // once. On macOS, closing the last window keeps the app alive and a later
     // dock activation only needs to recreate the BrowserWindow.

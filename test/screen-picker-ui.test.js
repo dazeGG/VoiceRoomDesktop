@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { describe, it } = require('node:test');
 const vm = require('node:vm');
+const { translate } = require('../electron/localization/catalog');
 
 class FakeElement {
   constructor({ id = '', tagName = 'div' } = {}) {
@@ -128,7 +129,7 @@ function makeModeButton(id, selected) {
   return button;
 }
 
-function createPickerHarness({ appAudioSupported = true, sources } = {}) {
+function createPickerHarness({ appAudioSupported = true, sources, locale = 'ru' } = {}) {
   const elements = {
     screenAppAudioRow: makeElement('screenAppAudioRow', 'label'),
     screenAppAudioToggle: makeElement('screenAppAudioToggle', 'input'),
@@ -175,6 +176,7 @@ function createPickerHarness({ appAudioSupported = true, sources } = {}) {
   const window = {
     addEventListener() {},
     getComputedStyle: () => ({ gridTemplateColumns: '1fr 1fr 1fr' }),
+    voiceRoomI18n: { t: (key, values) => translate(locale, key, values), subscribe() {} },
     voiceRoomScreenPicker: {
       getState: async () => ({
         appAudioSupported,
@@ -199,6 +201,15 @@ function createPickerHarness({ appAudioSupported = true, sources } = {}) {
 async function flushInit() {
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
+}
+
+for (const [locale, fps] of [['en', '30 fps'], ['fr', '30 i/s']]) {
+  it(`localizes picker summary in ${locale} while preserving source names`, async () => {
+    const { elements } = createPickerHarness({ locale });
+    await flushInit();
+    assert.equal(elements.screenSummaryName.textContent, 'Display 1');
+    assert.ok(elements.screenSummaryDetail.textContent.includes(fps));
+  });
 }
 
 describe('screen picker stream profile UI', () => {

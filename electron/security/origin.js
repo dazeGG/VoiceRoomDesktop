@@ -50,17 +50,21 @@ function isTrustedUrl(rawUrl, trustedOrigin) {
 }
 
 /**
- * The admin app lives on the `admin.` subdomain of the trusted origin, with the
- * same scheme and port (https://voiceroom.ru → https://admin.voiceroom.ru). No
- * trusted origin, or one whose host takes no subdomain (an IP address), gives ''.
+ * Hosted app and admin domains are siblings. Other deployments use the
+ * `admin.` subdomain of the trusted host with the same scheme and port.
  */
 function getAdminOrigin(trustedOrigin) {
   const resolvedTrustedOrigin = resolveTrustedOrigin(trustedOrigin);
   try {
     const trusted = new URL(resolvedTrustedOrigin);
     if (trusted.protocol !== 'https:' && trusted.protocol !== 'http:') return '';
-    const admin = new URL(`${trusted.protocol}//admin.${trusted.host}`);
-    return admin.hostname === `admin.${trusted.hostname}` ? admin.origin : '';
+    const { hostname } = trusted;
+    const adminHostname =
+      hostname === 'app.voiceroom.ru' || hostname === 'app.dev.voiceroom.ru'
+        ? `admin.${hostname.slice(4)}`
+        : `admin.${hostname}`;
+    trusted.hostname = adminHostname;
+    return trusted.hostname === adminHostname ? trusted.origin : '';
   } catch {
     return '';
   }

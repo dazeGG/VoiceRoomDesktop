@@ -80,6 +80,19 @@ describe('security-origin', () => {
     assert.equal(isAdminUrl('https://admin.voiceroom.ru/'), false);
   });
 
+  it('uses the sibling admin host for each dedicated VoiceRoom app origin', () => {
+    assert.equal(getAdminOrigin('https://app.voiceroom.ru'), 'https://admin.voiceroom.ru');
+    setTrustedOrigin('https://app.dev.voiceroom.ru:8443');
+
+    assert.equal(classifyAppUrl('https://app.dev.voiceroom.ru:8443/r/abc'), 'site');
+    assert.equal(classifyAppUrl('https://admin.dev.voiceroom.ru:8443/'), 'admin');
+    assert.equal(classifyAppUrl('https://admin.dev.voiceroom.ru/'), 'external');
+    assert.equal(classifyAppUrl('https://admin.app.dev.voiceroom.ru:8443/'), 'external');
+    assert.equal(classifyAppUrl('https://dev.voiceroom.ru:8443/app'), 'external');
+    assert.equal(isTrustedUrl('https://admin.dev.voiceroom.ru:8443/'), false);
+    assert.equal(getAdminOrigin('https://app.example.com'), 'https://admin.app.example.com');
+  });
+
   it('identifies trusted frames and display-media requests', () => {
     setTrustedOrigin('https://voice.example');
     const frame = { url: 'https://voice.example/app' };

@@ -4,15 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>VoiceRoom</title>
-    <link rel="stylesheet" href="../shell-tokens.css">
+    <link rel="stylesheet" href="./kit/voiceroom-kit.css">
     <link rel="stylesheet" href="./renderer-recovery.css">
   </head>
   <body>
     <main class="recovery-shell">
-      <p class="recovery-eyebrow">VoiceRoom</p>
-      <h1 data-i18n="recoveryTitle">Что-то пошло не так</h1>
-      <p class="recovery-message" data-i18n="recoveryMessage">Интерфейс VoiceRoom неожиданно остановился. Перезагрузите приложение, чтобы продолжить.</p>
-      <button class="recovery-reload" id="recoveryReload" data-i18n="reload" type="button">Перезагрузить</button>
+      <p class="eyebrow">VoiceRoom</p>
+      <h1 class="ui-dialog__title" data-i18n="recoveryTitle">Что-то пошло не так</h1>
+      <p class="recovery-message ui-empty__text" data-i18n="recoveryMessage">Интерфейс VoiceRoom неожиданно остановился. Перезагрузите приложение, чтобы продолжить.</p>
+      <button class="ui-button ui-button--primary ui-button--size-md" id="recoveryReload" data-i18n="reload" type="button">Перезагрузить</button>
     </main>
     <script src="../localization/catalog.js"></script>
     <script src="./localization.js"></script>

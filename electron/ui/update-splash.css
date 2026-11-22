@@ -1,110 +1,36 @@
-* {
-  box-sizing: border-box;
-}
-
 body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-size: 15px;
-  line-height: 1.45;
   -webkit-app-region: drag;
+  app-region: drag;
 }
 
 button {
-  font: inherit;
-  cursor: pointer;
   -webkit-app-region: no-drag;
-}
-
-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  app-region: no-drag;
 }
 
 .update-shell {
   display: grid;
   min-height: 100vh;
   align-content: center;
-  gap: 12px;
-  padding: 28px 32px 32px;
-}
-
-.update-eyebrow {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-h1 {
-  margin: 0;
-  font-size: 1.35rem;
-  line-height: 1.1;
+  justify-items: start;
+  gap: var(--space-12);
+  padding: var(--space-32);
 }
 
 .update-message {
-  margin: 0;
-  color: var(--muted);
+  max-width: 42ch;
+}
+
+#updateProgress {
+  justify-self: stretch;
 }
 
 .update-message.is-error {
-  color: var(--danger);
-}
-
-.update-progress {
-  overflow: hidden;
-  height: 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: oklch(12% 0.005 260);
-}
-
-.update-progress-bar {
-  width: 0;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width 180ms var(--ease-out);
-}
-
-.update-progress-label {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
+  color: var(--vr-danger);
 }
 
 .update-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-}
-
-.update-proceed,
-.update-quit {
-  justify-self: start;
-  min-width: var(--touch-target);
-  min-height: var(--touch-target);
-  border: 1px solid var(--control-line);
-  border-radius: var(--radius-sm);
-  padding: 0 16px;
-  background: var(--control);
-  color: var(--ink);
-  font-weight: 800;
-}
-
-.update-proceed {
-  background: var(--accent);
-  color: var(--paper);
-}
-
-.update-proceed:hover {
-  background: var(--control-active-hover);
-}
-
-.update-quit:hover {
-  background: var(--control-hover);
+  gap: var(--space-8);
 }

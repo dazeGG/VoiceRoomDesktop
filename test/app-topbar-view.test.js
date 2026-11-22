@@ -56,8 +56,8 @@ describe('shell theme chrome', () => {
   });
 
   it('paints the Windows caption buttons with the topbar background', () => {
-    const tokens = fs.readFileSync(path.join(__dirname, '../electron/shell-tokens.css'), 'utf8');
-    const [, lightness, chroma, hue] = tokens.match(/--paper:\s*oklch\(([\d.]+)%\s+([\d.]+)\s+([\d.]+)\)/);
+    const tokens = fs.readFileSync(path.join(__dirname, '../electron/ui/kit/voiceroom-kit.css'), 'utf8');
+    const [, lightness, chroma, hue] = tokens.match(/--vr-bg:\s*oklch\(([\d.]+)%\s+([\d.]+)\s+([\d.]+)\)/);
 
     assert.equal(
       getMainWindowChromeOptions('win32').titleBarOverlay.color,

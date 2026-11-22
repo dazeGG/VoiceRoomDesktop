@@ -76,7 +76,7 @@ async function init() {
   state.appAudioSupported = pickerState.appAudioSupported === true;
   state.qualityId = pickerState.defaultQualityId === 'high' ? 'high' : 'balanced';
   state.mode = pickerState.defaultFpsId === '5' ? 'text' : 'games';
-  elements.audioToggle.checked = pickerState.defaultStreamAudioEnabled !== false;
+  setChecked(elements.audioToggle, pickerState.defaultStreamAudioEnabled !== false);
 
   const hasScreen = state.sources.some((source) => source.type === 'screen');
   state.sourceType = hasScreen ? 'screen' : 'window';
@@ -89,8 +89,8 @@ async function init() {
   elements.gearButton.addEventListener('click', togglePopover);
   elements.modeGames.addEventListener('click', () => setMode('games'));
   elements.modeText.addEventListener('click', () => setMode('text'));
-  elements.audioToggle.addEventListener('change', updateSummary);
-  elements.appAudioToggle.addEventListener('change', updateSummary);
+  bindChecked(elements.audioToggle);
+  bindChecked(elements.appAudioToggle);
 
   elements.resToggle.addEventListener('click', (event) => {
     const preset = event.target?.dataset?.qualityPreset;
@@ -100,8 +100,19 @@ async function init() {
     updateSummary();
   });
 
+  elements.resToggle.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    state.qualityId = state.qualityId === 'high' ? 'balanced' : 'high';
+    refreshResToggle();
+    updateSummary();
+    const preset = state.qualityId === 'high' ? 'hd' : 'sd';
+    elements.resToggle.querySelector(`[data-quality-preset="${preset}"]`)?.focus();
+  });
+
   elements.options.addEventListener('keydown', handleSourceGridKeydown);
   elements.tablist.addEventListener('keydown', handleTablistKeydown);
+  elements.settingsPopover.addEventListener('keydown', handleModeKeydown);
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -177,6 +188,8 @@ function refreshTabs() {
   const isScreen = state.sourceType === 'screen';
   elements.screensTab.setAttribute('aria-selected', String(isScreen));
   elements.windowsTab.setAttribute('aria-selected', String(!isScreen));
+  elements.screensTab.tabIndex = isScreen ? 0 : -1;
+  elements.windowsTab.tabIndex = isScreen ? -1 : 0;
   elements.tabpanel.setAttribute('aria-labelledby', isScreen ? 'screenSourceScreensTab' : 'screenSourceWindowsTab');
   elements.screensTab.disabled = !state.sources.some((source) => source.type === 'screen');
   elements.windowsTab.disabled = !state.sources.some((source) => source.type === 'window');
@@ -190,16 +203,25 @@ function refreshResToggle() {
   const isHd = state.qualityId === 'high';
   for (const button of elements.resToggle.querySelectorAll('button')) {
     const isHdBtn = button.dataset.qualityPreset === 'hd';
-    button.setAttribute('aria-pressed', String(isHd === isHdBtn));
+    const selected = isHd === isHdBtn;
+    button.setAttribute('aria-pressed', String(selected));
+    button.setAttribute('aria-checked', String(selected));
+    button.tabIndex = selected ? 0 : -1;
   }
 }
 
 function refreshModePresets() {
-  elements.modeGames.setAttribute('aria-pressed', String(state.mode === 'games'));
-  elements.modeText.setAttribute('aria-pressed', String(state.mode === 'text'));
+  const games = state.mode === 'games';
+  elements.modeGames.setAttribute('aria-pressed', String(games));
+  elements.modeText.setAttribute('aria-pressed', String(!games));
+  elements.modeGames.setAttribute('aria-checked', String(games));
+  elements.modeText.setAttribute('aria-checked', String(!games));
+  elements.modeGames.tabIndex = games ? 0 : -1;
+  elements.modeText.tabIndex = games ? -1 : 0;
 
   const gamesDot = elements.modeGames.querySelector('.screen-settings-dot');
   const textRadio = elements.modeText.querySelector('.screen-settings-radio');
+  if (!textRadio) return;
 
   if (state.mode === 'games') {
     if (!gamesDot) {
@@ -216,6 +238,15 @@ function refreshModePresets() {
       textRadio.append(dot);
     }
   }
+}
+
+function handleModeKeydown(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+  if (event.target !== elements.modeGames && event.target !== elements.modeText) return;
+  event.preventDefault();
+  const next = state.mode === 'games' ? 'text' : 'games';
+  setMode(next);
+  (next === 'games' ? elements.modeGames : elements.modeText).focus();
 }
 
 function handleTablistKeydown(event) {
@@ -284,8 +315,8 @@ function updateSourceSelection() {
   for (const [sourceId, button] of sourceButtons) {
     const selected = sourceId === state.selectedSourceId;
     button.setAttribute('aria-pressed', String(selected));
+    button.setAttribute('aria-checked', String(selected));
     button.tabIndex = selected ? 0 : -1;
-    syncSourceCheck(button, selected);
   }
 
   elements.startButton.disabled = !state.selectedSourceId;
@@ -293,19 +324,48 @@ function updateSourceSelection() {
 
 // A window share can carry only that app's sound; a screen share always carries
 // everything except VoiceRoom.
+function isSwitch(control) {
+  return control.getAttribute('role') === 'switch';
+}
+
+function isChecked(control) {
+  if (isSwitch(control)) return control.getAttribute('aria-checked') === 'true';
+  return control.checked === true;
+}
+
+function setChecked(control, value) {
+  const checked = Boolean(value);
+  if (isSwitch(control)) {
+    control.setAttribute('aria-checked', String(checked));
+    return;
+  }
+  control.checked = checked;
+}
+
+function bindChecked(control) {
+  if (isSwitch(control)) {
+    control.addEventListener('click', () => {
+      setChecked(control, !isChecked(control));
+      updateSummary();
+    });
+    return;
+  }
+  control.addEventListener('change', updateSummary);
+}
+
 function canChooseAppAudio() {
-  return state.appAudioSupported && state.sourceType === 'window' && elements.audioToggle.checked;
+  return state.appAudioSupported && state.sourceType === 'window' && isChecked(elements.audioToggle);
 }
 
 function isAppAudioOnly() {
-  return canChooseAppAudio() && elements.appAudioToggle.checked;
+  return canChooseAppAudio() && isChecked(elements.appAudioToggle);
 }
 
 function updateSummary() {
   const source = state.sources.find((s) => s.id === state.selectedSourceId);
   const fpsLabel = t('fps', { count: state.mode === 'text' ? 5 : 30 });
   elements.appAudioRow.hidden = !canChooseAppAudio();
-  const audioLabel = !elements.audioToggle.checked ? '' : isAppAudioOnly() ? t('windowAudioDetail') : t('audioDetail');
+  const audioLabel = !isChecked(elements.audioToggle) ? '' : isAppAudioOnly() ? t('windowAudioDetail') : t('audioDetail');
 
   elements.summaryName.textContent = source?.name ?? t('notSelected');
   if (state.mode === 'text') {
@@ -320,8 +380,9 @@ function updateSummary() {
 
 function createSourceButton(source) {
   const button = document.createElement('button');
-  button.className = 'screen-source-option';
+  button.className = 'screen-source-option ui-choice ui-choice--card';
   button.type = 'button';
+  button.setAttribute('role', 'radio');
   button.dataset.sourceId = source.id;
   syncSourceButton(button, source);
   button.addEventListener('click', () => selectSource(source.id, { focus: true }));
@@ -335,12 +396,12 @@ function syncSourceButton(button, source) {
   let preview = button.querySelector('.screen-source-preview');
   if (!preview) {
     preview = document.createElement('span');
-    preview.className = 'screen-source-preview';
+    preview.className = 'screen-source-preview ui-choice__preview';
     preview.setAttribute('aria-hidden', 'true');
     button.prepend(preview);
   }
 
-  preview.className = `screen-source-preview ${getFallbackPreviewClass(source)}`;
+  preview.className = `screen-source-preview ui-choice__preview ${getFallbackPreviewClass(source)}`.trim();
   const thumbnailKey = source.thumbnail || '';
   if (preview.dataset.thumbnailKey === thumbnailKey) {
     syncSourceLabel(button, source);
@@ -366,33 +427,23 @@ function syncSourceLabel(button, source) {
   let label = button.querySelector('.screen-source-label');
   if (!label) {
     label = document.createElement('span');
-    label.className = 'screen-source-label';
+    label.className = 'screen-source-label ui-choice__row';
     button.append(label);
   }
   const icon = source.appIcon
     ? createSourceAppIcon(source)
     : createLucidePlaceholder(source.type === 'screen' ? 'monitor' : 'app-window', 'sm');
   const name = document.createElement('span');
+  name.className = 'ellipsis';
   name.textContent = source.name;
-  label.replaceChildren(icon, name);
-  renderPickerIcons(label);
-}
-
-function syncSourceCheck(button, selected) {
-  const preview = button.querySelector('.screen-source-preview');
-  const current = preview?.querySelector('.screen-source-check');
-  if (!selected) {
-    current?.remove();
-    return;
+  let radio = label.querySelector('.ui-radio');
+  if (!radio) {
+    radio = document.createElement('span');
+    radio.className = 'ui-radio';
+    radio.setAttribute('aria-hidden', 'true');
   }
-  if (current || !preview) return;
-
-  const check = document.createElement('span');
-  check.className = 'screen-source-check';
-  check.setAttribute('aria-hidden', 'true');
-  check.append(createLucidePlaceholder('check', 'xs'));
-  preview.append(check);
-  renderPickerIcons(check);
+  label.replaceChildren(icon, name, radio);
+  renderPickerIcons(label);
 }
 
 function createSourceAppIcon(source) {

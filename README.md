@@ -2,6 +2,8 @@
 
 Electron desktop shell for VoiceRoom. It opens the hosted VoiceRoom web app from `VOICE_ROOM_URL` and provides desktop-only screen capture and window controls.
 
+The shell's own windows (the title bar, update splash, connection and crash screens, in-game overlay, and screen picker) are plain HTML styled with the VoiceRoom UI kit. `electron/ui/kit/` is generated from that kit: run `npm run kit:sync` with the VoiceRoom checkout next to this repo, or set `VOICEROOM_REPO`. Do not edit `electron/ui/kit/` by hand.
+
 ## Desktop runtime detection
 
 The preload exposes a stable desktop marker for the hosted web app:

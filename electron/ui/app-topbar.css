@@ -1,15 +1,8 @@
-* {
-  box-sizing: border-box;
-}
-
 html,
 body {
-  margin: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--paper);
-  color: var(--ink);
 }
 
 .app-topbar {
@@ -17,14 +10,11 @@ body {
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 32px;
-  margin: 0;
-  border-bottom: 1px solid var(--line);
-  background: var(--paper);
+  height: var(--size-32);
+  border-bottom: 1px solid var(--vr-line);
+  background: var(--vr-bg);
   -webkit-app-region: drag;
   app-region: drag;
-  padding-left: 0;
-  padding-right: 0;
 }
 
 html.is-macos .app-topbar {
@@ -36,10 +26,7 @@ html.is-windows .app-topbar {
 }
 
 .app-topbar-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--muted);
+  color: var(--vr-text-2);
   pointer-events: none;
   user-select: none;
 }

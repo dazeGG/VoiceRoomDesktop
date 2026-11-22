@@ -229,6 +229,7 @@ function createOverlayController({
     overlayWindow = new BrowserWindow({
       alwaysOnTop: true,
       autoHideMenuBar: true,
+      // Transparent window chrome so the game shows through. Not a kit surface.
       backgroundColor: '#00000000',
       focusable: false,
       frame: false,

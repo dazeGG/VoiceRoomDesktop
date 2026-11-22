@@ -1,53 +1,35 @@
-* {
-  box-sizing: border-box;
-}
-
-[hidden] {
-  display: none !important;
-}
-
 html,
 body {
-  margin: 0;
   width: max-content;
   height: max-content;
   overflow: hidden;
+  /* The window is click-through over a game. The kit paints --vr-bg; this page must stay clear. */
   background: transparent;
-  color: #fff;
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   user-select: none;
 }
 
-/* A column of avatars glued to a corner of the game, like Discord's overlay. */
 .overlay-people {
-  --avatar-size: 36px;
-  --name-size: 13px;
-  --row-gap: 7px;
+  --avatar-dimension: var(--size-36);
   display: flex;
   flex-direction: column;
-  gap: var(--row-gap);
+  gap: var(--space-8);
   margin: 0;
-  padding: 2px;
+  padding: var(--space-2);
   list-style: none;
 }
 
 .overlay-people[data-size='small'] {
-  --avatar-size: 28px;
-  --name-size: 12px;
-  --row-gap: 5px;
+  --avatar-dimension: var(--size-28);
 }
 
 .overlay-people[data-size='large'] {
-  --avatar-size: 46px;
-  --name-size: 15px;
-  --row-gap: 9px;
+  --avatar-dimension: var(--size-48);
 }
 
-/* Speaking flips the whole row to full opacity at once, like the green ring in the app. */
 .overlay-person {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
   opacity: 0.5;
 }
@@ -56,83 +38,55 @@ body {
   opacity: 1;
 }
 
-/* In the right corners the row runs from the edge inwards: avatar, name, icons, badge. */
 .overlay-people[data-side='right'] .overlay-person {
   flex-direction: row-reverse;
 }
 
-.overlay-people[data-side='right'] .overlay-avatar {
-  margin-right: 0;
-  margin-left: calc(var(--avatar-size) * 0.08);
-}
-
-.overlay-avatar {
-  position: relative;
-  flex: none;
-  width: var(--avatar-size);
-  height: var(--avatar-size);
-  margin-right: calc(var(--avatar-size) * 0.08);
-  border-radius: 50%;
-  background: oklch(74% 0.1 278);
-}
-
-.overlay-avatar img,
+.overlay-avatar > img,
 .overlay-initial {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-}
-
-.overlay-avatar img {
-  display: block;
-  object-fit: cover;
+  grid-area: 1 / 1;
 }
 
 .overlay-initial {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: calc(var(--avatar-size) * 0.42);
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  width: 100%;
+  height: 100%;
 }
 
 .overlay-name {
   min-width: 0;
-  max-width: calc(var(--avatar-size) * 4.4);
+  max-width: 16ch;
   overflow: hidden;
-  color: #fff;
-  font-size: var(--name-size);
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 0.8125rem;
+  font-weight: 500;
   line-height: 1.2;
   text-overflow: ellipsis;
   text-shadow:
-    0 0 4px rgb(0 0 0 / 0.9),
-    0 1px 2px rgb(0 0 0 / 0.95),
-    0 0 12px rgb(0 0 0 / 0.7);
+    0 0 var(--space-4) var(--vr-bg),
+    0 var(--space-2) var(--space-2) var(--vr-bg),
+    0 0 var(--space-12) var(--vr-bg);
   white-space: nowrap;
+}
+
+.overlay-people[data-size='small'] .overlay-name {
+  font-size: 0.75rem;
+}
+
+.overlay-people[data-size='large'] .overlay-name {
+  font-size: 0.9375rem;
 }
 
 .overlay-icon {
   flex: none;
-  width: calc(var(--name-size) + 3px);
-  height: calc(var(--name-size) + 3px);
-  color: #f23f43;
-  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.9));
+  width: var(--icon-16);
+  height: var(--icon-16);
+  color: var(--vr-danger);
+  filter: drop-shadow(0 var(--space-2) var(--space-2) var(--vr-bg));
 }
 
-.overlay-stream {
-  flex: none;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: #ed4245;
-  color: #fff;
-  font-size: calc(var(--name-size) - 3px);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  line-height: 1.35;
-  text-transform: uppercase;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.55);
+.overlay-people[data-size='large'] .overlay-icon {
+  width: var(--icon-20);
+  height: var(--icon-20);
 }

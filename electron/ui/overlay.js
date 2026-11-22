@@ -91,12 +91,12 @@ function avatarBackground(participant) {
 
 // An accent sent by the web app is its own colour and keeps the white letter.
 function avatarInk(participant) {
-  return participant.avatarAccent ? '#fff' : `oklch(25% 0.05 ${avatarHue(participant)})`;
+  return participant.avatarAccent ? 'var(--vr-text)' : `oklch(25% 0.05 ${avatarHue(participant)})`;
 }
 
 function createPerson() {
   const item = element('li', 'overlay-person');
-  const avatar = element('span', 'overlay-avatar');
+  const avatar = element('span', 'overlay-avatar ui-avatar');
   const image = document.createElement('img');
   image.alt = '';
   const initial = element('span', 'overlay-initial');
@@ -104,7 +104,7 @@ function createPerson() {
   const name = element('span', 'overlay-name');
   const micOff = icon('micOff', t('micMuted'));
   const outputOff = icon('outputOff', t('soundMuted'));
-  const stream = element('span', 'overlay-stream');
+  const stream = element('span', 'overlay-stream ui-badge ui-badge--sm ui-badge--danger');
   stream.textContent = t('stream');
   item.append(avatar, name, micOff, outputOff, stream);
 

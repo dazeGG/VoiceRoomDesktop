@@ -1,11 +1,13 @@
 'use strict';
 
-const WINDOW_BACKGROUND = '#0b0c0e';
+// Hex mirrors of kit tokens in electron/ui/kit/voiceroom-kit.css (:root).
+// Windows and Electron paint window chrome with hex, not oklch.
+const WINDOW_BACKGROUND = '#0b0c0e'; // --vr-bg: oklch(15.5% 0.005 260)
 const TITLEBAR_HEIGHT = 32;
 // Windows paints the caption buttons itself, over the topbar view, so their
-// background must match --paper from shell-tokens.css (oklch(15.5% 0.005 260)).
-const TITLEBAR_OVERLAY_COLOR = '#0b0c0e';
-const TITLEBAR_OVERLAY_SYMBOL_COLOR = '#a2a5a8';
+// background matches the topbar's --vr-bg and the symbols match --vr-text-2.
+const TITLEBAR_OVERLAY_COLOR = '#0b0c0e'; // --vr-bg: oklch(15.5% 0.005 260)
+const TITLEBAR_OVERLAY_SYMBOL_COLOR = '#a2a5a8'; // --vr-text-2: oklch(72% 0.006 260)
 const TITLEBAR_MAC_TRAFFIC_LIGHTS_PADDING = '78px';
 const TITLEBAR_WIN_CONTROLS_PADDING = '140px';
 

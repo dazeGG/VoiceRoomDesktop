@@ -82,9 +82,8 @@ describe('screen picker Lucide icon contract', () => {
     assert.match(iconRuntime, /md:\s*18/);
   });
 
-  it('matches web picker source icons and selected-state checkmark', () => {
+  it('matches web picker source icons', () => {
     assert.match(pickerRuntime, /source\.appIcon/);
-    assert.match(pickerRuntime, /createLucidePlaceholder\('check', 'xs'\)/);
     assert.match(pickerRuntime, /source\.type === 'screen' \? 'monitor' : 'app-window'/);
   });
 

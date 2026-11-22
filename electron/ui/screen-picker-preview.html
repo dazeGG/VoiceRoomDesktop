@@ -5,104 +5,113 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; font-src 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title data-i18n="previewTitle">VoiceRoom Stream Picker</title>
-    <link rel="stylesheet" href="../shell-tokens.css">
+    <link rel="stylesheet" href="./kit/voiceroom-kit.css">
     <link rel="stylesheet" href="./screen-picker-preview.css">
   </head>
   <body>
     <main class="screen-picker-shell">
-      <section class="screen-source-panel" aria-labelledby="pickerTitle">
-        <header class="screen-source-heading">
-          <h1 id="pickerTitle" data-i18n="pickerTitle">Выберите, что показать</h1>
-          <button class="screen-source-close" id="screenSourceClose" type="button" aria-label="Закрыть" data-i18n-aria="close">
+      <section class="ui-dialog ui-dialog--xl screen-source-panel" aria-labelledby="pickerTitle">
+        <header class="ui-dialog__head screen-source-heading">
+          <div class="ui-dialog__titles">
+            <h1 class="ui-dialog__title" id="pickerTitle" data-i18n="pickerTitle">Выберите, что показать</h1>
+          </div>
+          <button class="ui-icon-button ui-dialog__close" id="screenSourceClose" type="button" aria-label="Закрыть" data-i18n-aria="close">
             <i data-lucide="x" data-icon-size="md" aria-hidden="true"></i>
           </button>
         </header>
 
-        <nav class="screen-source-tabs" aria-label="Тип источника" data-i18n-aria="sourceType" role="tablist">
-          <button class="screen-source-tab" id="screenSourceScreensTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="true">
-            <i data-lucide="monitor" data-icon-size="sm" aria-hidden="true"></i>
-            <span data-i18n="screens">Экраны</span>
-          </button>
-          <button class="screen-source-tab" id="screenSourceWindowsTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="false">
-            <i data-lucide="app-window" data-icon-size="sm" aria-hidden="true"></i>
-            <span data-i18n="windows">Окна</span>
-          </button>
-        </nav>
+        <div class="ui-dialog__body screen-picker-body">
+          <div class="ui-segment screen-source-tabs" aria-label="Тип источника" data-i18n-aria="sourceType" role="tablist">
+            <button class="ui-segment__item screen-source-tab" id="screenSourceScreensTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="true">
+              <i data-lucide="monitor" data-icon-size="sm" aria-hidden="true"></i>
+              <span data-i18n="screens">Экраны</span>
+            </button>
+            <button class="ui-segment__item screen-source-tab" id="screenSourceWindowsTab" type="button" role="tab" aria-controls="screenSourceTabpanel" aria-selected="false" tabindex="-1">
+              <i data-lucide="app-window" data-icon-size="sm" aria-hidden="true"></i>
+              <span data-i18n="windows">Окна</span>
+            </button>
+          </div>
 
-        <div id="screenSourceTabpanel" role="tabpanel" aria-labelledby="screenSourceScreensTab">
-          <div class="screen-source-options" id="screenSourceOptions" role="radiogroup" aria-label="Источники" data-i18n-aria="sources"></div>
+          <div id="screenSourceTabpanel" role="tabpanel" aria-labelledby="screenSourceScreensTab">
+            <div class="screen-source-options" id="screenSourceOptions" role="radiogroup" aria-label="Источники" data-i18n-aria="sources"></div>
+          </div>
         </div>
 
-        <footer class="screen-source-footer">
-          <!-- Selection summary -->
+        <div class="ui-separator" role="separator"></div>
+
+        <footer class="ui-dialog__foot screen-source-footer">
           <div class="screen-source-summary">
             <span class="screen-source-summary-icon" aria-hidden="true">
               <i data-lucide="monitor" data-icon-size="sm"></i>
             </span>
             <div class="screen-source-summary-text">
-              <div class="screen-source-summary-name" id="screenSummaryName" data-i18n="notSelected">Не выбрано</div>
-              <div class="screen-source-summary-detail" id="screenSummaryDetail">SD · 720p · 30 к/с · звук</div>
+              <div class="screen-source-summary-name ellipsis" id="screenSummaryName" data-i18n="notSelected">Не выбрано</div>
+              <div class="screen-source-summary-detail ellipsis ui-field__hint" id="screenSummaryDetail">SD · 720p · 30 к/с · звук</div>
             </div>
           </div>
 
           <div class="screen-source-footer-actions">
-            <!-- SD / HD toggle -->
-            <div class="screen-source-res-toggle" id="screenResToggle" role="group" aria-label="Качество" data-i18n-aria="quality">
-              <button type="button" data-quality-preset="sd" aria-pressed="true">SD</button>
-              <button type="button" data-quality-preset="hd" aria-pressed="false">HD</button>
+            <div class="ui-segment screen-source-res-toggle" id="screenResToggle" role="radiogroup" aria-label="Качество" data-i18n-aria="quality">
+              <button class="ui-segment__item" type="button" role="radio" data-quality-preset="sd" aria-checked="true">SD</button>
+              <button class="ui-segment__item" type="button" role="radio" data-quality-preset="hd" aria-checked="false" tabindex="-1">HD</button>
             </div>
 
-            <!-- Gear + popover -->
             <div class="screen-source-gear-wrap">
-              <button class="screen-source-gear" id="screenSettingsGear" type="button" title="Настройки стрима" data-i18n-title="streamSettings" aria-pressed="false" aria-controls="screenSettingsPopover">
+              <button class="ui-icon-button ui-icon-button--size-40 screen-source-gear" id="screenSettingsGear" type="button" title="Настройки стрима" data-i18n-title="streamSettings" aria-pressed="false" aria-controls="screenSettingsPopover">
                 <i data-lucide="settings" data-icon-size="md" aria-hidden="true"></i>
               </button>
 
-              <div class="screen-settings-popover" id="screenSettingsPopover" hidden role="dialog" aria-label="Настройки стрима" data-i18n-aria="streamSettings">
-                <div class="screen-settings-label" data-i18n="streamMode">Режим стрима</div>
-                <div class="screen-settings-presets">
-                  <button class="screen-settings-preset" id="screenModeGames" type="button" data-mode="games" aria-pressed="true">
-                    <span class="screen-settings-icon">
-                      <i data-lucide="play" data-icon-size="sm" aria-hidden="true"></i>
+              <div class="popover__panel screen-settings-popover" id="screenSettingsPopover" hidden role="dialog" aria-label="Настройки стрима" data-i18n-aria="streamSettings">
+                <div class="ui-popover__title" id="screenModeLabel" data-i18n="streamMode">Режим стрима</div>
+                <div class="screen-settings-presets" role="radiogroup" aria-labelledby="screenModeLabel">
+                  <button class="ui-choice" id="screenModeGames" type="button" role="radio" data-mode="games" aria-pressed="true" aria-checked="true">
+                    <i data-lucide="play" data-icon-size="sm" aria-hidden="true"></i>
+                    <span class="ui-choice__text">
+                      <span data-i18n="smoothVideo">Плавное видео</span>
+                      <small class="ui-choice__description" data-i18n="smoothDetail">30 к/с · для игр и видео</small>
                     </span>
-                    <span class="screen-settings-info">
-                      <span class="screen-settings-title" data-i18n="smoothVideo">Плавное видео</span>
-                      <span class="screen-settings-desc" data-i18n="smoothDetail">30 к/с · для игр и видео</span>
-                    </span>
-                    <span class="screen-settings-radio" aria-hidden="true">
-                      <span class="screen-settings-dot"></span>
-                    </span>
+                    <span class="ui-radio" aria-hidden="true"></span>
                   </button>
-                  <button class="screen-settings-preset" id="screenModeText" type="button" data-mode="text" aria-pressed="false">
-                    <span class="screen-settings-icon">
-                      <i data-lucide="type" data-icon-size="sm" aria-hidden="true"></i>
+                  <button class="ui-choice" id="screenModeText" type="button" role="radio" data-mode="text" aria-pressed="false" aria-checked="false" tabindex="-1">
+                    <i data-lucide="type" data-icon-size="sm" aria-hidden="true"></i>
+                    <span class="ui-choice__text">
+                      <span data-i18n="sharpPicture">Чёткая картинка</span>
+                      <small class="ui-choice__description" data-i18n="sharpDetail">5 к/с · для текста и кода</small>
                     </span>
-                    <span class="screen-settings-info">
-                      <span class="screen-settings-title" data-i18n="sharpPicture">Чёткая картинка</span>
-                      <span class="screen-settings-desc" data-i18n="sharpDetail">5 к/с · для текста и кода</span>
-                    </span>
-                    <span class="screen-settings-radio" aria-hidden="true"></span>
+                    <span class="ui-radio" aria-hidden="true"></span>
                   </button>
                 </div>
 
-                <div class="screen-settings-sep"></div>
+                <div class="ui-separator" role="separator"></div>
 
-                <label class="screen-audio-toggle">
-                  <input id="screenAudioToggle" type="checkbox" checked>
-                  <span class="screen-audio-label" data-i18n="streamAudio">Звук стрима</span>
-                  <span class="screen-audio-switch" aria-hidden="true"></span>
+                <label class="ui-setting">
+                  <span class="ui-setting__text">
+                    <span class="ui-setting__title" id="screenAudioLabel" data-i18n="streamAudio">Звук стрима</span>
+                  </span>
+                  <span class="ui-setting__control">
+                    <button class="ui-switch" id="screenAudioToggle" type="button" role="switch" aria-checked="true" aria-labelledby="screenAudioLabel">
+                      <span class="ui-switch__thumb"></span>
+                    </button>
+                  </span>
                 </label>
 
-                <label class="screen-audio-toggle screen-audio-app-toggle" id="screenAppAudioRow" hidden>
-                  <input id="screenAppAudioToggle" type="checkbox" checked>
-                  <span class="screen-audio-label" data-i18n="windowAudioOnly">Только звук этого окна</span>
-                  <span class="screen-audio-switch" aria-hidden="true"></span>
+                <label class="ui-setting" id="screenAppAudioRow" hidden>
+                  <span class="ui-setting__text">
+                    <span class="ui-setting__title" id="screenAppAudioLabel" data-i18n="windowAudioOnly">Только звук этого окна</span>
+                  </span>
+                  <span class="ui-setting__control">
+                    <button class="ui-switch" id="screenAppAudioToggle" type="button" role="switch" aria-checked="true" aria-labelledby="screenAppAudioLabel">
+                      <span class="ui-switch__thumb"></span>
+                    </button>
+                  </span>
                 </label>
               </div>
             </div>
 
-            <button class="screen-source-launch" id="screenSourceStart" type="button" disabled>
-              <i data-lucide="play" data-icon-size="sm" data-icon-fill="true" aria-hidden="true"></i>
+            <button class="ui-button ui-button--primary ui-button--size-md" id="screenSourceStart" type="button" disabled>
+              <span class="ui-button__icon">
+                <i data-lucide="play" data-icon-size="sm" data-icon-fill="true" aria-hidden="true"></i>
+              </span>
               <span data-i18n="start">Запустить</span>
             </button>
           </div>

@@ -50,7 +50,8 @@ function renderState(state) {
 
   if (showProgress) {
     const progress = Number.isFinite(state?.progress) ? state.progress : 0;
-    elements.progressBar.style.width = `${progress}%`;
+    elements.progressBar.style.setProperty('--progress-value', `${progress}%`);
+    elements.progressBar.parentElement?.setAttribute('aria-valuenow', String(progress));
     elements.progressLabel.textContent = `${progress}%`;
   }
 

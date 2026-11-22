@@ -285,6 +285,7 @@ function openDesktopCapturePickerWindow(parentWindow, sources, options = {}) {
   const overlayBounds = getPickerOverlayBounds(parentWindow);
   const pickerWindow = new BrowserWindow({
     ...(overlayBounds || { height: 760, width: 1040 }),
+    // Transparent only while the picker is an overlay; otherwise the kit --vr-bg.
     backgroundColor: overlayBounds ? '#00000000' : WINDOW_BACKGROUND,
     frame: false,
     fullscreenable: false,

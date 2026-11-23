@@ -3,6 +3,7 @@
 const { getLocale } = require('./localization');
 
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 const { createDesktopSettingsStore } = require('./desktop-settings');
 const { createForegroundWatcher } = require('./overlay-foreground');
 const {
@@ -76,6 +77,7 @@ function createOverlayController({
   let watcherRunning = false;
   let foregroundLease = null;
   let gameMode = false;
+  let reportedGameBounds = null;
   const watcher = createWatcher({
     appPath: typeof app.getAppPath === 'function' ? app.getAppPath() : '',
     fs,
@@ -163,7 +165,7 @@ function createOverlayController({
   // Electron converts per monitor. The PowerShell fallback is DPI-virtualized by
   // Windows, so its bounds are used as they are.
   function toDipBounds(bounds) {
-    if (!bounds || bounds.width < 64 || bounds.height < 64) return null;
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null;
     if (watcher.getStatus?.().backend !== 'native') return bounds;
     try {
       if (typeof screen.screenToDipRect === 'function') {
@@ -172,12 +174,14 @@ function createOverlayController({
     } catch (error) {
       log.warn?.('Overlay could not convert game bounds to DIP:', error);
     }
-    return bounds;
+    return null;
   }
 
   function targetWorkArea() {
-    const gameArea = toDipBounds(activeGame?.bounds);
-    if (gameArea) return gameArea;
+    const bounds = activeGame?.bounds;
+    if (bounds && bounds.width >= 64 && bounds.height >= 64) {
+      return toDipBounds(bounds) || bounds;
+    }
     try {
       const display = screen.getPrimaryDisplay?.();
       return display?.workArea || display?.bounds || { height: 720, width: 1280, x: 0, y: 0 };
@@ -301,7 +305,7 @@ function createOverlayController({
   function watcherWanted() {
     if (disposing) return false;
     if (foregroundLease) return true;
-    return settings.enabled === true && callControls.getState().active === true;
+    return callControls.getState().active === true;
   }
 
   function syncWatcher() {
@@ -326,9 +330,8 @@ function createOverlayController({
   }
 
   // Game mode for the web app, like Discord's: during a call a game is on screen
-  // and the app window is not the one in front, so nobody is looking at its
-  // animations. It comes from the same watcher as the HUD, so it needs the
-  // overlay switched on.
+  // and the app window is not the one in front. The watcher also detects games
+  // when the HUD is disabled.
   function isGameModeNow() {
     if (disposing || previewing || !watcherRunning) return false;
     if (callControls.getState().active !== true) return false;
@@ -337,10 +340,12 @@ function createOverlayController({
   }
 
   function reportGameMode(next) {
-    if (next === gameMode) return;
+    const gameBounds = next ? toDipBounds(activeGame?.bounds) : null;
+    if (next === gameMode && isDeepStrictEqual(gameBounds, reportedGameBounds)) return;
     gameMode = next;
+    reportedGameBounds = gameBounds;
     try {
-      onGameModeChange(gameMode);
+      onGameModeChange(gameMode, gameBounds);
     } catch (error) {
       log.warn?.('Game mode listener failed:', error);
     }

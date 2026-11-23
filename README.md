@@ -65,15 +65,16 @@ During a call (voice reported through `voiceRoomDesktopHotkeys.configure({ activ
 The hosted web app receives system events through `window.voiceRoomDesktopSystem`:
 
 ```js
-const { gameMode, windowVisible } = await window.voiceRoomDesktopSystem.getState();
-const stopState = window.voiceRoomDesktopSystem.onState(({ gameMode, windowVisible }) => {});
+const { gameMode, windowCovered, windowVisible } = await window.voiceRoomDesktopSystem.getState();
+const stopState = window.voiceRoomDesktopSystem.onState(({ gameMode, windowCovered, windowVisible }) => {});
 const stopWake = window.voiceRoomDesktopSystem.onWake(({ reason }) => {}); // 'resume' | 'unlock-screen'
 ```
 
-- **Game mode** works like Discord's. It is on during a call while a detected game is on screen and the VoiceRoom window is not in front. It comes from the overlay's game detection, so it needs the overlay setting on (Windows). The web app pauses looping animations, which nobody sees then. They resume as soon as the window is focused.
-- **windowVisible** is `false` while the main window is hidden in the tray or minimized. During a call the page reads as visible even then, so this is the only way it can tell. The web app stops receiving remote video (cameras and screens) while nobody can see it, and keeps voices and stream audio. It does not see a window covered by a game; that is game mode.
+- **Game mode** is on during a call while a detected game is on screen and the VoiceRoom window is not in front. On Windows, game detection runs even with the HUD disabled. The web app pauses looping animations during game mode.
+- **windowVisible** is `false` while the main window is hidden in the tray or minimized. During a call Chromium continues to report the page as visible in both cases.
+- **windowCovered** is `true` during game mode when the main window overlaps the game window. It is independent of `windowVisible` and defaults to `false`.
 - **Wake** fires after sleep and after unlocking the screen. During a call the page reads as visible, so it never gets a `visibilitychange` there. This tells the web app to check its realtime socket at once, instead of waiting out the heartbeat timeout.
-- Only the configured VoiceRoom page receives these events. A shell older than this contract has no `voiceRoomDesktopSystem`, so the web app must feature-detect it.
+- Only the configured VoiceRoom page receives these events. Older shells may omit `windowCovered` or the entire `voiceRoomDesktopSystem` API.
 
 ## Autostart
 

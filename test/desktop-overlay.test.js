@@ -108,7 +108,8 @@ function createHarness(t, { backend, screenToDipRect, onGameModeChange } = {}) {
     running: false,
     ...(backend ? { getStatus: () => ({ backend, failures: 0, running: watcher.running }) } : {}),
     start() { this.running = true; },
-    stop() { this.running = false; }
+    stop() { this.running = false; },
+    report(payload) { if (this.running) this.onChange(payload); }
   };
   const callControls = createCallControlsController({ log: { warn() {} } });
   const controller = createOverlayController({
@@ -120,7 +121,10 @@ function createHarness(t, { backend, screenToDipRect, onGameModeChange } = {}) {
     app: { getPath: () => userDataPath },
     appUrl: 'https://voiceroom.ru',
     callControls,
-    createForegroundWatcher: () => watcher,
+    createForegroundWatcher: ({ onChange }) => {
+      watcher.onChange = onChange;
+      return watcher;
+    },
     fs,
     log: { warn() {} },
     ...(onGameModeChange ? { onGameModeChange } : {}),
@@ -204,6 +208,24 @@ describe('desktop overlay placement and health', () => {
     assert.deepEqual(windows[0].bounds, { height: 48, width: 52, x: 2896, y: 16 });
   });
 
+  it('reports current game bounds in DIP even with the HUD disabled', (t) => {
+    const changes = [];
+    const { callControls, controller, watcher } = createHarness(t, {
+      backend: 'native',
+      onGameModeChange: (active, bounds) => changes.push([active, bounds]),
+      screenToDipRect: halveRect
+    });
+    controller.setSettings({ enabled: false });
+    startCall(callControls, controller);
+    watcher.report(SECOND_MONITOR_GAME);
+    watcher.report({ ...SECOND_MONITOR_GAME, title: 'New title' });
+    watcher.report({ ...SECOND_MONITOR_GAME, bounds: { ...SECOND_MONITOR_GAME.bounds, x: 3000 } });
+    assert.deepEqual(changes, [
+      [true, { height: 720, width: 1280, x: 1440, y: 0 }],
+      [true, { height: 720, width: 1280, x: 1500, y: 0 }]
+    ]);
+  });
+
   it('raises the HUD again on every report and after a GPU process crash', (t) => {
     const { callControls, controller, windows } = createHarness(t, { backend: 'native' });
     startCall(callControls, controller);
@@ -269,19 +291,38 @@ describe('desktop overlay game mode', () => {
     assert.deepEqual(changes, [true, false, true, false, true, false], 'leaving the call ends it');
   });
 
-  it('stays off with the overlay switched off, and ends on dispose', (t) => {
-    const { callControls, changes, controller, main } = gameModeHarness(t);
+  it('detects games only during a call with the HUD disabled, and stops on dispose', (t) => {
+    const { callControls, changes, controller, main, watcher, windows } = gameModeHarness(t);
+    const page = new FakeSender();
     controller.setSettings({ enabled: false });
-    callControls.setState(new FakeSender(), { active: true, roomId: 'abc123', roomName: 'Гостиная' });
     main.blur();
-    controller.handleForeground(CS2);
-    assert.deepEqual(changes, []);
+    assert.equal(watcher.running, false);
+    watcher.report(CS2);
+    assert.equal(controller.isGameMode(), false);
+
+    callControls.setState(page, { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    assert.equal(watcher.running, true);
+    watcher.report(CS2);
+    assert.equal(controller.isGameMode(), true);
+    assert.equal(windows.length, 0);
 
     controller.setSettings({ enabled: true });
-    controller.handleForeground(CS2);
+    assert.equal(windows[0].visible, true);
+    controller.setSettings({ enabled: false });
+    assert.equal(windows[0].visible, false);
     assert.deepEqual(changes, [true]);
+
+    callControls.setState(page, { active: false });
+    assert.equal(watcher.running, false);
+    assert.equal(controller.isGameMode(), false);
+
+    callControls.setState(page, { active: true, roomId: 'abc123', roomName: 'Гостиная' });
+    assert.equal(controller.isGameMode(), false);
+    watcher.report(CS2);
     controller.dispose();
-    assert.deepEqual(changes, [true, false]);
+    assert.equal(watcher.running, false);
+    assert.equal(windows[0].destroyed, true);
+    assert.deepEqual(changes, [true, false, true, false]);
   });
 });
 
@@ -415,6 +456,7 @@ describe('desktop overlay controller', () => {
   it('offers the last window before VoiceRoom for the allowlist, outside a call too', (t) => {
     const { controller, watcher } = createHarness(t);
     controller.attachMainWindow(new FakeMainWindow());
+    controller.setSettings({ enabled: false });
     assert.equal(watcher.running, false);
 
     assert.deepEqual(controller.getForeground(), { exe: '', game: false, label: '', reason: 'unknown', title: '' });
@@ -432,6 +474,7 @@ describe('desktop overlay controller', () => {
     assert.deepEqual(controller.addAllowedGame(CHROME.exe).allowedExecutables, []);
     assert.deepEqual(controller.addAllowedGame().allowedExecutables, ['d:\\games\\mygame\\mygame.exe']);
     assert.equal(controller.getForeground().game, true);
+    assert.equal(controller.isGameMode(), false);
   });
 
   it('sends avatars, mute state and streams to the overlay window', (t) => {

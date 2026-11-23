@@ -1,16 +1,15 @@
 'use strict';
 
-// What the shell knows about the computer around the page, for the web app:
-// game mode (a game is on screen and the app window is not in front), whether
-// the window can be seen at all (not hidden to the tray, not minimized), and
-// wake signals (back from sleep or from the lock screen). During a call the
-// page reads as visible even in the tray, so it would never learn either from
-// the Page Visibility API.
+const { boundsOverlap } = require('./policies/overlay');
+
+// During a call the page reads as visible even in the tray. The shell reports
+// game mode, window visibility and coverage by a game, plus system wake events.
 const GET_STATE_CHANNEL = 'desktop-system:get-state';
 const STATE_CHANNEL = 'desktop-system:state';
 const WAKE_CHANNEL = 'desktop-system:wake';
 const WAKE_EVENTS = Object.freeze(['resume', 'unlock-screen']);
-const WINDOW_VISIBILITY_EVENTS = Object.freeze(['show', 'hide', 'minimize', 'restore']);
+const WINDOW_STATE_EVENTS = Object.freeze(['move', 'resize', 'show', 'hide', 'minimize', 'restore']);
+const DEFAULT_STATE = Object.freeze({ gameMode: false, windowCovered: false, windowVisible: true });
 
 function isWindowVisible(window) {
   if (!window || window.isDestroyed?.()) return false;
@@ -20,13 +19,13 @@ function isWindowVisible(window) {
 function createSystemEventsController({ isTrustedUrl = () => true, log = console } = {}) {
   let window = null;
   let windowListeners = [];
-  let gameMode = false;
-  let windowVisible = true;
+  let gameBounds = null;
+  let state = DEFAULT_STATE;
   let powerMonitor = null;
   let powerMonitorListeners = [];
 
   function getState() {
-    return { gameMode, windowVisible };
+    return { ...state };
   }
 
   function send(channel, payload) {
@@ -51,31 +50,34 @@ function createSystemEventsController({ isTrustedUrl = () => true, log = console
     windowListeners = [];
   }
 
-  function syncWindowVisible() {
-    const next = isWindowVisible(window);
-    if (next === windowVisible) return;
-    windowVisible = next;
-    send(STATE_CHANNEL, getState());
+  function syncWindowState(gameMode = state.gameMode, notify = true) {
+    const windowVisible = window ? isWindowVisible(window) : state.windowVisible;
+    // Game bounds and BrowserWindow bounds are both in DIP.
+    const windowCovered = gameMode && gameBounds && window && !window.isDestroyed?.()
+      ? boundsOverlap(gameBounds, window.getBounds?.(), 0)
+      : false;
+    if (gameMode === state.gameMode && windowCovered === state.windowCovered && windowVisible === state.windowVisible) return;
+    state = { gameMode, windowCovered, windowVisible };
+    if (notify) send(STATE_CHANNEL, getState());
   }
 
   function attachWindow(next) {
     detachWindow();
     window = next || null;
-    if (!window) return;
-    windowListeners = WINDOW_VISIBILITY_EVENTS.map((eventName) => [eventName, syncWindowVisible]);
-    for (const [eventName, listener] of windowListeners) window.on?.(eventName, listener);
-    window.once?.('closed', () => {
-      if (window === next) detachWindow();
-    });
-    windowVisible = isWindowVisible(window);
+    if (window) {
+      const sync = () => syncWindowState();
+      windowListeners = WINDOW_STATE_EVENTS.map((eventName) => [eventName, sync]);
+      windowListeners.push(['closed', () => attachWindow(null)]);
+      for (const [eventName, listener] of windowListeners) window.on?.(eventName, listener);
+    }
+    syncWindowState(state.gameMode, false);
   }
 
-  function setGameMode(active) {
-    const next = active === true;
-    if (next === gameMode) return;
-    gameMode = next;
-    log.info?.(`Game mode ${gameMode ? 'on' : 'off'}`);
-    send(STATE_CHANNEL, getState());
+  function setGameMode(active, bounds = null) {
+    const gameMode = active === true;
+    if (gameMode !== state.gameMode) log.info?.(`Game mode ${gameMode ? 'on' : 'off'}`);
+    gameBounds = gameMode ? bounds : null;
+    syncWindowState(gameMode);
   }
 
   function installPowerMonitor(nextPowerMonitor) {
@@ -104,8 +106,8 @@ function createSystemEventsController({ isTrustedUrl = () => true, log = console
     powerMonitor = null;
     powerMonitorListeners = [];
     detachWindow();
-    gameMode = false;
-    windowVisible = true;
+    gameBounds = null;
+    state = DEFAULT_STATE;
   }
 
   return {

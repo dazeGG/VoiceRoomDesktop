@@ -18,6 +18,8 @@ function fakeWindow(url = 'https://voiceroom.ru/') {
   window.destroyed = false;
   window.visible = true;
   window.minimized = false;
+  window.bounds = { height: 600, width: 800, x: 120, y: 80 };
+  window.getBounds = () => window.bounds;
   window.isDestroyed = () => window.destroyed;
   window.isVisible = () => window.visible;
   window.isMinimized = () => window.minimized;
@@ -45,10 +47,74 @@ test('game mode changes reach the hosted page once per change', () => {
   events.setGameMode(true);
   events.setGameMode(false);
   assert.deepEqual(window.webContents.sent, [
-    [STATE_CHANNEL, { gameMode: true, windowVisible: true }],
-    [STATE_CHANNEL, { gameMode: false, windowVisible: true }]
+    [STATE_CHANNEL, { gameMode: true, windowCovered: false, windowVisible: true }],
+    [STATE_CHANNEL, { gameMode: false, windowCovered: false, windowVisible: true }]
   ]);
-  assert.deepEqual(events.getState(), { gameMode: false, windowVisible: true });
+  assert.deepEqual(events.getState(), { gameMode: false, windowCovered: false, windowVisible: true });
+});
+
+test('window coverage follows game bounds and main window movement and resizing', () => {
+  const events = createSystemEventsController({ isTrustedUrl, log: quietLog });
+  const window = fakeWindow();
+  const gameBounds = { height: 900, width: 1000, x: 0, y: 0 };
+  events.attachWindow(window);
+  assert.deepEqual(events.getState(), { gameMode: false, windowCovered: false, windowVisible: true });
+
+  events.setGameMode(true, gameBounds);
+  assert.deepEqual(events.getState(), { gameMode: true, windowCovered: true, windowVisible: true });
+
+  window.bounds = { ...window.bounds, x: 1920 };
+  window.emit('move');
+  assert.deepEqual(events.getState(), { gameMode: true, windowCovered: false, windowVisible: true });
+
+  window.bounds = { ...window.bounds, x: 1000 };
+  window.emit('move');
+  assert.equal(window.webContents.sent.length, 2, 'touching the game edge leaves coverage unchanged');
+
+  window.bounds = { ...window.bounds, x: 0, width: 100 };
+  events.setGameMode(true, { ...gameBounds, x: 200 });
+  assert.equal(events.getState().windowCovered, false, 'same display with a gap');
+  window.bounds = { ...window.bounds, width: 250 };
+  window.emit('resize');
+  assert.equal(events.getState().windowCovered, true);
+  events.setGameMode(true, { ...gameBounds, x: 300 });
+  assert.equal(events.getState().windowCovered, false, 'the game can move while game mode stays active');
+  events.setGameMode(true, gameBounds);
+  events.setGameMode(false, gameBounds);
+  assert.deepEqual(window.webContents.sent, [
+    [STATE_CHANNEL, { gameMode: true, windowCovered: true, windowVisible: true }],
+    [STATE_CHANNEL, { gameMode: true, windowCovered: false, windowVisible: true }],
+    [STATE_CHANNEL, { gameMode: true, windowCovered: true, windowVisible: true }],
+    [STATE_CHANNEL, { gameMode: true, windowCovered: false, windowVisible: true }],
+    [STATE_CHANNEL, { gameMode: true, windowCovered: true, windowVisible: true }],
+    [STATE_CHANNEL, { gameMode: false, windowCovered: false, windowVisible: true }]
+  ]);
+});
+
+test('window coverage is recomputed independently of whether the window is visible', () => {
+  const events = createSystemEventsController({ isTrustedUrl, log: quietLog });
+  const window = fakeWindow();
+  events.attachWindow(window);
+  events.setGameMode(true, { height: 900, width: 1000, x: 0, y: 0 });
+
+  window.visible = false;
+  window.emit('hide');
+  assert.deepEqual(events.getState(), { gameMode: true, windowCovered: true, windowVisible: false });
+
+  window.visible = true;
+  window.bounds = { ...window.bounds, x: 1920 };
+  window.emit('show');
+  assert.deepEqual(events.getState(), { gameMode: true, windowCovered: false, windowVisible: true });
+
+  window.minimized = true;
+  window.bounds = { ...window.bounds, x: 0 };
+  window.emit('minimize');
+  assert.deepEqual(events.getState(), { gameMode: true, windowCovered: true, windowVisible: false });
+
+  window.minimized = false;
+  window.bounds = { ...window.bounds, x: 1920 };
+  window.emit('restore');
+  assert.deepEqual(events.getState(), { gameMode: true, windowCovered: false, windowVisible: true });
 });
 
 test('system events are never sent to a page that is not the hosted app', () => {
@@ -57,7 +123,7 @@ test('system events are never sent to a page that is not the hosted app', () => 
   events.attachWindow(window);
   events.setGameMode(true);
   assert.deepEqual(window.webContents.sent, []);
-  assert.deepEqual(events.getState(), { gameMode: true, windowVisible: true }, 'the state is still kept for getState');
+  assert.deepEqual(events.getState(), { gameMode: true, windowCovered: false, windowVisible: true }, 'the state is still kept for getState');
 
   window.destroyed = true;
   assert.doesNotThrow(() => events.setGameMode(false));
@@ -92,9 +158,15 @@ test('the state request is answered only for the trusted frame', () => {
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     isTrustedFrame: (frame) => frame?.url === 'https://voiceroom.ru/'
   });
-  events.setGameMode(true);
+  const window = fakeWindow();
+  events.attachWindow(window);
+  events.setGameMode(true, window.bounds);
   const handler = handlers.get(GET_STATE_CHANNEL);
-  assert.deepEqual(handler({ senderFrame: { url: 'https://voiceroom.ru/' } }), { gameMode: true, windowVisible: true });
+  assert.deepEqual(handler({ senderFrame: { url: 'https://voiceroom.ru/' } }), {
+    gameMode: true,
+    windowCovered: true,
+    windowVisible: true
+  });
   assert.throws(() => handler({ senderFrame: { url: 'https://evil.example/' } }));
 });
 
@@ -114,7 +186,7 @@ test('hiding to the tray or minimizing tells the page the window cannot be seen'
   window.minimized = false;
   window.emit('restore');
   assert.deepEqual(states(), [false, true, false, true], 'one message per change');
-  assert.deepEqual(events.getState(), { gameMode: false, windowVisible: true });
+  assert.deepEqual(events.getState(), { gameMode: false, windowCovered: false, windowVisible: true });
 
   window.emit('closed');
   window.visible = false;
@@ -127,10 +199,10 @@ test('a window created hidden (start in the tray) starts as not visible', () => 
   const window = fakeWindow();
   window.visible = false;
   events.attachWindow(window);
-  assert.deepEqual(events.getState(), { gameMode: false, windowVisible: false });
+  assert.deepEqual(events.getState(), { gameMode: false, windowCovered: false, windowVisible: false });
   window.visible = true;
   window.emit('show');
-  assert.deepEqual(window.webContents.sent.at(-1), [STATE_CHANNEL, { gameMode: false, windowVisible: true }]);
+  assert.deepEqual(window.webContents.sent.at(-1), [STATE_CHANNEL, { gameMode: false, windowCovered: false, windowVisible: true }]);
 });
 
 test('the main window is throttled in the background only outside voice', () => {

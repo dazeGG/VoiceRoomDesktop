@@ -251,7 +251,7 @@ const overlay = createOverlayController({
   callControls,
   fs,
   log,
-  onGameModeChange: (active) => systemEvents.setGameMode(active),
+  onGameModeChange: systemEvents.setGameMode,
   path,
   platform: process.platform,
   screen: {

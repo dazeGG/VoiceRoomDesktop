@@ -12,6 +12,9 @@ const { exact, isHello, isReady, isEvent, isReply, isError } = require('./voice-
 const REQUEST_TIMEOUT_MS = 2500;
 const JOIN_TIMEOUT_MS = 12000;
 const RESTART_COOLDOWN_MS = 30000;
+// The renderer gives stop IPC one second before restoring Chromium playback.
+const SHUTDOWN_GRACE_MS = 500;
+const SHUTDOWN_DEADLINE_MS = 800;
 let lastRestart = -Infinity;
 
 function findVoiceHelper({
@@ -45,17 +48,19 @@ function terminate(child) {
 
 class VoiceSession extends EventEmitter {
   constructor(helper, {
+    callScoped = false,
     spawnChild = spawn,
     handshakeMs = 4000,
     heartbeatMs = 1000,
     heartbeatTimeoutMs = REQUEST_TIMEOUT_MS,
     restartDelayMs = 500,
     restartCooldownMs = RESTART_COOLDOWN_MS,
-    shutdownGraceMs = 2000,
-    shutdownDeadlineMs = 3000
+    shutdownGraceMs = SHUTDOWN_GRACE_MS,
+    shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS
   } = {}) {
     super();
     this.helper = helper;
+    this.callScoped = callScoped;
     this.spawnChild = spawnChild;
     this.handshakeMs = handshakeMs;
     this.heartbeatMs = heartbeatMs;
@@ -67,8 +72,7 @@ class VoiceSession extends EventEmitter {
     this.restarts = 0;
     this.stopping = false;
     this.connection = null;
-    this.desired = null;
-    this.admissionRevision = 0;
+    this.requestedMute = true;
     this.restartTimer = null;
   }
 
@@ -93,10 +97,11 @@ class VoiceSession extends EventEmitter {
       heartbeat: null, failing: false, failure: null
     };
     this.connection = connection;
-    const fail = (code) => {
+    const fail = (code, terminal = false) => {
       if (connection.failing) return;
       connection.failing = true;
       connection.failure = code;
+      connection.terminal = terminal;
       rejectReady(fault(code));
       terminate(child);
     };
@@ -132,15 +137,15 @@ class VoiceSession extends EventEmitter {
       }
       if (frame.id === 0) {
         if (frame.kind === 'fault') {
-          const valid = exact(frame.payload, ['code']) && ['bad-frame', 'frame-size'].includes(frame.payload.code);
-          fail(valid ? 'helper-fault' : 'bad-event');
+          const code = exact(frame.payload, ['code']) && frame.payload.code;
+          if (code === 'output-not-rendering') fail(code, true);
+          else fail(['bad-frame', 'frame-size'].includes(code) ? 'helper-fault' : 'bad-event');
           return;
         }
         if (!isEvent(frame.kind, frame.payload)) {
           fail('bad-event');
           return;
         }
-        if (frame.kind === 'transport' && frame.payload.state === 'disconnected') this.clearAdmission();
         if (!this.stopping) this.emit('event', frame);
         return;
       }
@@ -154,7 +159,10 @@ class VoiceSession extends EventEmitter {
       clearTimeout(request.timer);
       pending.delete(frame.id);
       if (frame.kind === 'response') request.resolve(frame.payload.data);
-      else request.reject(fault(frame.payload.code));
+      else {
+        if (frame.payload.code === 'device-switch-failed') this.setRequestedMute(true);
+        request.reject(fault(frame.payload.code));
+      }
     });
     child.stdout.on('data', (chunk) => {
       try {
@@ -181,10 +189,11 @@ class VoiceSession extends EventEmitter {
       resolveExit();
       if (this.connection !== connection) return;
       this.connection = null;
-      if (!this.stopping) this.recover(error.code);
+      if (!this.stopping) this.recover(error.code, connection.terminal);
     });
     connection.fail = fail;
     await ready;
+    if (this.connection !== connection || this.stopping) throw fault('session-stopped');
     connection.heartbeat = setInterval(() => {
       // Join has its own bounded deadline and serializes commands in the helper.
       if (this.stopping || connection.failing || pending.size) return;
@@ -193,35 +202,43 @@ class VoiceSession extends EventEmitter {
     return this.capabilities;
   }
 
-  recover(code) {
+  recover(code, terminal) {
     this.emit('lost', code);
     if (this.stopping) return;
     const now = performance.now();
-    if (this.restarts || now - lastRestart < this.restartCooldownMs) {
-      this.desired = null;
+    if (this.callScoped || terminal || this.restarts || now - lastRestart < this.restartCooldownMs) {
+      this.finishRecovery(false);
       this.emit('terminal', code);
       return;
     }
     this.restarts += 1;
     lastRestart = now;
+    this.recovery = Promise.withResolvers();
     this.restartTimer = setTimeout(async () => {
       this.restartTimer = null;
       try {
         await this.start();
-        if (!this.stopping && this.desired) {
-          // The replacement needs a fresh unmute command from its owner.
-          const data = await this.send(this.connection, 'join', { ...this.desired, muted: true });
-          if (!data.muted) throw fault('bad-response');
+        if (!this.stopping) {
+          this.finishRecovery(true);
+          this.emit('restarted');
         }
-        if (!this.stopping) this.emit('restarted');
       } catch {
         if (this.connection) this.connection.fail('restart-failed');
-        else if (!this.stopping) {
-          this.clearAdmission();
+        else if (!this.stopping && this.recovery) {
+          this.finishRecovery(false);
           this.emit('terminal', 'restart-failed');
         }
       }
     }, this.restartDelayMs);
+  }
+
+  finishRecovery(restarted) {
+    this.recovery?.resolve(restarted);
+    this.recovery = null;
+  }
+
+  setRequestedMute(muted) {
+    this.requestedMute = muted;
   }
 
   send(connection, kind, payload, timeout = kind === 'join' ? JOIN_TIMEOUT_MS : REQUEST_TIMEOUT_MS) {
@@ -248,9 +265,9 @@ class VoiceSession extends EventEmitter {
     });
   }
 
-  async request(kind, payload = {}) {
+  async request(kind, payload = {}, { muteRecorded = false } = {}) {
     if (this.stopping || kind === 'shutdown') throw fault('session-stopped');
-    if (!['join', 'leave', 'ping', 'subscriptions', 'output-mute', 'output-device'].includes(kind)) {
+    if (!['join', 'leave', 'ping', 'subscriptions', 'output-mute', 'output-device', 'list-outputs', 'update'].includes(kind)) {
       throw fault('unknown-command');
     }
     let snapshot;
@@ -259,22 +276,21 @@ class VoiceSession extends EventEmitter {
     } catch {
       throw fault('bad-payload');
     }
-    if (kind === 'leave') this.clearAdmission();
-    const revision = this.admissionRevision;
-    const data = await this.send(this.connection, kind, snapshot);
-    if (this.stopping || revision !== this.admissionRevision) return data;
-    if (kind === 'join') this.desired = snapshot;
-    if (this.desired) {
-      if (kind === 'subscriptions') this.desired.tracks = structuredClone(snapshot.tracks);
-      if (kind === 'output-mute') this.desired.muted = snapshot.muted;
-      if (kind === 'output-device') this.desired.outputDevice = snapshot.outputDevice;
+    // A join makes the helper single-use even if it exits before acknowledging admission.
+    if (kind === 'join') this.callScoped = true;
+    if (!muteRecorded) {
+      if (kind === 'join') this.setRequestedMute(snapshot?.muted ?? true);
+      else if (['update', 'output-mute'].includes(kind) && typeof snapshot?.muted === 'boolean') {
+        this.setRequestedMute(snapshot.muted);
+      }
     }
-    return data;
-  }
-
-  clearAdmission() {
-    this.desired = null;
-    this.admissionRevision += 1;
+    if (this.recovery && !(await this.recovery.promise)) throw fault('helper-unavailable');
+    if (this.stopping) throw fault('session-stopped');
+    if (typeof snapshot?.muted === 'boolean') {
+      if (kind === 'update' && snapshot.muted !== this.requestedMute) delete snapshot.muted;
+      else snapshot.muted = this.requestedMute;
+    }
+    return this.send(this.connection, kind, snapshot);
   }
 
   stop() {
@@ -284,26 +300,19 @@ class VoiceSession extends EventEmitter {
 
   async shutdown() {
     this.stopping = true;
-    this.desired = null;
     clearTimeout(this.restartTimer);
+    this.finishRecovery(false);
     const connection = this.connection;
     if (!connection) return true;
-    // Let the helper drain before closing stdin, then attempt termination.
-    // Only close confirms the old child is gone.
+    // Queue shutdown before EOF and give the helper a short chance to mute and
+    // leave. Only close confirms exit, including after forced termination.
     const deadline = new AbortController();
     const closed = connection.exited.then(() => true);
-    const drain = async () => {
-      await Promise.race([
-        this.send(connection, 'shutdown', {}),
-        closed,
-        delay(this.shutdownGraceMs, undefined, { signal: deadline.signal })
-      ]).catch(() => {});
-      if (deadline.signal.aborted || this.connection !== connection) return;
-      connection.child.stdin.end();
-      await Promise.race([closed, delay(200, undefined, { signal: deadline.signal })]);
+    void this.send(connection, 'shutdown', {}).catch(() => {});
+    connection.child.stdin.end();
+    void delay(this.shutdownGraceMs, undefined, { signal: deadline.signal }).then(() => {
       if (this.connection === connection) terminate(connection.child);
-    };
-    void drain().catch(() => {});
+    }).catch(() => {});
     try {
       return await Promise.race([
         closed,
@@ -322,7 +331,7 @@ async function startNativeVoice(options) {
   if (activeSession) throw fault('session-active');
   const helper = findVoiceHelper(options);
   if (!helper) throw fault('helper-unavailable');
-  const session = new VoiceSession(helper);
+  const session = new VoiceSession(helper, { callScoped: options?.callScoped });
   activeSession = session;
   try {
     await session.start();

@@ -1,9 +1,10 @@
 mod audio;
 mod parent;
 mod protocol;
+mod stats;
 
-use audio::Output;
-use livekit::{prelude::*, webrtc::stats::RtcStats};
+use audio::{Output, OUTPUT_NOT_RENDERING};
+use livekit::prelude::*;
 use protocol::{Frame, VERSION};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -54,11 +55,31 @@ struct Device {
     output_device: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Update {
+    #[serde(default, deserialize_with = "updated")]
+    tracks: Option<HashSet<String>>,
+    #[serde(default, deserialize_with = "updated")]
+    muted: Option<bool>,
+    #[serde(default, deserialize_with = "updated")]
+    output_device: Option<Option<String>>,
+}
+
+fn updated<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 struct Session {
     room: Room,
     events: mpsc::UnboundedReceiver<RoomEvent>,
     output: Output,
     tracks: HashSet<String>,
+    stats: stats::ReceiverStats,
 }
 
 impl Session {
@@ -71,7 +92,7 @@ impl Session {
         {
             return Err("bad-payload");
         }
-        let output = Output::new(join.output_device, join.muted)?;
+        let output = Output::new(join.output_device)?;
         let mut options = RoomOptions::default();
         options.auto_subscribe = false;
         let (room, events) = timeout(
@@ -81,20 +102,32 @@ impl Session {
         .await
         .map_err(|_| "join-timeout")?
         .map_err(|_| "join-failed")?;
-        let session = Self {
+        let mut session = Self {
             room,
             events,
             output,
             tracks: join.tracks,
+            stats: stats::ReceiverStats::default(),
         };
         session.reconcile();
+        if !join.muted {
+            session.output.unmute(session.should_render())?;
+        }
         Ok(session)
     }
 
     fn reconcile(&self) {
+        let identity = self.room.local_participant().identity();
+        let canonical = identity
+            .as_str()
+            .split_once("#voice.")
+            .map(|(peer, _)| peer);
         for participant in self.room.remote_participants().into_values() {
+            let is_self = canonical == Some(participant.identity().as_str());
             for publication in participant.track_publications().into_values() {
-                let desired = publication.kind() == TrackKind::Audio
+                let desired = !is_self
+                    && publication.kind() == TrackKind::Audio
+                    && publication.source() == TrackSource::Microphone
                     && self.tracks.contains(publication.sid().as_str());
                 if desired != publication.is_desired() {
                     publication.set_subscribed(desired);
@@ -112,56 +145,54 @@ impl Session {
         json!({ "state": state })
     }
 
-    async fn stats(&self) -> Reply {
+    fn should_render(&self) -> bool {
+        self.room.connection_state() == ConnectionState::Connected
+            && !self.tracks.is_empty()
+            && self.room.remote_participants().into_values().any(|peer| {
+                peer.track_publications().into_values().any(|publication| {
+                    publication.is_desired()
+                        && publication.track().is_some()
+                        && self.tracks.contains(publication.sid().as_str())
+                })
+            })
+    }
+
+    async fn stats(&mut self) -> Reply {
         let stats = timeout(Duration::from_millis(750), self.room.get_stats())
             .await
             .map_err(|_| "stats-timeout")?
             .map_err(|_| "stats-failed")?;
-        let reports = stats.subscriber_stats.iter().chain(&stats.publisher_stats);
-        let mut delay = 0.0;
-        let mut emitted = 0_u64;
-        let mut concealed = 0_u64;
-        let mut concealment_events = 0_u64;
-        let mut lost = 0_i64;
-        let selected: HashSet<_> = reports
-            .clone()
-            .filter_map(|report| match report {
-                RtcStats::Transport(row) => Some(row.transport.selected_candidate_pair_id.as_str()),
-                _ => None,
-            })
-            .collect();
-        let mut rtt: Option<f64> = None;
-        for report in reports {
-            match report {
-                RtcStats::InboundRtp(row) if row.stream.kind == "audio" => {
-                    delay += row.inbound.jitter_buffer_delay;
-                    emitted += row.inbound.jitter_buffer_emitted_count;
-                    concealed += row.inbound.concealed_samples;
-                    concealment_events += row.inbound.concealment_events;
-                    lost += row.received.packets_lost;
-                }
-                RtcStats::CandidatePair(row) if selected.contains(row.rtc.id.as_str()) => {
-                    let seconds = row.candidate_pair.current_round_trip_time;
-                    rtt = Some(rtt.map_or(seconds, |old| old.max(seconds)));
-                }
-                _ => {}
-            }
+        Ok(self
+            .stats
+            .sample([&stats.subscriber_stats, &stats.publisher_stats]))
+    }
+
+    fn update(&mut self, update: Update) -> Reply {
+        if let Some(tracks) = &update.tracks {
+            validate_tracks(tracks)?;
         }
-        Ok(json!({
-            "jitterBufferDelay": delay,
-            "jitterBufferEmittedCount": emitted,
-            "concealedSamples": concealed,
-            "concealmentEvents": concealment_events,
-            "packetsLost": lost,
-            "rtt": rtt,
-            "captureSessions": audio::active_sessions(true),
-            "renderSessions": audio::active_sessions(false),
-        }))
+        if update.muted == Some(true) {
+            self.output.mute();
+        }
+        let device_changed = update.output_device.is_some();
+        if let Some(device) = update.output_device {
+            self.output.set_device(device)?;
+        }
+        if let Some(tracks) = update.tracks {
+            self.tracks = tracks;
+            self.reconcile();
+        }
+        if update.muted == Some(false) {
+            self.output.unmute(self.should_render())?;
+        } else if device_changed {
+            self.output.verify_active_playout(self.should_render())?;
+        }
+        Ok(self.output.state())
     }
 
     async fn close(self) -> Reply {
         let mut output = self.output;
-        output.set_muted(true);
+        output.mute();
         timeout(Duration::from_secs(2), self.room.close())
             .await
             .map_err(|_| "leave-timeout")?
@@ -199,6 +230,14 @@ async fn handle(session: &mut Option<Session>, kind: &str, payload: Value) -> Re
             empty(&payload)?;
             Ok(json!({}))
         }
+        "list-outputs" => {
+            empty(&payload)?;
+            audio::list_outputs()
+        }
+        "update" => session
+            .as_mut()
+            .ok_or("not-joined")?
+            .update(decode(payload)?),
         "join" => {
             if session.is_some() {
                 return Err("already-joined");
@@ -225,15 +264,19 @@ async fn handle(session: &mut Option<Session>, kind: &str, payload: Value) -> Re
         }
         "output-mute" => {
             let request: Mute = decode(payload)?;
-            let output = &mut session.as_mut().ok_or("not-joined")?.output;
-            output.set_muted(request.muted);
-            Ok(output.state())
+            session.as_mut().ok_or("not-joined")?.update(Update {
+                muted: Some(request.muted),
+                tracks: None,
+                output_device: None,
+            })
         }
         "output-device" => {
             let request: Device = decode(payload)?;
-            let output = &mut session.as_mut().ok_or("not-joined")?.output;
-            output.set_device(request.output_device)?;
-            Ok(output.state())
+            session.as_mut().ok_or("not-joined")?.update(Update {
+                muted: None,
+                tracks: None,
+                output_device: Some(request.output_device),
+            })
         }
         _ => Err("unknown-command"),
     }
@@ -311,10 +354,17 @@ async fn run(epoch: &str, output: &mut impl Write) -> io::Result<()> {
                     else { handle(&mut session, &frame.kind, frame.payload).await };
                 let successful = result.is_ok();
                 let command = match frame.kind.as_str() {
-                    "join" | "leave" | "shutdown" | "subscriptions" | "output-mute" | "output-device" | "ping" => Some(frame.kind.as_str()),
+                    "join" | "leave" | "shutdown" | "subscriptions" | "output-mute" | "output-device" | "ping"
+                    | "list-outputs" | "update" => Some(frame.kind.as_str()),
                     _ => None,
                 };
                 let valid_request = frame.v == VERSION && frame.epoch == epoch && frame.id != 0;
+                let output_failed = result == Err(OUTPUT_NOT_RENDERING);
+                if output_failed {
+                    if let Some(joined) = &session {
+                        emit(output, epoch, 0, "device", joined.output.state())?;
+                    }
+                }
                 match result {
                     Ok(data) => emit(output, epoch, frame.id, "response", json!({ "command": command, "data": data }))?,
                     Err(code) => emit(output, epoch, frame.id, "error", json!({ "command": command, "code": code }))?,
@@ -330,7 +380,7 @@ async fn run(epoch: &str, output: &mut impl Write) -> io::Result<()> {
                             emit(output, epoch, 0, "media-ready", json!({ "captureInitialized": false }))?;
                             emit(output, epoch, 0, "device", joined.output.state())?;
                         }
-                        "output-mute" | "output-device" if valid_request => {
+                        "output-mute" | "output-device" | "update" if valid_request && !output_failed => {
                             emit(output, epoch, 0, "device", joined.output.state())?;
                         }
                         _ => {}
@@ -350,7 +400,13 @@ async fn run(epoch: &str, output: &mut impl Write) -> io::Result<()> {
                 }
             }
             _ = tick.tick(), if session.is_some() => {
-                if let Ok(stats) = session.as_ref().unwrap().stats().await {
+                let joined = session.as_mut().unwrap();
+                if let Err(code) = joined.output.verify_active_playout(joined.should_render()) {
+                    emit(output, epoch, 0, "device", joined.output.state())?;
+                    emit(output, epoch, 0, "fault", json!({ "code": code }))?;
+                    break;
+                }
+                if let Ok(stats) = joined.stats().await {
                     emit(output, epoch, 0, "stats", stats)?;
                 }
             }
@@ -391,5 +447,34 @@ async fn main() {
     }
     if run(epoch, &mut io::stdout().lock()).await.is_err() {
         eprintln!("voice: pipe-write-failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_distinguishes_default_output_from_an_omitted_output() {
+        assert_eq!(decode::<Update>(json!({})).unwrap().output_device, None);
+        assert_eq!(
+            decode::<Update>(json!({ "outputDevice": null }))
+                .unwrap()
+                .output_device,
+            Some(None)
+        );
+        assert_eq!(
+            decode::<Update>(json!({ "outputDevice": "endpoint", "muted": false }))
+                .unwrap()
+                .output_device,
+            Some(Some("endpoint".into()))
+        );
+        for invalid in [
+            json!({ "muted": null }),
+            json!({ "tracks": null }),
+            json!({ "token": "not an update field" }),
+        ] {
+            assert!(matches!(decode::<Update>(invalid), Err("bad-payload")));
+        }
     }
 }

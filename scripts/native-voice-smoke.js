@@ -14,6 +14,22 @@ const ports = { signal: 17980, tcp: 17981, udp: 17982 };
 const base = `http://127.0.0.1:${ports.signal}`;
 const url = base.replace('http:', 'ws:');
 
+function reserveLab(root) {
+  const lab = process.env.VRLAB_LAB
+    || path.resolve(root, '..', 'VoiceRoom', '.omc', 'research', 'voice-under-load', 'followup', 'lab');
+  const lock = path.join(lab, 'trial.lock');
+  const owner = JSON.stringify({ name: 'desktop-receive-smoke', pid: process.pid, nonce: randomUUID() });
+  try {
+    fs.writeFileSync(lock, owner, { flag: 'wx' });
+  } catch (error) {
+    if (error.code === 'EEXIST') throw new Error('Voice lab is in use (trial.lock).');
+    throw error;
+  }
+  return () => {
+    if (fs.readFileSync(lock, 'utf8') === owner) fs.unlinkSync(lock);
+  };
+}
+
 function jwt(room, identity, publish) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
@@ -44,14 +60,17 @@ async function main() {
   assert.equal(process.env.VOICE_ROOM_NATIVE_VOICE, '1');
   const root = path.resolve(__dirname, '..');
   const target = path.resolve(root, 'native', 'voice', process.env.CARGO_TARGET_DIR || 'target');
-  const publisher = path.join(target, 'x86_64-pc-windows-msvc', 'release', 'examples', 'smoke_sender.exe');
-  assert.ok(fs.existsSync(publisher), 'Build the smoke_sender Cargo example first.');
+  const examples = path.join(target, 'x86_64-pc-windows-msvc', 'release', 'examples');
+  const publisher = path.join(examples, 'smoke_sender.exe');
+  const observer = path.join(examples, 'capture_watch.exe');
+  assert.ok(fs.existsSync(publisher) && fs.existsSync(observer), 'Build the smoke_sender and capture_watch examples first.');
   const name = `vrlab-desk-${randomUUID()}`;
   let sender;
   let senderExit;
   let containerStarted = false;
   const interrupted = new AbortController();
   const interrupt = () => interrupted.abort(new Error('Smoke interrupted'));
+  const releaseLab = reserveLab(root);
   process.once('SIGINT', interrupt);
   process.once('SIGTERM', interrupt);
   try {
@@ -82,45 +101,52 @@ async function main() {
     ]);
     assert.ok(sid.startsWith('TR_'));
 
-    const session = await startNativeVoice();
-    let stats = null;
-    let transport = null;
-    let mediaReady = false;
-    session.on('event', ({ kind, payload }) => {
-      if (kind === 'stats') stats = payload;
-      if (kind === 'transport') transport = payload.state;
-      if (kind === 'media-ready') mediaReady = true;
-    });
-    const waitStats = (predicate, failure) => waitFor(() => {
-      interrupted.signal.throwIfAborted();
-      return stats && predicate(stats) && stats;
-    }, failure);
-    const device = await session.request('join', { url, token: jwt(name, 'listener#voice', false) });
-    assert.equal(device.captureEnabled, false);
-    assert.equal(device.captureInitialized, false);
-    await waitStats(() => true, 'No stats while in room.');
-    assert.equal(transport, 'connected');
-    assert.equal(mediaReady, true);
-    assert.equal(stats.jitterBufferEmittedCount, 0, 'Unexpected subscription');
-    assert.equal(stats.captureSessions, 0);
-
-    await session.request('subscriptions', { tracks: [sid] });
-    await waitStats((row) => row.jitterBufferEmittedCount > 0, 'No inbound audio while muted.');
-    assert.equal(stats.renderSessions, 0);
-    assert.equal(stats.captureSessions, 0);
-    await assert.rejects(session.request('output-device', { outputDevice: 'missing-device' }),
-      { code: 'device-unavailable' });
-    if (device.outputs.length) {
-      const selected = await session.request('output-device', { outputDevice: device.outputs[0].id });
-      assert.equal(selected.outputDevice, device.outputs[0].id);
-      assert.equal((await session.request('output-device', { outputDevice: null })).outputDevice, null);
+    const monitor = spawn(observer, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
+    const monitorExit = once(monitor, 'close');
+    const reports = [];
+    monitor.stdin.on('error', () => {});
+    createInterface({ input: monitor.stdout }).on('line', (line) => reports.push(line));
+    const readPeak = async (pid) => {
+      const start = reports.length;
+      const prefix = `peak ${pid} `;
+      monitor.stdin.write(`${pid}\n`);
+      const report = await waitFor(
+        () => reports.slice(start).find((line) => line.startsWith(prefix)),
+        'No WASAPI level from the observer.', 2000
+      );
+      const peak = Number(report.slice(prefix.length));
+      assert.ok(peak >= 0, 'Could not read the helper render session peak.');
+      return peak;
+    };
+    try {
+      await Promise.race([
+        waitFor(() => {
+          interrupted.signal.throwIfAborted();
+          return reports.some((line) => /^ready [1-9][0-9]*$/.test(line));
+        }, 'Capture observer did not arm.'),
+        monitorExit.then(() => { throw new Error('Capture observer exited before it armed.'); })
+      ]);
+      let pids;
+      try {
+        pids = await verifyReceive({ url, token: jwt(name, 'listener#voice.smoke', false), sid, interrupted, readPeak });
+      } finally {
+        const stopped = await stopNativeVoice();
+        assert.notEqual(stopped, false, 'The helper exit was not confirmed.');
+      }
+      // Let the observer consume callbacks already dispatched during teardown.
+      await delay(250);
+      monitor.stdin.end();
+      const deadline = setTimeout(() => monitor.kill(), 2000);
+      try { assert.deepEqual(await monitorExit, [0, null]); } finally { clearTimeout(deadline); }
+      assert.ok(!reports.includes('error'), 'Unable to attribute a capture session.');
+      for (const pid of pids) {
+        assert.ok(!reports.includes(`capture ${pid}`), 'The receive helper opened a capture session.');
+      }
+      console.log('Native voice smoke passed.');
+    } finally {
+      monitor.kill();
+      await monitorExit;
     }
-    await session.request('output-mute', { muted: false });
-    const playback = await waitStats((row) => row.renderSessions > 0, 'No active WASAPI render session.');
-    assert.equal(playback.captureSessions, 0);
-    console.log(JSON.stringify(playback));
-    await session.request('leave');
-    console.log('Native voice smoke passed.');
   } finally {
     process.removeListener('SIGINT', interrupt);
     process.removeListener('SIGTERM', interrupt);
@@ -134,10 +160,66 @@ async function main() {
           try { await senderExit; } finally { clearTimeout(deadline); }
         }
       } finally {
-        if (containerStarted) docker(['rm', '-f', name]);
+        try {
+          if (containerStarted) docker(['rm', '-f', name]);
+        } finally {
+          releaseLab();
+        }
       }
     }
   }
+}
+
+async function verifyReceive({ url, token, sid, interrupted, readPeak }) {
+  const session = await startNativeVoice();
+  const child = session.connection.child;
+  let stats = null;
+  let transport = null;
+  let mediaReady = false;
+  let probe = true;
+  const probeSamples = [];
+  session.on('event', ({ kind, payload }) => {
+    if (kind === 'stats') {
+      stats = payload;
+      if (probe) probeSamples.push(stats);
+    }
+    if (kind === 'transport') transport = payload.state;
+    if (kind === 'media-ready') mediaReady = true;
+  });
+  const waitStats = (predicate, failure) => waitFor(() => {
+    interrupted.signal.throwIfAborted();
+    return stats && predicate(stats) && stats;
+  }, failure);
+  const device = await session.request('join', { url, token, tracks: [sid], muted: true });
+  assert.equal(device.muted, true);
+  assert.equal(device.captureEnabled, false);
+  assert.equal(device.captureInitialized, false);
+  const first = await waitStats((row) => row.totalSamplesReceived > 0, 'No inbound audio while muted.');
+  assert.equal(transport, 'connected');
+  assert.equal(mediaReady, true);
+  await waitStats((row) => row.totalSamplesReceived > first.totalSamplesReceived, 'Muted receive counters stalled.');
+  await assert.rejects(session.request('output-device', { outputDevice: 'missing-device' }),
+    { code: 'device-unavailable' });
+  if (device.outputs.length) {
+    const selected = await session.request('output-device', { outputDevice: device.outputs[0].id });
+    assert.equal(selected.outputDevice, device.outputs[0].id);
+    assert.equal((await session.request('output-device', { outputDevice: null })).outputDevice, null);
+  }
+  assert.equal(await readPeak(child.pid), 0);
+  probe = false;
+  assert.equal((await session.request('update', { muted: false })).muted, false);
+  const playback = await waitStats((row) => row.renderSessions > 0, 'No active WASAPI render session.');
+  await waitFor(async () => await readPeak(child.pid) > 0.0001, 'No audio signal in the helper render session.');
+  assert.equal(playback.captureSessions, 0);
+  for (const sample of probeSamples) {
+    assert.equal(sample.renderSessions, 0);
+    assert.equal(sample.captureSessions, 0);
+  }
+  const terminal = once(session, 'terminal', { signal: AbortSignal.any([interrupted.signal, AbortSignal.timeout(1000)]) });
+  assert.equal(child.kill(), true);
+  assert.deepEqual(await terminal, ['helper-exited']);
+  assert.equal(session.connection, null);
+  return [child.pid];
 }
 
 main().catch((error) => {

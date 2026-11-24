@@ -2,14 +2,27 @@
 
 const version = /^\d+\.\d+\.\d+(?:[-+][\w.+-]+)?$/;
 const errors = {
-  join: ['bad-payload', 'already-joined', 'device-unavailable', 'device-switch-failed', 'join-timeout', 'join-failed'],
+  join: ['bad-payload', 'already-joined', 'device-unavailable', 'device-switch-failed', 'output-not-rendering', 'join-timeout', 'join-failed'],
   leave: ['bad-payload', 'leave-timeout', 'leave-failed'],
   shutdown: ['bad-payload', 'leave-timeout', 'leave-failed'],
   subscriptions: ['bad-payload', 'not-joined'],
-  'output-mute': ['bad-payload', 'not-joined'],
-  'output-device': ['bad-payload', 'not-joined', 'device-unavailable', 'device-switch-failed'],
+  'output-mute': ['bad-payload', 'not-joined', 'output-not-rendering'],
+  'output-device': ['bad-payload', 'not-joined', 'device-unavailable', 'device-switch-failed', 'output-not-rendering'],
+  'list-outputs': ['bad-payload', 'device-unavailable'],
+  update: ['bad-payload', 'not-joined', 'device-unavailable', 'device-switch-failed', 'output-not-rendering'],
   ping: ['bad-payload']
 };
+const publicCodes = new Set([
+  ...Object.values(errors).flat(),
+  'disabled-by-env', 'session-active', 'session-stopped', 'helper-unavailable', 'too-many-requests',
+  'handshake-timeout', 'bad-frame', 'bad-handshake', 'bad-event', 'bad-response', 'version-mismatch',
+  'helper-fault', 'helper-exited', 'heartbeat-lost', 'pipe-error', 'spawn-error', 'request-timeout',
+  'restart-failed', 'untrusted-frame'
+]);
+
+function publicCode(code) {
+  return publicCodes.has(code) ? code : 'helper-unavailable';
+}
 
 function exact(value, keys) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -17,7 +30,7 @@ function exact(value, keys) {
 }
 
 const nonnegative = (value) => Number.isFinite(value) && value >= 0;
-const count = (value) => Number.isInteger(value) && value >= 0;
+const count = (value) => Number.isSafeInteger(value) && value >= 0;
 const nullable = (value, valid) => value === null || valid(value);
 const text = (value) => typeof value === 'string';
 
@@ -43,10 +56,12 @@ function isDevice(payload) {
 
 function isStats(payload) {
   return exact(payload, ['jitterBufferDelay', 'jitterBufferEmittedCount', 'concealedSamples',
-    'concealmentEvents', 'packetsLost', 'rtt', 'captureSessions', 'renderSessions'])
+    'silentConcealedSamples', 'concealmentEvents', 'totalSamplesReceived', 'packetsLost', 'rtt',
+    'captureSessions', 'renderSessions'])
     && nonnegative(payload.jitterBufferDelay) && count(payload.jitterBufferEmittedCount)
-    && count(payload.concealedSamples) && count(payload.concealmentEvents)
-    && Number.isInteger(payload.packetsLost) && nullable(payload.rtt, nonnegative)
+    && count(payload.concealedSamples) && count(payload.silentConcealedSamples)
+    && count(payload.concealmentEvents) && count(payload.totalSamplesReceived)
+    && Number.isSafeInteger(payload.packetsLost) && nullable(payload.rtt, nonnegative)
     && nullable(payload.captureSessions, (value) => value === 0) && nullable(payload.renderSessions, count);
 }
 
@@ -62,12 +77,19 @@ function isEvent(kind, payload) {
 }
 
 function isReply(kind, payload) {
-  return exact(payload, ['command', 'data'])
-    && (['join', 'output-mute', 'output-device'].includes(kind) ? isDevice(payload.data) : exact(payload.data, []));
+  if (!exact(payload, ['command', 'data'])) return false;
+  if (['join', 'output-mute', 'output-device', 'update'].includes(kind)) return isDevice(payload.data);
+  if (kind === 'list-outputs') {
+    const { data } = payload;
+    return exact(data, ['outputs']) && Array.isArray(data.outputs)
+      && data.outputs.every((device) => exact(device, ['id', 'name', 'isDefault'])
+        && text(device.id) && text(device.name) && typeof device.isDefault === 'boolean');
+  }
+  return exact(payload.data, []);
 }
 
 function isError(kind, payload) {
   return exact(payload, ['command', 'code']) && errors[kind].includes(payload.code);
 }
 
-module.exports = { exact, isHello, isReady, isEvent, isReply, isError };
+module.exports = { exact, isHello, isReady, isEvent, isReply, isError, publicCode };

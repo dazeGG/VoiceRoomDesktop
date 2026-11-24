@@ -12,7 +12,9 @@ const { PassThrough } = require('node:stream');
 const path = require('node:path');
 const test = require('node:test');
 const { createDecoder, encode, MAX_FRAME, VERSION } = require('../electron/native/voice-frames');
-const { findVoiceHelper, startNativeVoice, createVoiceQuitHandler, VoiceSession } = require('../electron/native/voice');
+const { findVoiceHelper, startNativeVoice, VoiceSession } = require('../electron/native/voice');
+
+const { createVoiceQuitHandler } = require('../electron/native/voice-ipc');
 
 const helper = findVoiceHelper();
 const windowsOnly = { skip: !helper && 'Windows x64 native helper is not built', timeout: 12000 };
@@ -87,13 +89,14 @@ test('required Windows lifecycle suite fails when helper lookup misses', () => {
   assert.match(result.stderr, /Windows CI lifecycle step requires the built helper/);
 });
 
-test('native voice entry point is disabled by default', async () => {
+test('native voice entry point honors the local kill switch', async () => {
   const previous = process.env.VOICE_ROOM_NATIVE_VOICE;
-  delete process.env.VOICE_ROOM_NATIVE_VOICE;
+  process.env.VOICE_ROOM_NATIVE_VOICE = '0';
   try {
     await assert.rejects(startNativeVoice(), { code: 'disabled-by-env' });
   } finally {
-    if (previous !== undefined) process.env.VOICE_ROOM_NATIVE_VOICE = previous;
+    if (previous === undefined) delete process.env.VOICE_ROOM_NATIVE_VOICE;
+    else process.env.VOICE_ROOM_NATIVE_VOICE = previous;
   }
 });
 

@@ -5,8 +5,8 @@ const { spawn } = require('node:child_process');
 const { EventEmitter, once } = require('node:events');
 const path = require('node:path');
 const test = require('node:test');
-const { createNativeVoiceIpc } = require('../electron/native/voice-ipc');
-const { VoiceSession, createVoiceQuitHandler } = require('../electron/native/voice');
+const { createNativeVoiceIpc, createVoiceQuitHandler } = require('../electron/native/voice-ipc');
+const { VoiceSession } = require('../electron/native/voice');
 const { VERSION } = require('../electron/native/voice-frames');
 const { isTrustedFrame } = require('../electron/security/origin');
 
@@ -23,7 +23,7 @@ const admission = {
 };
 const outputs = [{ id: 'test-output', name: 'Test output', isDefault: true }];
 
-function setup(t, { mode = 'bridge' } = {}) {
+function setup(t, { mode = 'bridge', outputProbeIdleMs } = {}) {
   const handlers = new Map();
   const ipcMain = new EventEmitter();
   ipcMain.handle = (channel, handler) => handlers.set(channel, handler);
@@ -49,8 +49,8 @@ function setup(t, { mode = 'bridge' } = {}) {
   let active;
   const ipc = createNativeVoiceIpc({
     ipcMain, trustedOrigin: origin, isTrustedFrame: (candidate) => isTrustedFrame(candidate, origin),
-    mediaOrigins: 'wss://voice.example:8443',
-    findVoiceHelper: () => fixture,
+    mediaOrigins: 'wss://livekit.voiceroom.ru,wss://voice.example:8443',
+    outputProbeIdleMs,
     async startNativeVoice({ callScoped } = {}) {
       assert.equal(active, undefined, 'the old process must close first');
       const session = new VoiceSession(fixture, {
@@ -138,11 +138,45 @@ test('native voice is scoped to the trusted primary top-level frame and validate
   });
   await assert.rejects(app.invoke('stop', { callId: admission.callId, extra: true }), { message: 'bad-payload' });
   assert.equal(app.sessions.length, 0);
-  assert.deepEqual(await app.invoke('list-outputs'), outputs);
-  assert.equal(app.children[0].exitCode, 0);
+  assert.equal(app.children.length, 0);
   assert.deepEqual(await app.invoke('start', { ...admission, url: 'wss://voice.example:8443/rtc?region=eu' }), { ok: true });
   assert.deepEqual(await app.invoke('list-outputs'), outputs);
-  assert.equal(app.children.length, 2, 'the active helper handles endpoint enumeration');
+  assert.equal(app.children.length, 1, 'the active helper handles endpoint enumeration');
+});
+
+test('listing outputs lazily starts a helper in a no-join state and the call reuses it', { timeout: 5000 }, async (t) => {
+  const app = setup(t);
+  assert.deepEqual(app.invoke('get-capability'), { available: true, protocol: VERSION });
+  assert.equal(app.children.length, 0);
+  assert.throws(() => app.invokeFrom({ ...app.sender, senderFrame: null }, 'list-outputs'), { code: 'untrusted-frame' });
+  assert.deepEqual(await app.invoke('list-outputs'), outputs);
+  assert.equal(app.children.length, 1);
+  assert.equal(app.sessions[0].capabilities.capture, false);
+  await assert.rejects(app.sessions[0].request('output-mute', { muted: true }), { code: 'not-joined' });
+  assert.deepEqual(app.delivered, []);
+  assert.deepEqual(await app.invoke('start', { ...admission, outputDeviceId: outputs[0].id }), { ok: true });
+  assert.equal(app.children.length, 1);
+  assert.deepEqual(await app.invoke('list-outputs'), outputs);
+  await app.invoke('stop', { callId: admission.callId });
+  assert.equal(app.children[0].exitCode, 0);
+});
+
+test('an idle output probe exits and a later call starts a fresh helper', { timeout: 5000 }, async (t) => {
+  const app = setup(t, { outputProbeIdleMs: 25 });
+  assert.deepEqual(await app.invoke('list-outputs'), outputs);
+  assert.deepEqual(await once(app.children[0], 'close'), [0, null]);
+  assert.deepEqual(await app.invoke('start', admission), { ok: true });
+  assert.equal(app.children.length, 2);
+});
+
+test('navigation closes an output probe before the next document starts a call', { timeout: 5000 }, async (t) => {
+  const app = setup(t);
+  assert.deepEqual(await app.invoke('list-outputs'), outputs);
+  const closed = once(app.children[0], 'close');
+  app.webContents.emit('did-navigate');
+  assert.deepEqual(await app.invoke('start', admission), { ok: true });
+  assert.deepEqual(await closed, [0, null]);
+  assert.equal(app.children.length, 2);
 });
 
 test('native voice validates gain maps and forwards gains and fallback state', { timeout: 5000 }, async (t) => {

@@ -1,8 +1,13 @@
 # Windows native voice IPC v1.2
 
-The Windows x64 receive preview is enabled with `VOICE_ROOM_NATIVE_VOICE=1`.
-Electron main owns the supervisor and can start one helper for a call. The flag
-alone does not start a process. The helper is packaged under
+The receive bridge is available by default on Windows x64 in installed builds
+and local checkouts. Set `VOICE_ROOM_NATIVE_VOICE=0` to disable it locally.
+The server controls whether the beta is offered and admitted through
+`NATIVE_VOICE_STAGE`, the allowlist, user opt-in, and cohort selection.
+Electron loads the supervisor, looks up the executable, and starts the helper
+only when a trusted renderer sends a valid `listOutputs()` or `start` request.
+The packaged helper
+resides under
 `resources/app.asar.unpacked/native/bin/windows/VoiceRoomVoice.exe`. In
 development the equivalent location is under the checkout root. Building
 uses the exact Rust toolchain in `native/voice/rust-toolchain.toml` and MSVC
@@ -13,11 +18,16 @@ pinned LiveKit release. Cargo uses that extracted directory.
 ## Renderer bridge
 
 The sandboxed preload exposes `window.voiceRoomDesktopNativeVoice` in the
-primary window's top-level document on the configured VoiceRoom origin.
+primary window's top-level document on the origin of the app URL the shell loads.
 Electron verifies the window, frame and origin on every request. The bridge
-reports static capability, lists output endpoints, starts an admitted receive
-session by call ID, updates its tracks, output, mute and gains, stops it, and emits
-call-scoped media, transport, device, stats, fault and stopped events.
+reports platform and protocol capability without probing the executable,
+starts an admitted receive session by call ID, lists render endpoints,
+updates its tracks, output, mute and gains, stops it, and emits call-scoped
+media, transport, device, stats, fault and stopped events. Both `start` and
+`listOutputs()` report an unavailable helper. Before `start`, `listOutputs()`
+enumerates WASAPI render endpoints without joining a room or opening a capture
+device. The helper stays available for the next `start` for five seconds after
+enumeration. Navigation, renderer exit, window close and app quit also stop it.
 
 Both start and update accept `volumes?: Record<trackSid, number>` and
 `masterVolume?: number`. Gains are linear in [0, 2]. The volume map
@@ -34,12 +44,16 @@ explicit endpoint is missing and null otherwise. The effective ID is
 null when no output can be routed. A renderer can use native receive
 with these gain settings when `getCapability()` advertises 1.2.
 
-Admission URLs must use WSS. The trusted site origin and the deployment's
-known LiveKit and fallback origins are allowed. Set
-`VOICE_ROOM_NATIVE_VOICE_ORIGINS` to a comma-separated list of exact WSS
-origins for a custom or regional deployment. The gate's query credential is
-forwarded in the URL. Neither it nor the companion token appears in IPC
-errors or diagnostics.
+Admission URLs must use WSS. The WSS counterpart of the configured HTTPS
+app origin and the deployment's known LiveKit and fallback origins are allowed.
+In a local checkout or packaged development build,
+`VOICE_ROOM_NATIVE_VOICE_ORIGINS` can replace that media allowlist with a
+comma-separated list of exact WSS origins. Include the default entries you
+want to retain when adding a custom endpoint. An empty list or one without
+valid entries uses the defaults. The override leaves renderer trust tied to
+the app origin, and installed stable builds ignore it. The gate's query
+credential is forwarded in the URL. Neither it nor the companion token
+appears in IPC errors or diagnostics.
 
 A full top-level navigation (including reload), renderer exit, window close
 or app quit retires the session. A new start shuts down any previous helper
@@ -151,7 +165,6 @@ Desktop running:
 ```powershell
 node scripts/build-native-voice.js
 node scripts/build-native-voice.js --cargo build --release --locked --examples
-$env:VOICE_ROOM_NATIVE_VOICE = '1'
 npm run smoke:win-voice
 ```
 

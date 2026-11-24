@@ -5,6 +5,7 @@ const { exact, publicCode } = require('./voice-protocol');
 
 const CHANNEL = 'desktop-native-voice:';
 const MAX_COMMANDS = 16;
+const OUTPUT_PROBE_IDLE_MS = 5000;
 const START_REQUIRED = ['callId', 'url', 'token', 'tracks', 'outputDeviceId', 'muted'];
 const START_KEYS = new Set([...START_REQUIRED, 'volumes', 'masterVolume']);
 const TRACK_SID = /^TR_[a-zA-Z0-9_-]{1,125}$/;
@@ -19,18 +20,19 @@ function resolveVoiceOrigins(trustedOrigin, configured = '') {
     origins.add(`wss://livekit.${site}`);
     origins.add(`wss://livekit-fallback.${site}`);
   }
+  const override = new Set();
   for (const candidate of configured.split(',')) {
     const value = candidate.trim();
     try {
       const url = new URL(value);
       if (url.protocol === 'wss:' && (value === url.origin || value === `${url.origin}/`)) {
-        origins.add(url.origin);
+        override.add(url.origin);
       }
     } catch {
-      // Invalid entries leave the deployment allowlist unchanged.
+      // Ignore malformed override entries.
     }
   }
-  return origins;
+  return override.size ? override : origins;
 }
 
 const bounded = (value, max) =>
@@ -112,8 +114,26 @@ function rendererEvent({ kind, payload }) {
   }
 }
 
+function createVoiceQuitHandler(app, stop) {
+  let shutdown;
+  return (event) => {
+    if (!shutdown) {
+      const stopping = stop();
+      if (!stopping) return false;
+      shutdown = Promise.resolve(stopping).then((closed) => {
+        shutdown = null;
+        if (closed) app.quit();
+        else app.exit(0);
+      }, () => app.exit(0));
+    }
+    event.preventDefault();
+    return true;
+  };
+}
+
 function createNativeVoiceIpc({
-  ipcMain, isTrustedFrame, trustedOrigin, mediaOrigins, findVoiceHelper, startNativeVoice, stopNativeVoice
+  app, ipcMain, isTrustedFrame, trustedOrigin, mediaOrigins, startNativeVoice, stopNativeVoice,
+  outputProbeIdleMs = OUTPUT_PROBE_IDLE_MS
 }) {
   const origins = resolveVoiceOrigins(trustedOrigin, mediaOrigins);
   let primary = null;
@@ -122,6 +142,8 @@ function createNativeVoiceIpc({
   let quitting = false;
   let current = null;
   let using = null;
+  let outputProbe = null;
+  let outputProbeTimer;
   let draining;
   const retiring = new Map();
   let pending = 0;
@@ -159,6 +181,8 @@ function createNativeVoiceIpc({
   }
 
   function stopHelper() {
+    clearTimeout(outputProbeTimer);
+    outputProbe = null;
     if (draining) return draining;
     const stopped = stopNativeVoice();
     if (!stopped) {
@@ -238,9 +262,7 @@ function createNativeVoiceIpc({
     ipcMain.handle(`${CHANNEL}get-capability`, (event, ...args) => {
       scope(event);
       if (args.length) throw new Error('bad-payload');
-      let available = false;
-      try { available = Boolean(findVoiceHelper()); } catch {}
-      return { available, protocol: VERSION, ...(available ? {} : { reason: 'helper-unavailable' }) };
+      return { available: true, protocol: VERSION };
     });
     ipcMain.handle(`${CHANNEL}list-outputs`, (event, ...args) => {
       const owner = scope(event);
@@ -249,18 +271,27 @@ function createNativeVoiceIpc({
       return enqueue(async () => {
         if (await draining === false) throw new Error('stop-timeout');
         if (!stillCurrent(owner)) throw untrustedFrame();
-        const activeSession = current?.session;
-        if (!activeSession) using = owner;
+        const active = current?.session;
+        if (!active) clearTimeout(outputProbeTimer);
         try {
-          const session = activeSession || await startNativeVoice();
+          const session = active ?? outputProbe ?? await startNativeVoice({ callScoped: true });
           if (!stillCurrent(owner)) throw untrustedFrame();
+          if (!active && !outputProbe) {
+            outputProbe = session;
+            session.once('terminal', () => {
+              if (outputProbe === session) void stopHelper();
+            });
+          }
           const { outputs } = await session.request('list-outputs');
           if (!stillCurrent(owner)) throw untrustedFrame();
+          if (!active) {
+            outputProbeTimer = setTimeout(() => { void stopHelper(); }, outputProbeIdleMs);
+            outputProbeTimer.unref();
+          }
           return outputs;
         } catch (error) {
+          if (!active && outputProbe && stillCurrent(owner)) await stopHelper();
           throw new Error(publicCode(error?.code));
-        } finally {
-          if (!activeSession) await stopHelper();
         }
       });
     });
@@ -278,9 +309,12 @@ function createNativeVoiceIpc({
           return rejected('stop-timeout');
         }
         if (current !== owner || !stillCurrent(owner)) return rejected('session-stopped');
+        clearTimeout(outputProbeTimer);
+        const probe = outputProbe;
+        outputProbe = null;
         using = owner;
         try {
-          const session = await startNativeVoice({ callScoped: true });
+          const session = probe ?? await startNativeVoice({ callScoped: true });
           if (current !== owner || !stillCurrent(owner)) return rejected('session-stopped');
           owner.session = session;
           session.setRequestedMute(owner.muted);
@@ -341,7 +375,7 @@ function createNativeVoiceIpc({
     return invalidate();
   }
 
-  return { configure, attachWindow, stopForQuit };
+  return { configure, attachWindow, stopForQuit, handleQuit: createVoiceQuitHandler(app, stopForQuit) };
 }
 
-module.exports = { createNativeVoiceIpc };
+module.exports = { createNativeVoiceIpc, createVoiceQuitHandler };

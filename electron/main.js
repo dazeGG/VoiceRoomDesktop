@@ -14,7 +14,6 @@ const { createOverlayController } = require('./overlay');
 const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
 const { createDiagnosticsController } = require('./diagnostics');
 const { getNativeAudioCapabilities, getNativeAudioState } = require('./native/audio');
-const voiceSupervisor = process.env.VOICE_ROOM_NATIVE_VOICE === '1' ? require('./native/voice') : null;
 const { findNativeHotkeyHelper } = require('./native/hotkeys');
 const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
 const { createBackgroundThrottlingController } = require('./window/background-throttling');
@@ -147,14 +146,24 @@ const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = getOriginFromUrl(APP_URL);
 setTrustedOrigin(TRUSTED_ORIGIN);
-const nativeVoice = voiceSupervisor && require('./native/voice-ipc').createNativeVoiceIpc({
+const buildProfile = readBuildProfile(app.getAppPath());
+const enableNativeVoice = process.platform === 'win32' && process.arch === 'x64'
+  && process.env.VOICE_ROOM_NATIVE_VOICE !== '0' && TRUSTED_ORIGIN && TRUSTED_ORIGIN !== 'null';
+let voiceSupervisor;
+const nativeVoice = enableNativeVoice ? require('./native/voice-ipc').createNativeVoiceIpc({
+  app,
   ipcMain,
   isTrustedFrame,
   trustedOrigin: TRUSTED_ORIGIN,
-  mediaOrigins: process.env.VOICE_ROOM_NATIVE_VOICE_ORIGINS,
-  ...voiceSupervisor
-});
-const handleVoiceQuit = nativeVoice && voiceSupervisor.createVoiceQuitHandler(app, nativeVoice.stopForQuit);
+  mediaOrigins: !app.isPackaged || buildProfile?.channel === 'dev'
+    ? process.env.VOICE_ROOM_NATIVE_VOICE_ORIGINS
+    : undefined,
+  startNativeVoice(options) {
+    voiceSupervisor ??= require('./native/voice');
+    return voiceSupervisor.startNativeVoice(options);
+  },
+  stopNativeVoice: () => voiceSupervisor?.stopNativeVoice()
+}) : null;
 if (process.platform === 'win32') {
   app.setAppUserModelId('ru.dazinho.voiceroom');
 }
@@ -349,7 +358,7 @@ const deepLinks = createDeepLinkController({
     });
   },
   restoreMainWindow: () => windowLifecycle.restoreMainWindow(),
-  scheme: resolveProtocolScheme({ isPackaged: app.isPackaged, buildProfile: readBuildProfile(app.getAppPath()) })
+  scheme: resolveProtocolScheme({ isPackaged: app.isPackaged, buildProfile })
 });
 
 function configureWindowIpc() {
@@ -469,9 +478,9 @@ if (!gotLock) {
   });
 
   const requestWindowQuit = () => windowLifecycle.requestQuit();
-  app.on('before-quit', handleVoiceQuit
-    ? (event) => { if (!handleVoiceQuit(event)) requestWindowQuit(); }
-    : requestWindowQuit);
+  app.on('before-quit', (event) => {
+    if (!nativeVoice?.handleQuit(event)) requestWindowQuit();
+  });
 
   // A GPU process crash (often a driver reset mid-game) freezes streams and can
   // drop the overlay's z-order. Chromium restarts the process; log it and put the

@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const Module = require('node:module');
 const path = require('node:path');
 const test = require('node:test');
@@ -20,6 +21,7 @@ function createElectronMock() {
     quit() {},
     requestSingleInstanceLock: () => true,
     setAppUserModelId() {},
+    setAsDefaultProtocolClient: () => true,
     whenReady: () => new Promise(() => {})
   };
 
@@ -73,35 +75,146 @@ test('main process module load tolerates an invalid startup app URL', () => {
   }
 });
 
-test('main process loads native voice only when enabled', () => {
-  const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
-  const previous = process.env.VOICE_ROOM_NATIVE_VOICE;
-  const originalLoad = Module._load;
-  const electronMock = createElectronMock();
-  let loads = 0;
-  Module._load = function loadWithElectronMock(request, parent, isMain) {
-    if (request === 'electron') return electronMock;
-    if (request === './native/voice' && parent.filename === mainPath) loads += 1;
-    return originalLoad.call(this, request, parent, isMain);
-  };
+const voiceStartupCases = [
+  { name: 'packaged release', isPackaged: true, channel: 'release', platform: 'win32', arch: 'x64', enabled: true },
+  { name: 'packaged release ignores overrides', isPackaged: true, channel: 'release', platform: 'win32', arch: 'x64', enabled: true, ignoreOverride: true },
+  { name: 'packaged development', isPackaged: true, channel: 'dev', platform: 'win32', arch: 'x64', enabled: true, override: true },
+  { name: 'checkout', platform: 'win32', arch: 'x64', enabled: true },
+  { name: 'checkout with overrides', platform: 'win32', arch: 'x64', enabled: true, override: true },
+  { name: 'local kill switch', platform: 'win32', arch: 'x64', flag: '0' },
+  { name: 'Linux with legacy opt-in', platform: 'linux', arch: 'x64', flag: '1' },
+  { name: 'Windows ARM64', platform: 'win32', arch: 'arm64' }
+];
 
-  try {
-    delete process.env.VOICE_ROOM_NATIVE_VOICE;
-    delete require.cache[mainPath];
-    require(mainPath);
-    assert.equal(loads, 0);
+for (const { name, isPackaged = false, channel, platform, arch, enabled, override, ignoreOverride, flag } of voiceStartupCases) {
+  test(`main process native voice startup policy for ${name}`, async (t) => {
+    const mainPath = require.resolve('../electron/main');
+    const originalLoad = Module._load;
+    const electronMock = createElectronMock();
+    electronMock.app.isPackaged = isPackaged;
+    const handlers = new Map();
+    electronMock.ipcMain = new EventEmitter();
+    electronMock.ipcMain.handle = (key, handler) => handlers.set(key, handler);
+    const origin = channel === 'release' ? 'https://app.voiceroom.ru' : 'https://app.dev.voiceroom.ru';
+    const appUrl = `${origin}/room?desktop=1`;
+    const extraOrigin = 'wss://media.test:8443';
+    const env = {
+      VOICE_ROOM_URL: isPackaged ? undefined : appUrl,
+      VOICE_ROOM_NATIVE_VOICE: flag,
+      VOICE_ROOM_NATIVE_VOICE_ORIGINS: override || ignoreOverride ? extraOrigin : undefined
+    };
+    for (const [key, value] of Object.entries(env)) {
+      const previous = process.env[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+      t.after(() => {
+        if (previous === undefined) delete process.env[key];
+        else process.env[key] = previous;
+      });
+    }
+    for (const [key, value] of Object.entries({ platform, arch })) {
+      const descriptor = Object.getOwnPropertyDescriptor(process, key);
+      Object.defineProperty(process, key, { ...descriptor, value });
+      t.after(() => Object.defineProperty(process, key, descriptor));
+    }
+    const readFileSync = fs.readFileSync;
+    const statSync = fs.statSync;
+    let helperLookups = 0;
+    t.mock.method(fs, 'readFileSync', (file, ...args) => {
+      if (typeof file === 'string' && file.endsWith('runtime-config.json')) {
+        return JSON.stringify({ voiceRoomUrl: isPackaged ? appUrl : 'https://runtime-config.test' });
+      }
+      if (typeof file === 'string' && file.endsWith('build-profile.json')) {
+        return JSON.stringify({ channel });
+      }
+      return readFileSync(file, ...args);
+    });
+    t.mock.method(fs, 'statSync', (file, ...args) => {
+      if (typeof file === 'string' && file.endsWith('VoiceRoomVoice.exe')) {
+        helperLookups += 1;
+        return undefined;
+      }
+      return statSync(file, ...args);
+    });
+    let supervisorLoads = 0;
+    let bridge;
+    let bootstrap;
+    Module._load = function loadWithElectronMock(request, parent, isMain) {
+      if (request === 'electron') return electronMock;
+      const result = originalLoad.call(this, request, parent, isMain);
+      if (parent?.filename !== mainPath) return result;
+      if (request === './native/voice') supervisorLoads += 1;
+      if (request === './native/voice-ipc') return {
+        createNativeVoiceIpc(options) {
+          bridge = result.createNativeVoiceIpc(options);
+          return bridge;
+        }
+      };
+      if (request === './app/bootstrap') return {
+        createAppBootstrap(options) {
+          bootstrap = options;
+          return { launchApplication: () => Promise.resolve() };
+        }
+      };
+      return result;
+    };
+    t.after(() => {
+      delete require.cache[mainPath];
+      Module._load = originalLoad;
+    });
 
-    process.env.VOICE_ROOM_NATIVE_VOICE = '1';
-    delete require.cache[mainPath];
     require(mainPath);
-    assert.equal(loads, 1);
-  } finally {
-    if (previous === undefined) delete process.env.VOICE_ROOM_NATIVE_VOICE;
-    else process.env.VOICE_ROOM_NATIVE_VOICE = previous;
-    delete require.cache[mainPath];
-    Module._load = originalLoad;
-  }
-});
+    assert.equal(bootstrap.appUrl, appUrl);
+    assert.deepEqual(bootstrap.mainWindowArguments, enabled ? [`--voice-room-native-voice-origin=${origin}`] : []);
+    assert.equal(Boolean(bridge), Boolean(enabled));
+    assert.equal(supervisorLoads, 0);
+    assert.equal(helperLookups, 0);
+    if (!enabled) return;
+
+    const window = new EventEmitter();
+    const webContents = new EventEmitter();
+    const frame = { origin, url: appUrl, send() {} };
+    webContents.mainFrame = frame;
+    webContents.isDestroyed = () => false;
+    window.webContents = webContents;
+    bridge.configure();
+    bridge.attachWindow(window);
+    webContents.emit('did-navigate');
+
+    const ipcEvent = { sender: webContents, senderFrame: frame };
+    const invoke = (name, ...args) => handlers.get(`desktop-native-voice:${name}`)(ipcEvent, ...args);
+    electronMock.ipcMain.emit('desktop-native-voice:expose', ipcEvent);
+    assert.equal(ipcEvent.returnValue, true);
+    assert.equal(invoke('get-capability').available, true);
+    assert.equal(supervisorLoads, 0);
+    assert.equal(helperLookups, 0);
+
+    frame.origin = 'https://foreign.test';
+    frame.url = frame.origin + '/room';
+    electronMock.ipcMain.emit('desktop-native-voice:expose', ipcEvent);
+    assert.equal(ipcEvent.returnValue, false);
+    assert.throws(() => invoke('get-capability'), { code: 'untrusted-frame' });
+    assert.throws(() => invoke('list-outputs'), { code: 'untrusted-frame' });
+    frame.origin = origin;
+    frame.url = appUrl;
+
+    const admission = { callId: 'call', tracks: [], token: 'test.jwt.signature', outputDeviceId: null, muted: true };
+    const defaultMediaOrigin = origin.replace('https:', 'wss:');
+    const denied = override ? defaultMediaOrigin : extraOrigin;
+    assert.deepEqual(invoke('start', { ...admission, url: denied }), { ok: false, code: 'bad-payload' });
+    assert.equal(supervisorLoads, 0);
+    assert.equal(helperLookups, 0);
+
+    await assert.rejects(invoke('list-outputs'), { message: 'helper-unavailable' });
+    assert.equal(supervisorLoads, 1);
+    assert.ok(helperLookups > 0);
+
+    const allowed = override ? extraOrigin : defaultMediaOrigin;
+    assert.deepEqual(await invoke('start', { ...admission, url: allowed }), { ok: false, code: 'helper-unavailable' });
+    assert.equal(supervisorLoads, 1);
+    assert.ok(helperLookups > 0);
+  });
+}
 
 test('main process disables intensive wake-up throttling in its single disable-features switch', () => {
   const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
@@ -167,7 +280,10 @@ test('main process wires window bootstrap installers into app bootstrap', () => 
   }
 });
 
-test('main process installs IPC services once when macOS recreates its window', async () => {
+test('main process installs IPC services once when macOS recreates its window', async (t) => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+  t.after(() => Object.defineProperty(process, 'platform', platform));
   const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
   const originalLoad = Module._load;
   const electronMock = createElectronMock();

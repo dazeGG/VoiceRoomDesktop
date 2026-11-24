@@ -73,6 +73,36 @@ test('main process module load tolerates an invalid startup app URL', () => {
   }
 });
 
+test('main process loads native voice only when enabled', () => {
+  const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
+  const previous = process.env.VOICE_ROOM_NATIVE_VOICE;
+  const originalLoad = Module._load;
+  const electronMock = createElectronMock();
+  let loads = 0;
+  Module._load = function loadWithElectronMock(request, parent, isMain) {
+    if (request === 'electron') return electronMock;
+    if (request === './native/voice' && parent.filename === mainPath) loads += 1;
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    delete process.env.VOICE_ROOM_NATIVE_VOICE;
+    delete require.cache[mainPath];
+    require(mainPath);
+    assert.equal(loads, 0);
+
+    process.env.VOICE_ROOM_NATIVE_VOICE = '1';
+    delete require.cache[mainPath];
+    require(mainPath);
+    assert.equal(loads, 1);
+  } finally {
+    if (previous === undefined) delete process.env.VOICE_ROOM_NATIVE_VOICE;
+    else process.env.VOICE_ROOM_NATIVE_VOICE = previous;
+    delete require.cache[mainPath];
+    Module._load = originalLoad;
+  }
+});
+
 test('main process disables intensive wake-up throttling in its single disable-features switch', () => {
   const mainPath = path.join(__dirname, '..', 'electron', 'main.js');
   const originalLoad = Module._load;

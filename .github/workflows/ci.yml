@@ -115,6 +115,17 @@ jobs:
         with:
           arch: x64
 
+      - name: Setup pinned Rust
+        working-directory: native/voice
+        run: rustup show
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/voice
+          cache-targets: false
+          key: x86_64-pc-windows-msvc-webrtc-a545de4-${{ hashFiles('native/voice/Cargo.lock') }}
+
       - name: Install dependencies
         run: npm ci
 
@@ -125,6 +136,23 @@ jobs:
 
       - name: Run production Electron capture bridge smoke
         run: node --test test/electron-message-port.test.js
+
+      - name: Build native voice from a clean WebRTC download
+        run: node scripts/build-native-voice.js
+
+      - name: Check native voice formatting
+        run: node scripts/build-native-voice.js --cargo fmt --check
+
+      - name: Lint native voice
+        run: node scripts/build-native-voice.js --cargo clippy --release --locked --all-targets -- -D warnings
+
+      - name: Test native voice framing
+        run: node scripts/build-native-voice.js --cargo test --release --locked
+
+      - name: Test native voice process lifecycle
+        env:
+          VOICE_ROOM_REQUIRE_NATIVE_VOICE: '1'
+        run: node --test test/native-voice.test.js
 
       - name: Build Windows app
         run: npm run build:win

@@ -14,6 +14,9 @@ const { createOverlayController } = require('./overlay');
 const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
 const { createDiagnosticsController } = require('./diagnostics');
 const { getNativeAudioCapabilities, getNativeAudioState } = require('./native/audio');
+const handleVoiceQuit = process.env.VOICE_ROOM_NATIVE_VOICE === '1'
+  ? require('./native/voice').createVoiceQuitHandler(app)
+  : null;
 const { findNativeHotkeyHelper } = require('./native/hotkeys');
 const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
 const { createBackgroundThrottlingController } = require('./window/background-throttling');
@@ -457,9 +460,10 @@ if (!gotLock) {
     deepLinks.handleArgv(argv);
   });
 
-  app.on('before-quit', () => {
-    windowLifecycle.requestQuit();
-  });
+  const requestWindowQuit = () => windowLifecycle.requestQuit();
+  app.on('before-quit', handleVoiceQuit
+    ? (event) => { if (!handleVoiceQuit(event)) requestWindowQuit(); }
+    : requestWindowQuit);
 
   // A GPU process crash (often a driver reset mid-game) freezes streams and can
   // drop the overlay's z-order. Chromium restarts the process; log it and put the

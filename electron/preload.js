@@ -88,7 +88,8 @@ const desktopRuntime = {
   isDesktop: true,
   isElectron: true,
   platform: process.platform,
-  version: getDesktopVersion()
+  version: getDesktopVersion(),
+  buildHash: process.argv.find((value) => value.startsWith('--voice-room-build-hash='))?.slice('--voice-room-build-hash='.length) || null
 };
 
 markDesktopDocument();

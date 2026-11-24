@@ -69,40 +69,6 @@ function installNativeCaptureBridge(webContents, { log } = {}) {
   webContents.on('did-navigate-in-page', inject);
 }
 
-function installBuildLabel(webContents, { app, readBuildProfile, log } = {}) {
-  const profile = readBuildProfile(app.getAppPath());
-  const hash = profile?.buildHash || '';
-  const text = hash ? `build: ${app.getVersion()} · ${hash}` : `build: ${app.getVersion()}`;
-  const label = JSON.stringify(text);
-  const script = `(function(){
-    var id='voice-room-build-label';
-    var existing=document.getElementById(id);
-    if(existing){
-      existing.textContent=${label};
-      existing.style.left='auto';
-      existing.style.right='8px';
-      return;
-    }
-    var el=document.createElement('div');
-    el.id=id;
-    el.textContent=${label};
-    el.style.cssText='position:fixed;right:8px;bottom:6px;z-index:2147483647;'+
-      'font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;'+
-      'color:currentColor;opacity:0.35;pointer-events:none;user-select:none;white-space:nowrap;';
-    (document.body||document.documentElement).appendChild(el);
-  })();`;
-
-  const inject = () => {
-    if (webContents.isDestroyed()) return;
-    webContents.executeJavaScript(script, true).catch((error) => {
-      log?.warn?.('Failed to inject build label:', error);
-    });
-  };
-
-  webContents.on('dom-ready', inject);
-  webContents.on('did-navigate-in-page', inject);
-}
-
 function createPickerPreviewWindow({ browserWindow = BrowserWindow, dialog: dialogModule = dialog } = {}) {
   const previewWindow = new browserWindow({
     backgroundColor: WINDOW_BACKGROUND,
@@ -131,7 +97,6 @@ function createPickerPreviewWindow({ browserWindow = BrowserWindow, dialog: dial
 
 module.exports = {
   createPickerPreviewWindow,
-  installBuildLabel,
   installMediaDeviceFilter,
   installNativeCaptureBridge,
   loadMainApplication,

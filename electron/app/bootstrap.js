@@ -37,7 +37,6 @@ function createAppBootstrap({
   showConnectionLost,
   installMediaDeviceFilter,
   installNativeCaptureBridge,
-  installBuildLabel,
   showRendererRecovery,
   windowLifecycle,
   windowState,
@@ -171,7 +170,7 @@ function createAppBootstrap({
       title: 'VoiceRoom',
       ...getMainWindowChromeOptions(process.platform),
       webPreferences: {
-        additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`, ...mainWindowArguments],
+        additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`, `--voice-room-build-hash=${readBuildProfile(app.getAppPath())?.buildHash || ''}`, ...mainWindowArguments],
         backgroundThrottling: false,
         contextIsolation: true,
         nodeIntegration: false,
@@ -194,7 +193,6 @@ function createAppBootstrap({
 
     installMediaDeviceFilter(mainWindow.webContents, { log });
     installNativeCaptureBridge(mainWindow.webContents, { log });
-    installBuildLabel(mainWindow.webContents, { app, log, readBuildProfile });
     devDiagnostics.installDevDiagnosticsShortcut(mainWindow);
     windowLifecycle.attachMainWindow(mainWindow);
     windowLifecycle.installTray();

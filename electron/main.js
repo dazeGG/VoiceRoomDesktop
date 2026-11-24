@@ -26,7 +26,6 @@ const { createBackgroundUpdateController } = require('./policies/update-backgrou
 const { runUpdateGate } = require('./policies/update-gate');
 const { readBuildProfile, shouldRunUpdateGateState } = require('./policies/update-gate-policy');
 const {
-  installBuildLabel,
   installMediaDeviceFilter,
   installNativeCaptureBridge,
   loadMainApplication,
@@ -426,7 +425,6 @@ const appBootstrap = createAppBootstrap({
   isPermissionContextTrusted,
   isTrustedDisplayMediaRequest,
   isTrustedUrl,
-  installBuildLabel,
   installMediaDeviceFilter,
   installNativeCaptureBridge,
   log,

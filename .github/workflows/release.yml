@@ -138,6 +138,23 @@ jobs:
         with:
           arch: x64
 
+      - name: Setup pinned Rust
+        working-directory: native/voice
+        run: rustup show
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/voice
+          cache-targets: false
+          key: x86_64-pc-windows-msvc-webrtc-a545de4-${{ hashFiles('native/voice/Cargo.lock') }}
+
+      - name: Cache WebRTC archive
+        uses: actions/cache@v4
+        with:
+          path: native/voice/.webrtc/webrtc-a545de4/webrtc-win-x64-release.zip
+          key: windows-x86_64-pc-windows-msvc-webrtc-a545de4-${{ hashFiles('native/voice/Cargo.lock', 'scripts/native-voice-prebuilt.js') }}
+
       - name: Install dependencies
         run: npm ci
 

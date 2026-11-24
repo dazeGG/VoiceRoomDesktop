@@ -77,6 +77,7 @@ if (
 ) hotkeyTargets.push('--require-universal');
 run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-hotkeys.js'), ...hotkeyTargets], { env: nativeEnv });
 run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-overlay.js'), ...targets], { env: nativeEnv });
+run(process.execPath, [path.join(rootDir, 'scripts', 'build-native-voice.js'), ...targets], { env: nativeEnv });
 
 const env = {
   ...process.env,

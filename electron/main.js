@@ -146,6 +146,24 @@ const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = getOriginFromUrl(APP_URL);
 setTrustedOrigin(TRUSTED_ORIGIN);
+const buildProfile = readBuildProfile(app.getAppPath());
+const enableNativeVoice = process.platform === 'win32' && process.arch === 'x64'
+  && process.env.VOICE_ROOM_NATIVE_VOICE !== '0' && TRUSTED_ORIGIN && TRUSTED_ORIGIN !== 'null';
+let voiceSupervisor;
+const nativeVoice = enableNativeVoice ? require('./native/voice-ipc').createNativeVoiceIpc({
+  app,
+  ipcMain,
+  isTrustedFrame,
+  trustedOrigin: TRUSTED_ORIGIN,
+  mediaOrigins: !app.isPackaged || buildProfile?.channel === 'dev'
+    ? process.env.VOICE_ROOM_NATIVE_VOICE_ORIGINS
+    : undefined,
+  startNativeVoice(options) {
+    voiceSupervisor ??= require('./native/voice');
+    return voiceSupervisor.startNativeVoice(options);
+  },
+  stopNativeVoice: () => voiceSupervisor?.stopNativeVoice()
+}) : null;
 if (process.platform === 'win32') {
   app.setAppUserModelId('ru.dazinho.voiceroom');
 }
@@ -340,7 +358,7 @@ const deepLinks = createDeepLinkController({
     });
   },
   restoreMainWindow: () => windowLifecycle.restoreMainWindow(),
-  scheme: resolveProtocolScheme({ isPackaged: app.isPackaged, buildProfile: readBuildProfile(app.getAppPath()) })
+  scheme: resolveProtocolScheme({ isPackaged: app.isPackaged, buildProfile })
 });
 
 function configureWindowIpc() {
@@ -426,7 +444,9 @@ const appBootstrap = createAppBootstrap({
   allowedSessionPermissions: ALLOWED_SESSION_PERMISSIONS,
   desktopLayoutCss: DESKTOP_LAYOUT_CSS,
   previewEnabled: PICKER_PREVIEW_ENABLED,
+  mainWindowArguments: nativeVoice ? [`--voice-room-native-voice-origin=${TRUSTED_ORIGIN}`] : [],
   onMainWindowCreated: (window) => {
+    nativeVoice?.attachWindow(window);
     appIcon.attachWindow(window);
     backgroundThrottling.attachWindow(window);
     systemEvents.attachWindow(window);
@@ -457,8 +477,9 @@ if (!gotLock) {
     deepLinks.handleArgv(argv);
   });
 
-  app.on('before-quit', () => {
-    windowLifecycle.requestQuit();
+  const requestWindowQuit = () => windowLifecycle.requestQuit();
+  app.on('before-quit', (event) => {
+    if (!nativeVoice?.handleQuit(event)) requestWindowQuit();
   });
 
   // A GPU process crash (often a driver reset mid-game) freezes streams and can
@@ -574,6 +595,7 @@ if (!gotLock) {
     }
     try {
       configureWindowIpc();
+      nativeVoice?.configure();
       configureDesktopIdleIpc({
         ipcMain,
         powerMonitor,

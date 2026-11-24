@@ -42,6 +42,7 @@ function createAppBootstrap({
   windowLifecycle,
   windowState,
   onMainWindowCreated = () => {},
+  mainWindowArguments = [],
   resolveLaunchUrl = () => appUrl,
   devDiagnostics,
   previewEnabled,
@@ -170,7 +171,7 @@ function createAppBootstrap({
       title: 'VoiceRoom',
       ...getMainWindowChromeOptions(process.platform),
       webPreferences: {
-        additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`],
+        additionalArguments: [`--voice-room-desktop-version=${app.getVersion()}`, ...mainWindowArguments],
         backgroundThrottling: false,
         contextIsolation: true,
         nodeIntegration: false,

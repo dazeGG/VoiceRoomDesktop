@@ -97,6 +97,30 @@ contextBridge.exposeInMainWorld('voiceRoomRuntime', desktopRuntime);
 
 contextBridge.exposeInMainWorld('voiceRoomDesktop', desktopRuntime);
 
+const nativeVoiceOriginArg = '--voice-room-native-voice-origin=';
+const nativeVoiceOrigin = process.argv.find((arg) => arg.startsWith(nativeVoiceOriginArg))
+  ?.slice(nativeVoiceOriginArg.length);
+function canExposeNativeVoice() {
+  if (!nativeVoiceOrigin || !process.isMainFrame || window.location.origin !== nativeVoiceOrigin) return false;
+  try { return ipcRenderer.sendSync('desktop-native-voice:expose') === true; } catch { return false; }
+}
+
+if (canExposeNativeVoice()) {
+  contextBridge.exposeInMainWorld('voiceRoomDesktopNativeVoice', {
+    getCapability: () => ipcRenderer.invoke('desktop-native-voice:get-capability'),
+    listOutputs: () => ipcRenderer.invoke('desktop-native-voice:list-outputs'),
+    start: (input) => ipcRenderer.invoke('desktop-native-voice:start', input),
+    update: (input) => ipcRenderer.invoke('desktop-native-voice:update', input),
+    stop: (input) => ipcRenderer.invoke('desktop-native-voice:stop', input),
+    onEvent: (handler) => {
+      if (typeof handler !== 'function') return () => {};
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on('desktop-native-voice:event', listener);
+      return () => ipcRenderer.removeListener('desktop-native-voice:event', listener);
+    }
+  });
+}
+
 contextBridge.exposeInMainWorld('voiceRoomDesktopCapture', {
   applyProfile: (options) => ipcRenderer.invoke('desktop-capture:apply-profile', options),
   getSources: () => ipcRenderer.invoke('desktop-capture:get-sources'),

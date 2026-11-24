@@ -3,13 +3,13 @@ mod parent;
 mod protocol;
 mod stats;
 
-use audio::{Output, OUTPUT_NOT_RENDERING};
+use audio::Output;
 use livekit::prelude::*;
 use protocol::{Frame, VERSION};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{self, Write},
     time::Duration,
 };
@@ -31,6 +31,14 @@ struct Join {
     output_device: Option<String>,
     #[serde(default = "initial_mute")]
     muted: bool,
+    #[serde(default)]
+    volumes: HashMap<String, f64>,
+    #[serde(default = "unity")]
+    master_volume: f64,
+}
+
+fn unity() -> f64 {
+    1.0
 }
 
 fn initial_mute() -> bool {
@@ -55,7 +63,7 @@ struct Device {
     output_device: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Update {
     #[serde(default, deserialize_with = "updated")]
@@ -64,6 +72,10 @@ struct Update {
     muted: Option<bool>,
     #[serde(default, deserialize_with = "updated")]
     output_device: Option<Option<String>>,
+    #[serde(default, deserialize_with = "updated")]
+    volumes: Option<HashMap<String, f64>>,
+    #[serde(default, deserialize_with = "updated")]
+    master_volume: Option<f64>,
 }
 
 fn updated<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -80,11 +92,14 @@ struct Session {
     output: Output,
     tracks: HashSet<String>,
     stats: stats::ReceiverStats,
+    volumes: HashMap<String, f64>,
+    master_volume: f64,
 }
 
 impl Session {
     async fn connect(join: Join) -> Result<Self, &'static str> {
         validate_tracks(&join.tracks)?;
+        validate_volumes(Some(&join.volumes), Some(join.master_volume))?;
         if join.token.is_empty()
             || join.token.len() > 16384
             || join.url.len() > 4096
@@ -108,10 +123,12 @@ impl Session {
             output,
             tracks: join.tracks,
             stats: stats::ReceiverStats::default(),
+            volumes: join.volumes,
+            master_volume: join.master_volume,
         };
         session.reconcile();
         if !join.muted {
-            session.output.unmute(session.should_render())?;
+            session.output.unmute(session.should_render());
         }
         Ok(session)
     }
@@ -122,27 +139,36 @@ impl Session {
             .as_str()
             .split_once("#voice.")
             .map(|(peer, _)| peer);
+        let mut subscriptions = Vec::new();
         for participant in self.room.remote_participants().into_values() {
             let is_self = canonical == Some(participant.identity().as_str());
             for publication in participant.track_publications().into_values() {
+                let sid = publication.sid();
                 let desired = !is_self
                     && publication.kind() == TrackKind::Audio
                     && publication.source() == TrackSource::Microphone
-                    && self.tracks.contains(publication.sid().as_str());
+                    && self.tracks.contains(sid.as_str());
+                if let Some(RemoteTrack::Audio(track)) = publication.track() {
+                    let gain = if desired {
+                        self.volumes
+                            .get(sid.as_str())
+                            .copied()
+                            .unwrap_or_else(unity)
+                            * self.master_volume
+                    } else {
+                        // Unsubscribe is asynchronous. Silence any old track immediately.
+                        0.0
+                    };
+                    track.rtc_track().set_remote_volume(gain);
+                }
                 if desired != publication.is_desired() {
-                    publication.set_subscribed(desired);
+                    subscriptions.push((publication, desired));
                 }
             }
         }
-    }
-
-    fn transport(&self) -> Value {
-        let state = match self.room.connection_state() {
-            ConnectionState::Connected => "connected",
-            ConnectionState::Reconnecting => "reconnecting",
-            ConnectionState::Disconnected => "disconnected",
-        };
-        json!({ "state": state })
+        for (publication, desired) in subscriptions {
+            publication.set_subscribed(desired);
+        }
     }
 
     fn should_render(&self) -> bool {
@@ -155,6 +181,15 @@ impl Session {
                         && self.tracks.contains(publication.sid().as_str())
                 })
             })
+    }
+
+    fn transport(&self) -> Value {
+        let state = match self.room.connection_state() {
+            ConnectionState::Connected => "connected",
+            ConnectionState::Reconnecting => "reconnecting",
+            ConnectionState::Disconnected => "disconnected",
+        };
+        json!({ "state": state })
     }
 
     async fn stats(&mut self) -> Reply {
@@ -171,21 +206,29 @@ impl Session {
         if let Some(tracks) = &update.tracks {
             validate_tracks(tracks)?;
         }
+        validate_volumes(update.volumes.as_ref(), update.master_volume)?;
         if update.muted == Some(true) {
             self.output.mute();
         }
-        let device_changed = update.output_device.is_some();
-        if let Some(device) = update.output_device {
-            self.output.set_device(device)?;
-        }
+        let reconcile =
+            update.tracks.is_some() || update.volumes.is_some() || update.master_volume.is_some();
         if let Some(tracks) = update.tracks {
             self.tracks = tracks;
+        }
+        if let Some(volumes) = update.volumes {
+            self.volumes = volumes;
+        }
+        if let Some(master_volume) = update.master_volume {
+            self.master_volume = master_volume;
+        }
+        if reconcile {
             self.reconcile();
         }
+        if let Some(device) = update.output_device {
+            self.output.set_device(device, self.should_render());
+        }
         if update.muted == Some(false) {
-            self.output.unmute(self.should_render())?;
-        } else if device_changed {
-            self.output.verify_active_playout(self.should_render())?;
+            self.output.unmute(self.should_render());
         }
         Ok(self.output.state())
     }
@@ -201,11 +244,34 @@ impl Session {
     }
 }
 
+fn valid_sid(sid: &str) -> bool {
+    sid.strip_prefix("TR_").is_some_and(|id| {
+        (1..=125).contains(&id.len())
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    })
+}
+
 fn validate_tracks(tracks: &HashSet<String>) -> Result<(), &'static str> {
-    if tracks.len() > 128
-        || tracks
-            .iter()
-            .any(|sid| !sid.starts_with("TR_") || sid.len() > 128)
+    if tracks.len() > 128 || tracks.iter().any(|sid| !valid_sid(sid)) {
+        return Err("bad-payload");
+    }
+    Ok(())
+}
+
+fn validate_volumes(
+    volumes: Option<&HashMap<String, f64>>,
+    master: Option<f64>,
+) -> Result<(), &'static str> {
+    let valid_gain = |gain| (0.0..=2.0).contains(&gain);
+    if master.is_some_and(|gain| !valid_gain(gain))
+        || volumes.is_some_and(|volumes| {
+            volumes.len() > 128
+                || volumes
+                    .iter()
+                    .any(|(sid, gain)| !valid_sid(sid) || !valid_gain(*gain))
+        })
     {
         return Err("bad-payload");
     }
@@ -266,16 +332,14 @@ async fn handle(session: &mut Option<Session>, kind: &str, payload: Value) -> Re
             let request: Mute = decode(payload)?;
             session.as_mut().ok_or("not-joined")?.update(Update {
                 muted: Some(request.muted),
-                tracks: None,
-                output_device: None,
+                ..Update::default()
             })
         }
         "output-device" => {
             let request: Device = decode(payload)?;
             session.as_mut().ok_or("not-joined")?.update(Update {
-                muted: None,
-                tracks: None,
                 output_device: Some(request.output_device),
+                ..Update::default()
             })
         }
         _ => Err("unknown-command"),
@@ -359,12 +423,6 @@ async fn run(epoch: &str, output: &mut impl Write) -> io::Result<()> {
                     _ => None,
                 };
                 let valid_request = frame.v == VERSION && frame.epoch == epoch && frame.id != 0;
-                let output_failed = result == Err(OUTPUT_NOT_RENDERING);
-                if output_failed {
-                    if let Some(joined) = &session {
-                        emit(output, epoch, 0, "device", joined.output.state())?;
-                    }
-                }
                 match result {
                     Ok(data) => emit(output, epoch, frame.id, "response", json!({ "command": command, "data": data }))?,
                     Err(code) => emit(output, epoch, frame.id, "error", json!({ "command": command, "code": code }))?,
@@ -380,7 +438,7 @@ async fn run(epoch: &str, output: &mut impl Write) -> io::Result<()> {
                             emit(output, epoch, 0, "media-ready", json!({ "captureInitialized": false }))?;
                             emit(output, epoch, 0, "device", joined.output.state())?;
                         }
-                        "output-mute" | "output-device" | "update" if valid_request && !output_failed => {
+                        "output-mute" | "output-device" | "update" if successful => {
                             emit(output, epoch, 0, "device", joined.output.state())?;
                         }
                         _ => {}
@@ -388,9 +446,20 @@ async fn run(epoch: &str, output: &mut impl Write) -> io::Result<()> {
                 }
             }
             event = async { session.as_mut().unwrap().events.recv().await }, if session.is_some() => {
+                #[cfg(feature = "receive-test")]
+                if matches!(event, Some(RoomEvent::TrackSubscribed { .. }))
+                    && std::env::var_os("VR_VOICE_TEST_ENDPOINTS").is_some()
+                {
+                    // Model a busy command loop after the SDK exposes a track.
+                    tokio::time::sleep(Duration::from_millis(350)).await;
+                }
                 let joined = session.as_ref().unwrap();
                 match event {
-                    Some(RoomEvent::TrackPublished { .. } | RoomEvent::TrackSubscribed { .. } | RoomEvent::Reconnected) => joined.reconcile(),
+                    Some(RoomEvent::TrackPublished { .. } | RoomEvent::TrackUnpublished { .. }
+                        | RoomEvent::TrackSubscribed { .. }
+                        | RoomEvent::TrackUnsubscribed { .. } | RoomEvent::TrackMuted { .. }
+                        | RoomEvent::TrackUnmuted { .. } | RoomEvent::ParticipantDisconnected(_)
+                        | RoomEvent::Reconnected) => joined.reconcile(),
                     Some(RoomEvent::ConnectionStateChanged(_)) => emit(output, epoch, 0, "transport", joined.transport())?,
                     Some(RoomEvent::Disconnected { .. }) | None => {
                         emit(output, epoch, 0, "transport", json!({ "state": "disconnected" }))?;
@@ -401,10 +470,14 @@ async fn run(epoch: &str, output: &mut impl Write) -> io::Result<()> {
             }
             _ = tick.tick(), if session.is_some() => {
                 let joined = session.as_mut().unwrap();
-                if let Err(code) = joined.output.verify_active_playout(joined.should_render()) {
-                    emit(output, epoch, 0, "device", joined.output.state())?;
-                    emit(output, epoch, 0, "fault", json!({ "code": code }))?;
-                    break;
+                match joined.output.poll_device(joined.should_render()) {
+                    Ok(true) => emit(output, epoch, 0, "device", joined.output.state())?,
+                    Ok(false) => {}
+                    Err(code) => {
+                        emit(output, epoch, 0, "device", joined.output.state())?;
+                        emit(output, epoch, 0, "fault", json!({ "code": code }))?;
+                        break;
+                    }
                 }
                 if let Ok(stats) = joined.stats().await {
                     emit(output, epoch, 0, "stats", stats)?;
@@ -453,6 +526,21 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn remote_volume_bridge_rejects_a_local_audio_source() {
+        use livekit::webrtc::audio_source::{
+            native::NativeAudioSource, AudioSourceOptions, RtcAudioSource,
+        };
+
+        let source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 0);
+        let local =
+            LocalAudioTrack::create_audio_track("local-test", RtcAudioSource::Native(source));
+        let track = local.rtc_track();
+        for gain in [0.0, 1.0, 4.0, -1.0, 4.01, f64::NAN, f64::INFINITY] {
+            assert!(!track.set_remote_volume(gain));
+        }
+    }
 
     #[test]
     fn update_distinguishes_default_output_from_an_omitted_output() {

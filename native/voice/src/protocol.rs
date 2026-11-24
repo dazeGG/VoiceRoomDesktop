@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::io::{self, Read, Write};
 
 pub const MAX_FRAME: usize = 64 * 1024;
-pub const VERSION: Version = Version { major: 1, minor: 1 };
+pub const VERSION: Version = Version { major: 1, minor: 2 };
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct Version {

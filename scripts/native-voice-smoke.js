@@ -10,7 +10,7 @@ const { createInterface } = require('node:readline');
 const { setTimeout: delay } = require('node:timers/promises');
 const { startNativeVoice, stopNativeVoice } = require('../electron/native/voice');
 
-const ports = { signal: 17980, tcp: 17981, udp: 17982 };
+const ports = { signal: 17990, tcp: 17991, udp: 17992 };
 const base = `http://127.0.0.1:${ports.signal}`;
 const url = base.replace('http:', 'ws:');
 
@@ -64,10 +64,9 @@ async function main() {
   const publisher = path.join(examples, 'smoke_sender.exe');
   const observer = path.join(examples, 'capture_watch.exe');
   assert.ok(fs.existsSync(publisher) && fs.existsSync(observer), 'Build the smoke_sender and capture_watch examples first.');
-  const name = `vrlab-desk-${randomUUID()}`;
+  const name = `vrlab-p3b-${randomUUID()}`;
   let sender;
   let senderExit;
-  let containerStarted = false;
   const interrupted = new AbortController();
   const interrupt = () => interrupted.abort(new Error('Smoke interrupted'));
   const releaseLab = reserveLab(root);
@@ -83,7 +82,6 @@ async function main() {
       'livekit/livekit-server:v1.13.11', '--dev', '--config-body', config, '--bind', '0.0.0.0',
       '--node-ip', '127.0.0.1'
     ]);
-    containerStarted = true;
     await waitFor(async () => {
       interrupted.signal.throwIfAborted();
       return fetch(base, { signal: AbortSignal.timeout(1000) }).then(() => true, () => false);
@@ -161,7 +159,9 @@ async function main() {
         }
       } finally {
         try {
-          if (containerStarted) docker(['rm', '-f', name]);
+          docker(['rm', '-f', name]);
+        } catch (error) {
+          if (!String(error.stderr).includes('No such container')) throw error;
         } finally {
           releaseLab();
         }
@@ -176,6 +176,7 @@ async function verifyReceive({ url, token, sid, interrupted, readPeak }) {
   let stats = null;
   let transport = null;
   let mediaReady = false;
+  let latestDevice = null;
   let probe = true;
   const probeSamples = [];
   session.on('event', ({ kind, payload }) => {
@@ -185,12 +186,15 @@ async function verifyReceive({ url, token, sid, interrupted, readPeak }) {
     }
     if (kind === 'transport') transport = payload.state;
     if (kind === 'media-ready') mediaReady = true;
+    if (kind === 'device') latestDevice = payload;
   });
   const waitStats = (predicate, failure) => waitFor(() => {
     interrupted.signal.throwIfAborted();
     return stats && predicate(stats) && stats;
   }, failure);
-  const device = await session.request('join', { url, token, tracks: [sid], muted: true });
+  const device = await session.request('join', {
+    url, token, tracks: [sid], muted: true, volumes: { [sid]: 0.5 }, masterVolume: 0
+  });
   assert.equal(device.muted, true);
   assert.equal(device.captureEnabled, false);
   assert.equal(device.captureInitialized, false);
@@ -198,28 +202,106 @@ async function verifyReceive({ url, token, sid, interrupted, readPeak }) {
   assert.equal(transport, 'connected');
   assert.equal(mediaReady, true);
   await waitStats((row) => row.totalSamplesReceived > first.totalSamplesReceived, 'Muted receive counters stalled.');
-  await assert.rejects(session.request('output-device', { outputDevice: 'missing-device' }),
-    { code: 'device-unavailable' });
-  if (device.outputs.length) {
-    const selected = await session.request('output-device', { outputDevice: device.outputs[0].id });
-    assert.equal(selected.outputDevice, device.outputs[0].id);
-    assert.equal((await session.request('output-device', { outputDevice: null })).outputDevice, null);
-  }
+  const missing = await session.request('output-device', { outputDevice: 'missing-device' });
+  assert.equal(missing.outputDevice, 'missing-device');
+  assert.equal(missing.effectiveOutputDevice, device.defaultOutputDevice);
+  assert.equal(missing.fallback, 'selected-output-unavailable');
+  const notified = await waitFor(
+    () => latestDevice?.outputDevice === 'missing-device' && latestDevice,
+    'No device event for the fallback endpoint.', 2000
+  );
+  assert.deepEqual(notified, missing);
+  const selected = await session.request('output-device', { outputDevice: device.outputs[0].id });
+  assert.equal(selected.outputDevice, device.outputs[0].id);
+  assert.equal(selected.effectiveOutputDevice, device.outputs[0].id);
+  assert.equal(selected.fallback, null);
+  assert.equal((await session.request('output-device', { outputDevice: null })).outputDevice, null);
   assert.equal(await readPeak(child.pid), 0);
   probe = false;
-  assert.equal((await session.request('update', { muted: false })).muted, false);
-  const playback = await waitStats((row) => row.renderSessions > 0, 'No active WASAPI render session.');
-  await waitFor(async () => await readPeak(child.pid) > 0.0001, 'No audio signal in the helper render session.');
-  assert.equal(playback.captureSessions, 0);
-  for (const sample of probeSamples) {
-    assert.equal(sample.renderSessions, 0);
-    assert.equal(sample.captureSessions, 0);
+  const unmuted = await session.request('output-mute', { muted: false });
+  assert.equal(unmuted.muted, false);
+  const zeroGain = await waitStats((row) => row.renderSessions === 1, 'Zero gain stopped WASAPI playout.');
+  await waitStats((row) => row.totalSamplesReceived > zeroGain.totalSamplesReceived, 'Zero gain stopped receive.');
+  assert.equal(await readPeak(child.pid), 0);
+  const alternate = device.outputs.find((output) => output.id !== device.defaultOutputDevice);
+  if (alternate) {
+    const switched = await session.request('output-device', { outputDevice: alternate.id });
+    assert.equal(switched.muted, false);
+    assert.equal(switched.effectiveOutputDevice, alternate.id);
+    assert.equal(await readPeak(child.pid), 0);
   }
-  const terminal = once(session, 'terminal', { signal: AbortSignal.any([interrupted.signal, AbortSignal.timeout(1000)]) });
-  assert.equal(child.kill(), true);
-  assert.deepEqual(await terminal, ['helper-exited']);
-  assert.equal(session.connection, null);
+  const activeFallback = await session.request('output-device', { outputDevice: 'missing-device' });
+  assert.equal(activeFallback.muted, false);
+  assert.equal(activeFallback.effectiveOutputDevice, device.defaultOutputDevice);
+  assert.equal(activeFallback.fallback, 'selected-output-unavailable');
+  await session.request('output-device', { outputDevice: null });
+  assert.equal(await readPeak(child.pid), 0);
+  const audibleStart = performance.now();
+  const audibleDeadline = setTimeout(() => child.kill(), 9000);
+  try {
+    const peaks = await verifyGains(session, sid, () => readPeak(child.pid), interrupted.signal);
+    const playback = await waitStats((row) => row.renderSessions > 0, 'No active WASAPI render session.');
+    assert.equal(playback.captureSessions, 0);
+    for (const sample of probeSamples) {
+      assert.equal(sample.renderSessions, 0);
+      assert.equal(sample.captureSessions, 0);
+    }
+    assert.equal(await stopNativeVoice(), true);
+    assert.equal(child.exitCode, 0, 'The joined helper must shut down gracefully.');
+    assert.equal(await readPeak(child.pid), 0, 'WASAPI still reports output after shutdown.');
+    assert.equal(session.connection, null);
+    const audiblePhaseMs = Math.ceil(performance.now() - audibleStart);
+    assert.ok(audiblePhaseMs <= 10000);
+    console.log(JSON.stringify({ renderPeaks: peaks, audiblePhaseMs }));
+  } finally {
+    clearTimeout(audibleDeadline);
+  }
   return [child.pid];
+}
+
+async function verifyGains(session, sid, readPeak, signal) {
+  const measure = async (update) => {
+    await session.request('update', update);
+    // Let old frames leave the short WASAPI stream buffer before measuring.
+    await delay(200, undefined, { signal });
+    const peaks = [];
+    for (let i = 0; i < 4; i += 1) {
+      signal.throwIfAborted();
+      peaks.push(await readPeak());
+    }
+    return Math.max(...peaks);
+  };
+  const track = {
+    50: await measure({ masterVolume: 1 }),
+    100: await measure({ volumes: {} }),
+    0: await measure({ volumes: { [sid]: 0 } }),
+    150: await measure({ volumes: { [sid]: 1.5 } })
+  };
+  const master = {
+    100: await measure({ volumes: {} }),
+    50: await measure({ masterVolume: 0.5 }),
+    0: await measure({ masterVolume: 0 }),
+    150: await measure({ masterVolume: 1.5 })
+  };
+  for (const [target, peaks] of Object.entries({ track, master })) {
+    assert.ok(peaks[100] > 0.0001, `${target}: no WASAPI render signal`);
+    assert.equal(peaks[0], 0, `${target}: gain zero must produce digital silence`);
+    for (const gain of [50, 150]) {
+      assert.ok(Math.abs(peaks[gain] / peaks[100] - gain / 100) < 0.2,
+        `${target}: expected linear gain, measured ${JSON.stringify(peaks)}`);
+    }
+  }
+  const combined = {
+    200: await measure({ volumes: { [sid]: 2 }, masterVolume: 1 }),
+    400: await measure({ masterVolume: 2 }),
+    0: await measure({ volumes: { [sid]: 0 } })
+  };
+  assert.equal(combined[0], 0, 'Zero track gain must silence master boost.');
+  for (const gain of [200, 400]) {
+    assert.ok(Math.abs(combined[gain] / track[100] - gain / 100) < 0.3,
+      `combined: expected multiplied gain, measured ${JSON.stringify(combined)}`);
+  }
+  return { track, master, combined };
 }
 
 main().catch((error) => {

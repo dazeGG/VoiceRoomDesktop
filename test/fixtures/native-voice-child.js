@@ -1,15 +1,18 @@
 'use strict';
 
+const assert = require('node:assert/strict');
 const { createDecoder, encode, VERSION } = require('../../electron/native/voice-frames');
 
 const [epoch, , mode] = process.argv.slice(2);
 const device = {
   outputDevice: null,
   effectiveOutputDevice: 'test-output',
+  defaultOutputDevice: 'test-output',
+  fallback: null,
   muted: false,
   captureEnabled: false,
   captureInitialized: false,
-  outputs: [{ id: 'test-output', name: 'Test output' }]
+  outputs: [{ id: 'test-output', name: 'Test output', isDefault: true }]
 };
 let trackCount = 0;
 let joined = false;
@@ -43,9 +46,13 @@ process.stdin.on('data', createDecoder(({ id, kind, payload }) => {
   };
   switch (kind) {
     case 'list-outputs':
-      reply({ outputs: [{ ...device.outputs[0], isDefault: true }] });
+      reply({ outputs: device.outputs });
       break;
     case 'join': {
+      if (mode === 'gains') {
+        assert.deepEqual(payload.volumes, { TR_mic: 1.5 });
+        assert.equal(payload.masterVolume, 2);
+      }
       if (mode === 'lost-join-reply') process.exit(1);
       if (mode === 'slow-join') {
         send('transport', { state: 'reconnecting' });
@@ -76,6 +83,12 @@ process.stdin.on('data', createDecoder(({ id, kind, payload }) => {
       break;
     }
     case 'update':
+      if (mode === 'gains') {
+        assert.deepEqual(payload.volumes, {});
+        assert.equal(payload.masterVolume, 0);
+        assert.equal(payload.outputDevice, 'disconnected');
+        device.fallback = 'selected-output-unavailable';
+      }
       if (mode === 'failed-unmute' && payload.muted === false) {
         send('device', device);
         send('error', { command: kind, code: 'output-not-rendering' }, id);

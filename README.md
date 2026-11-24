@@ -9,9 +9,11 @@ The shell's own windows (the title bar, update splash, connection and crash scre
 The preload exposes a stable desktop marker for the hosted web app:
 
 ```js
-window.voiceRoomDesktop // { isDesktop, isElectron, platform, version }
+window.voiceRoomDesktop // { isDesktop, isElectron, platform, version, buildHash }
 window.voiceRoomRuntime // same payload, kept for existing integrations
 ```
+
+`buildHash` is a string when present in the build profile, otherwise `null`.
 
 It also marks the document before `DOMContentLoaded`:
 

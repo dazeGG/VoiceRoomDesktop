@@ -14,9 +14,7 @@ const { createOverlayController } = require('./overlay');
 const { createDeepLinkController, resolveProtocolScheme } = require('./deep-links');
 const { createDiagnosticsController } = require('./diagnostics');
 const { getNativeAudioCapabilities, getNativeAudioState } = require('./native/audio');
-const handleVoiceQuit = process.env.VOICE_ROOM_NATIVE_VOICE === '1'
-  ? require('./native/voice').createVoiceQuitHandler(app)
-  : null;
+const voiceSupervisor = process.env.VOICE_ROOM_NATIVE_VOICE === '1' ? require('./native/voice') : null;
 const { findNativeHotkeyHelper } = require('./native/hotkeys');
 const { createCallSurfaces, createWindowsTaskbarThemeReader } = require('./window/call-surfaces');
 const { createBackgroundThrottlingController } = require('./window/background-throttling');
@@ -149,6 +147,14 @@ const runtimeConfig = readRuntimeConfig();
 const APP_URL = process.env.VOICE_ROOM_URL || runtimeConfig.voiceRoomUrl || '';
 const TRUSTED_ORIGIN = getOriginFromUrl(APP_URL);
 setTrustedOrigin(TRUSTED_ORIGIN);
+const nativeVoice = voiceSupervisor && require('./native/voice-ipc').createNativeVoiceIpc({
+  ipcMain,
+  isTrustedFrame,
+  trustedOrigin: TRUSTED_ORIGIN,
+  mediaOrigins: process.env.VOICE_ROOM_NATIVE_VOICE_ORIGINS,
+  ...voiceSupervisor
+});
+const handleVoiceQuit = nativeVoice && voiceSupervisor.createVoiceQuitHandler(app, nativeVoice.stopForQuit);
 if (process.platform === 'win32') {
   app.setAppUserModelId('ru.dazinho.voiceroom');
 }
@@ -429,7 +435,9 @@ const appBootstrap = createAppBootstrap({
   allowedSessionPermissions: ALLOWED_SESSION_PERMISSIONS,
   desktopLayoutCss: DESKTOP_LAYOUT_CSS,
   previewEnabled: PICKER_PREVIEW_ENABLED,
+  mainWindowArguments: nativeVoice ? [`--voice-room-native-voice-origin=${TRUSTED_ORIGIN}`] : [],
   onMainWindowCreated: (window) => {
+    nativeVoice?.attachWindow(window);
     appIcon.attachWindow(window);
     backgroundThrottling.attachWindow(window);
     systemEvents.attachWindow(window);
@@ -578,6 +586,7 @@ if (!gotLock) {
     }
     try {
       configureWindowIpc();
+      nativeVoice?.configure();
       configureDesktopIdleIpc({
         ipcMain,
         powerMonitor,

@@ -6,6 +6,69 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 
+test('preload exposes native voice only with the origin marker and primary-frame authorization', async () => {
+  const preloadPath = path.join(__dirname, '..', 'electron', 'preload.js');
+  const source = fs.readFileSync(preloadPath, 'utf8');
+  const origin = 'https://voiceroom.ru';
+
+  function load({ enabled = true, location = origin, mainFrame = true, authorized = true } = {}) {
+    const exposed = new Map();
+    const listeners = new Map();
+    const requests = [];
+    vm.runInNewContext(source, {
+      document: {},
+      process: {
+        argv: enabled ? [`--voice-room-native-voice-origin=${origin}`] : [],
+        isMainFrame: mainFrame
+      },
+      require: () => ({
+        contextBridge: { exposeInMainWorld: (name, bridge) => exposed.set(name, bridge) },
+        ipcRenderer: {
+          sendSync(channel) {
+            assert.equal(channel, 'desktop-native-voice:expose');
+            return authorized;
+          },
+          invoke: (...args) => { requests.push(args); return Promise.resolve(); },
+          on: (channel, listener) => listeners.set(channel, listener),
+          removeListener: (channel, listener) => {
+            assert.equal(listeners.get(channel), listener);
+            listeners.delete(channel);
+          }
+        }
+      }),
+      window: { location: { origin: location }, addEventListener() {} }
+    }, { filename: preloadPath });
+    return { bridge: exposed.get('voiceRoomDesktopNativeVoice'), listeners, requests };
+  }
+
+  for (const options of [{ enabled: false }, { location: 'https://elsewhere.test' },
+    { mainFrame: false }, { authorized: false }]) {
+    assert.equal(load(options).bridge, undefined);
+  }
+  const { bridge, listeners, requests } = load();
+  const command = { callId: 'call' };
+  await bridge.getCapability();
+  await bridge.listOutputs();
+  await bridge.start(command);
+  await bridge.update(command);
+  await bridge.stop(command);
+  assert.deepEqual(requests, [
+    ['desktop-native-voice:get-capability'],
+    ['desktop-native-voice:list-outputs'],
+    ['desktop-native-voice:start', command],
+    ['desktop-native-voice:update', command],
+    ['desktop-native-voice:stop', command]
+  ]);
+  const seen = [];
+  const unsubscribe = bridge.onEvent((event) => seen.push(event));
+  const notice = { callId: 'call', kind: 'media-ready' };
+  const channel = 'desktop-native-voice:event';
+  listeners.get(channel)({ sender: 'Electron internals' }, notice);
+  assert.deepEqual(seen, [notice]);
+  unsubscribe();
+  assert.equal(listeners.has(channel), false);
+});
+
 test('preload installs desktop markers without native capture contract modules', () => {
   const preloadPath = path.join(__dirname, '..', 'electron', 'preload.js');
   const source = fs.readFileSync(preloadPath, 'utf8');

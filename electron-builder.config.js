@@ -82,6 +82,7 @@ module.exports = {
     'electron/native/voice.js',
     'electron/native/voice-frames.js',
     'electron/native/voice-protocol.js',
+    'electron/native/voice-ipc.js',
     'electron/notifications.js',
     'electron/desktop-settings.js',
     'electron/localization/index.js',

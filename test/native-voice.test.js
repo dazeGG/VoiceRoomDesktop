@@ -2,7 +2,12 @@
 
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const { once } = require('node:events');
+const { readFileSync } = require('node:fs');
+const http = require('node:http');
+const https = require('node:https');
+const net = require('node:net');
 const { PassThrough } = require('node:stream');
 const path = require('node:path');
 const test = require('node:test');
@@ -34,8 +39,8 @@ function filterFrames(child, filter) {
   return child;
 }
 
-function connect(t, parentPid = process.pid) {
-  const child = spawn(helper, [epoch, String(parentPid)], { windowsHide: true });
+function connect(t, parentPid = process.pid, env = process.env) {
+  const child = spawn(helper, [epoch, String(parentPid)], { windowsHide: true, env });
   t.after(() => child.kill());
   const frames = [];
   const waiting = [];
@@ -148,6 +153,18 @@ test('native voice supervisor correlates concurrent requests and acknowledges sh
   assert.equal(child.exitCode, 0);
 });
 
+test('native voice enumerates render endpoints before joining and rejects invalid updates', windowsOnly, async (t) => {
+  const session = new VoiceSession(helper);
+  t.after(() => session.stop());
+  assert.equal((await session.start()).capture, false);
+  const { outputs } = await session.request('list-outputs');
+  assert.ok(outputs.every((output) => output.id && output.name && typeof output.isDefault === 'boolean'));
+  assert.ok(outputs.filter((output) => output.isDefault).length <= 1);
+  assert.equal(new Set(outputs.map((output) => output.id)).size, outputs.length);
+  await assert.rejects(session.request('list-outputs', { open: true }), { code: 'bad-payload' });
+  await assert.rejects(session.request('update', { outputDevice: null }), { code: 'not-joined' });
+});
+
 test('heartbeat loss replaces a real helper only once', windowsOnly, async (t) => {
   const pids = [];
   const session = new VoiceSession(helper, {
@@ -167,37 +184,24 @@ test('heartbeat loss replaces a real helper only once', windowsOnly, async (t) =
   assert.equal(new Set(pids).size, 2);
 });
 
-for (const mode of ['lost-mute-reply', 'device-switch-failure']) {
-  test(`native voice restarts muted after ${mode}`, { timeout: 5000 }, async (t) => {
-    let starts = 0;
-    const session = new VoiceSession(fixture, {
-      restartDelayMs: 0,
-      restartCooldownMs: 0,
-      spawnChild(_helper, args, options) {
-        return spawnFixture(args, options, starts++ === 0 ? mode : 'normal');
-      }
-    });
-    t.after(() => session.stop());
-    await session.start();
-    const joined = await session.request('join', { muted: false });
-    assert.equal(joined.muted, false);
-    const restarted = once(session, 'restarted');
-    if (mode === 'lost-mute-reply') {
-      await assert.rejects(session.request('output-mute', { muted: true }), { code: 'helper-exited' });
-    } else {
-      const device = once(session, 'event');
-      await assert.rejects(session.request('output-device', { outputDevice: 'test-output' }), {
-        code: 'device-switch-failed'
-      });
-      assert.equal((await device)[0].payload.muted, true);
+test('device switch failure reports a muted state before the call faults on exit', { timeout: 5000 }, async (t) => {
+  const session = new VoiceSession(fixture, {
+    spawnChild(_helper, args, options) {
+      return spawnFixture(args, options, 'device-switch-failure');
     }
-    await restarted;
-    const state = await session.request('output-device', { outputDevice: null });
-    assert.equal(starts, 2);
-    assert.equal(state.muted, true);
-    assert.equal((await session.request('output-mute', { muted: false })).muted, false);
   });
-}
+  t.after(() => session.stop());
+  await session.start();
+  assert.equal((await session.request('join', { muted: false })).muted, false);
+  const terminal = once(session, 'terminal');
+  const device = once(session, 'event');
+  await assert.rejects(session.request('output-device', { outputDevice: 'test-output' }), {
+    code: 'device-switch-failed'
+  });
+  assert.equal((await device)[0].payload.muted, true);
+  assert.deepEqual(await terminal, ['helper-exited']);
+  assert.equal(session.connection, null);
+});
 
 for (const [name, mutate, code] of [
   ['capture initialized', (frame) => { frame.payload.captureInitialized = true; return frame; }, 'bad-handshake'],
@@ -282,16 +286,92 @@ test('failed native voice join emits fixed error without logging credentials', {
   const url = 'ws://127.0.0.1:1/native-voice-test-secret-url';
   link.send(1, 'join', { payload: { token, url } });
   const reply = await link.next();
-  // A machine without an audio endpoint (CI runners) fails on the output
-  // device before it dials; both are fixed codes and neither may leak.
+  // The SDK can exhaust its join deadline. Hosts without an audio endpoint
+  // can reject even earlier. Every failure must keep both credentials private.
   assert.equal(reply.kind, 'error');
   assert.equal(reply.payload.command, 'join');
-  assert.ok(['join-failed', 'device-unavailable'].includes(reply.payload.code), reply.payload.code);
+  assert.ok(['join-failed', 'join-timeout', 'device-unavailable'].includes(reply.payload.code), reply.payload.code);
   link.child.stdin.end();
   await link.exit;
   const output = Buffer.concat([...stdout, ...stderr]).toString();
   assert.ok(!output.includes(token) && !output.includes(url) && !output.includes('native-voice-test-secret-url'));
 });
+
+async function listenLoopback(t, server) {
+  const sockets = new Set();
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+  t.after(() => {
+    for (const socket of sockets) socket.destroy();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  return server.address().port;
+}
+
+for (const viaProxy of [false, true]) {
+  test(`native voice reaches LiveKit signalling over WSS ${viaProxy ? 'via CONNECT' : 'directly'}`,
+    { ...windowsOnly, timeout: 15000 }, async (t) => {
+      // The loopback leaf has a public test key. The CA signing key was discarded.
+      const tlsFixture = (name) => path.join(__dirname, 'fixtures', `native-voice-tls-${name}.pem`);
+      const server = https.createServer({
+        key: readFileSync(tlsFixture('loopback-key')),
+        cert: readFileSync(tlsFixture('loopback-cert'))
+      });
+      const upgrades = [];
+      server.on('upgrade', (request, socket) => {
+        upgrades.push(new URL(request.url, 'https://localhost').pathname);
+        const accept = createHash('sha1')
+          .update(request.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+          .digest('base64');
+        // Complete the upgrade, then close instead of sending a LiveKit JoinResponse.
+        socket.end(Buffer.concat([
+          Buffer.from('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+            `Sec-WebSocket-Accept: ${accept}\r\n\r\n`),
+          Buffer.from([0x88, 0x02, 0x03, 0xe8])
+        ]));
+      });
+      const signalPort = await listenLoopback(t, server);
+      let proxyUrl = '';
+      const targets = [];
+      if (viaProxy) {
+        const proxy = http.createServer();
+        proxy.on('connect', (request, client, head) => {
+          targets.push(request.url);
+          const upstream = net.connect(signalPort, '127.0.0.1', () => {
+            client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+            if (head.length) upstream.write(head);
+            client.pipe(upstream).pipe(client);
+          });
+          upstream.on('error', () => client.destroy());
+          client.on('error', () => upstream.destroy());
+          client.on('close', () => upstream.destroy());
+        });
+        proxyUrl = `http://127.0.0.1:${await listenLoopback(t, proxy)}`;
+      }
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+        !/^(?:https?_proxy|all_proxy|ssl_cert_file|ssl_cert_dir)$/i.test(key)));
+      env.HTTPS_PROXY = proxyUrl;
+      env.SSL_CERT_FILE = tlsFixture('ca');
+      const link = connect(t, process.pid, env);
+      await handshake(link);
+      link.send(1, 'join', { payload: {
+        url: `wss://127.0.0.1:${signalPort}`, token: 'test-token', muted: true
+      } });
+      const reply = await link.next();
+      link.child.stdin.end();
+      assert.deepEqual(await link.exit, [0, null]);
+      // Hosted Windows runners without an output endpoint fail before signalling.
+      if (reply.payload.code === 'device-unavailable') return t.skip('No Windows audio output endpoint');
+      assert.equal(reply.kind, 'error');
+      assert.ok(upgrades.some((pathname) => /^\/rtc(?:\/v1)?$/.test(pathname)),
+        `No LiveKit WebSocket upgrade reached the TLS server (${reply.payload.code})`);
+      if (viaProxy) assert.ok(targets.includes(`127.0.0.1:${signalPort}`));
+    });
+}
 
 test('native voice watchdog exits after owning process dies with stdin held open', windowsOnly, async (t) => {
   const owner = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true });

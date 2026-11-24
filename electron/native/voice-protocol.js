@@ -6,7 +6,7 @@ const errors = {
   leave: ['bad-payload', 'leave-timeout', 'leave-failed'],
   shutdown: ['bad-payload', 'leave-timeout', 'leave-failed'],
   subscriptions: ['bad-payload', 'not-joined'],
-  'output-mute': ['bad-payload', 'not-joined', 'output-not-rendering'],
+  'output-mute': ['bad-payload', 'not-joined', 'device-unavailable', 'output-not-rendering'],
   'output-device': ['bad-payload', 'not-joined', 'device-unavailable', 'device-switch-failed', 'output-not-rendering'],
   'list-outputs': ['bad-payload', 'device-unavailable'],
   update: ['bad-payload', 'not-joined', 'device-unavailable', 'device-switch-failed', 'output-not-rendering'],
@@ -46,12 +46,19 @@ function isReady(payload) {
   return exact(payload, ['captureInitialized']) && payload.captureInitialized === false;
 }
 
+function isOutput(device) {
+  return exact(device, ['id', 'name', 'isDefault']) && text(device.id) && text(device.name)
+    && typeof device.isDefault === 'boolean';
+}
+
 function isDevice(payload) {
-  return exact(payload, ['outputDevice', 'effectiveOutputDevice', 'muted', 'captureEnabled', 'captureInitialized', 'outputs'])
-    && nullable(payload.outputDevice, text) && text(payload.effectiveOutputDevice)
+  return exact(payload, ['outputDevice', 'effectiveOutputDevice', 'defaultOutputDevice', 'fallback',
+    'muted', 'captureEnabled', 'captureInitialized', 'outputs'])
+    && nullable(payload.outputDevice, text) && nullable(payload.effectiveOutputDevice, text)
+    && nullable(payload.defaultOutputDevice, text)
+    && nullable(payload.fallback, (value) => value === 'selected-output-unavailable')
     && typeof payload.muted === 'boolean' && payload.captureEnabled === false && payload.captureInitialized === false
-    && Array.isArray(payload.outputs)
-    && payload.outputs.every((device) => exact(device, ['id', 'name']) && text(device.id) && text(device.name));
+    && Array.isArray(payload.outputs) && payload.outputs.every(isOutput);
 }
 
 function isStats(payload) {
@@ -82,8 +89,7 @@ function isReply(kind, payload) {
   if (kind === 'list-outputs') {
     const { data } = payload;
     return exact(data, ['outputs']) && Array.isArray(data.outputs)
-      && data.outputs.every((device) => exact(device, ['id', 'name', 'isDefault'])
-        && text(device.id) && text(device.name) && typeof device.isDefault === 'boolean');
+      && data.outputs.every(isOutput);
   }
   return exact(payload.data, []);
 }

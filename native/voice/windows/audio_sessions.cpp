@@ -91,23 +91,7 @@ extern "C" int voice_render_endpoint_sessions(const wchar_t* id) {
     return SUCCEEDED(device_session_count(device.Get(), active)) ? active : -1;
 }
 
-extern "C" bool voice_default_output(char* output, int capacity) {
-    ComScope com;
-    if (!com.usable()) return false;
-    ComPtr<IMMDeviceEnumerator> enumerator;
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                                  IID_PPV_ARGS(&enumerator));
-    if (FAILED(hr)) return false;
-    ComPtr<IMMDevice> device;
-    if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eCommunications, &device))) return false;
-    LPWSTR id = nullptr;
-    if (FAILED(device->GetId(&id))) return false;
-    int written = WideCharToMultiByte(CP_UTF8, 0, id, -1, output, capacity, nullptr, nullptr);
-    CoTaskMemFree(id);
-    return written > 0;
-}
-
-using OutputCallback = void (*)(void*, const char*, const char*);
+using OutputCallback = void (*)(void*, const char*, const char*, bool);
 
 extern "C" bool voice_list_outputs(void* context, OutputCallback append) {
     ComScope com;
@@ -115,26 +99,38 @@ extern "C" bool voice_list_outputs(void* context, OutputCallback append) {
     ComPtr<IMMDeviceEnumerator> enumerator;
     if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                                 IID_PPV_ARGS(&enumerator)))) return false;
+    ComPtr<IMMDevice> default_device;
+    std::wstring default_id;
+    if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, eCommunications, &default_device))) {
+        LPWSTR raw_id = nullptr;
+        if (SUCCEEDED(default_device->GetId(&raw_id))) {
+            default_id = raw_id;
+            CoTaskMemFree(raw_id);
+        }
+    }
+
     ComPtr<IMMDeviceCollection> devices;
     if (FAILED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices))) return false;
     UINT count = 0;
     if (FAILED(devices->GetCount(&count))) return false;
     for (UINT index = 0; index < count; ++index) {
         ComPtr<IMMDevice> device;
-        ComPtr<IPropertyStore> properties;
-        if (FAILED(devices->Item(index, &device)) ||
-            FAILED(device->OpenPropertyStore(STGM_READ, &properties))) continue;
+        if (FAILED(devices->Item(index, &device))) return false;
         LPWSTR raw_id = nullptr;
-        if (FAILED(device->GetId(&raw_id))) continue;
+        if (FAILED(device->GetId(&raw_id))) return false;
         const auto id = utf8(raw_id);
+        const bool is_default = CompareStringOrdinal(raw_id, -1, default_id.c_str(), -1, TRUE) == CSTR_EQUAL;
         CoTaskMemFree(raw_id);
+        ComPtr<IPropertyStore> properties;
         PROPVARIANT label{};
-        if (SUCCEEDED(properties->GetValue(PKEY_Device_FriendlyName, &label)) &&
-            label.vt == VT_LPWSTR && label.pwszVal && !id.empty()) {
-            const auto name = utf8(label.pwszVal);
-            if (!name.empty()) append(context, id.c_str(), name.c_str());
+        std::string name;
+        if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &properties)) &&
+            SUCCEEDED(properties->GetValue(PKEY_Device_FriendlyName, &label)) &&
+            label.vt == VT_LPWSTR && label.pwszVal) {
+            name = utf8(label.pwszVal);
         }
         PropVariantClear(&label);
+        if (!id.empty()) append(context, id.c_str(), name.empty() ? id.c_str() : name.c_str(), is_default);
     }
     return true;
 }

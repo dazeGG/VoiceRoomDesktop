@@ -154,6 +154,22 @@ jobs:
           VOICE_ROOM_REQUIRE_NATIVE_VOICE: '1'
         run: node --test test/native-voice.test.js
 
+      - name: Build native voice receive integration binaries
+        run: node scripts/build-native-voice.js --cargo build --release --locked --features receive-test --bins --examples
+
+      - name: Verify native voice receive and output recovery
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'livekit-windows.zip'
+          $directory = Join-Path $env:RUNNER_TEMP 'voice-receive-livekit'
+          Invoke-WebRequest 'https://github.com/livekit/livekit/releases/download/v1.13.11/livekit_1.13.11_windows_amd64.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '5d071ea43339f0140d24a66f0b2ff8a7bf6c4d0dceb19b30abca835670213667') {
+            throw 'LiveKit archive SHA-256 mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $directory
+          $env:VR_VOICE_TEST_LIVEKIT = Join-Path $directory 'livekit-server.exe'
+          node --test test/native-voice-receive.test.js
+
       - name: Build Windows app
         run: npm run build:win
 

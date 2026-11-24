@@ -1061,8 +1061,6 @@ dependencies = [
 [[package]]
 name = "libwebrtc"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b6e26fa08edbea52912e9cdf49703a0f6a1ca220bd2e355212d8d76103fe2c8"
 dependencies = [
  "cxx",
  "jni",
@@ -2601,6 +2599,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "webrtc-sys",
  "windows-sys 0.61.2",
 ]
 
@@ -2716,8 +2715,6 @@ dependencies = [
 [[package]]
 name = "webrtc-sys"
 version = "0.3.55"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d849555a78b6cd7035ae7adb78fa2e427796cd4d84161cb1240a7d1f1ffc2f2c"
 dependencies = [
  "cc",
  "cxx",

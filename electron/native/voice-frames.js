@@ -1,7 +1,7 @@
 'use strict';
 
 const MAX_FRAME = 64 * 1024;
-const VERSION = Object.freeze({ major: 1, minor: 1 });
+const VERSION = Object.freeze({ major: 1, minor: 2 });
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 function encode(frame) {

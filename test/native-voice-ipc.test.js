@@ -145,6 +145,34 @@ test('native voice is scoped to the trusted primary top-level frame and validate
   assert.equal(app.children.length, 2, 'the active helper handles endpoint enumeration');
 });
 
+test('native voice validates gain maps and forwards gains and fallback state', { timeout: 5000 }, async (t) => {
+  const app = setup(t, { mode: 'gains' });
+  for (const fields of [
+    { volumes: null }, { volumes: [] }, { volumes: new Map() },
+    { volumes: { microphone: 1 } }, { volumes: { TR_: 1 } },
+    { volumes: { TR_mic: -0.1 } }, { volumes: { TR_mic: 2.01 } },
+    { volumes: { TR_mic: '1' } }, { volumes: { TR_mic: NaN } },
+    { volumes: Object.fromEntries(Array.from({ length: 129 }, (_, i) => ['TR_' + i, 1])) },
+    { masterVolume: null }, { masterVolume: '1' }, { masterVolume: Infinity }, { masterVolume: 2.01 }
+  ]) {
+    assert.deepEqual(app.invoke('start', { ...admission, ...fields }), { ok: false, code: 'bad-payload' });
+    assert.deepEqual(app.invoke('update', { callId: admission.callId, ...fields }),
+      { ok: false, code: 'bad-payload' });
+  }
+  assert.deepEqual(await app.invoke('start', {
+    ...admission, volumes: { TR_mic: 1.5 }, masterVolume: 2
+  }), { ok: true });
+  const device = once(app.events, 'device');
+  assert.deepEqual(await app.invoke('update', {
+    callId: admission.callId, volumes: {}, masterVolume: 0, outputDeviceId: 'disconnected'
+  }), { ok: true });
+  assert.deepEqual((await device)[0], {
+    callId: admission.callId, kind: 'device', outputDeviceId: 'disconnected',
+    effectiveOutputDeviceId: 'test-output', defaultOutputDeviceId: 'test-output',
+    fallback: 'selected-output-unavailable', muted: false
+  });
+});
+
 for (const muted of [false, true]) {
   test(`native voice faults promptly on child exit with muted=${muted} and permits a new call`,
     { timeout: 8000 }, async (t) => {
@@ -166,7 +194,8 @@ for (const muted of [false, true]) {
         callId: 'call-a', tracks: ['TR_mic', 'TR_second'], muted, outputDeviceId: 'test-output'
       }), { ok: true });
       assert.deepEqual((await device)[0], {
-        callId: 'call-a', kind: 'device', outputDeviceId: 'test-output', effectiveOutputDeviceId: 'test-output', muted
+        callId: 'call-a', kind: 'device', outputDeviceId: 'test-output', effectiveOutputDeviceId: 'test-output',
+        defaultOutputDeviceId: 'test-output', fallback: null, muted
       });
       await updatedStats;
 

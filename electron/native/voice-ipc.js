@@ -5,6 +5,8 @@ const { exact, publicCode } = require('./voice-protocol');
 
 const CHANNEL = 'desktop-native-voice:';
 const MAX_COMMANDS = 16;
+const START_REQUIRED = ['callId', 'url', 'token', 'tracks', 'outputDeviceId', 'muted'];
+const START_KEYS = new Set([...START_REQUIRED, 'volumes', 'masterVolume']);
 const TRACK_SID = /^TR_[a-zA-Z0-9_-]{1,125}$/;
 const JWT = /^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -37,6 +39,11 @@ const validCallId = (value) => bounded(value, 128) && value.trim() === value;
 const validTracks = (value) => Array.isArray(value) && value.length <= 128
   && Array.from(value).every((track) => bounded(track, 128) && TRACK_SID.test(track))
   && new Set(value).size === value.length;
+const validGain = (value) => Number.isFinite(value) && value >= 0 && value <= 2;
+const validVolumes = (value) => value !== null && typeof value === 'object'
+  && [Object.prototype, null].includes(Object.getPrototypeOf(value))
+  && Object.keys(value).length <= 128
+  && Object.entries(value).every(([sid, gain]) => TRACK_SID.test(sid) && validGain(gain));
 const validOutput = (value) => value === null || bounded(value, 512);
 const rejected = (code) => ({ ok: false, code });
 const untrustedFrame = () => Object.assign(new Error('untrusted-frame'), { code: 'untrusted-frame' });
@@ -52,10 +59,14 @@ function validUrl(value, origins) {
 }
 
 function validStart(input, origins) {
-  return exact(input, ['callId', 'url', 'token', 'tracks', 'outputDeviceId', 'muted'])
+  return input !== null && typeof input === 'object' && !Array.isArray(input)
+    && START_REQUIRED.every((key) => Object.hasOwn(input, key))
+    && Object.keys(input).every((key) => START_KEYS.has(key))
     && validCallId(input.callId) && validUrl(input.url, origins)
     && bounded(input.token, 16384) && JWT.test(input.token)
-    && validTracks(input.tracks) && validOutput(input.outputDeviceId) && typeof input.muted === 'boolean';
+    && validTracks(input.tracks) && validOutput(input.outputDeviceId) && typeof input.muted === 'boolean'
+    && (!Object.hasOwn(input, 'volumes') || validVolumes(input.volumes))
+    && (!Object.hasOwn(input, 'masterVolume') || validGain(input.masterVolume));
 }
 
 function validUpdate(input) {
@@ -65,6 +76,8 @@ function validUpdate(input) {
       switch (key) {
         case 'callId': return true;
         case 'tracks': return validTracks(input.tracks);
+        case 'volumes': return validVolumes(input.volumes);
+        case 'masterVolume': return validGain(input.masterVolume);
         case 'outputDeviceId': return validOutput(input.outputDeviceId);
         case 'muted': return typeof input.muted === 'boolean';
         default: return false;
@@ -80,6 +93,8 @@ function rendererEvent({ kind, payload }) {
       kind,
       outputDeviceId: payload.outputDevice,
       effectiveOutputDeviceId: payload.effectiveOutputDevice,
+      defaultOutputDeviceId: payload.defaultOutputDevice,
+      fallback: payload.fallback,
       muted: payload.muted
     };
     case 'stats': return {
@@ -275,9 +290,10 @@ function createNativeVoiceIpc({
           session.once('terminal', (code) => {
             if (current === owner) void retire(owner, code);
           });
-          const { url, token, tracks, outputDeviceId } = input;
-          await session.request('join', { url, token, tracks, outputDevice: outputDeviceId, muted: owner.muted },
-            { muteRecorded: true });
+          const { url, token, tracks, outputDeviceId, volumes, masterVolume } = input;
+          await session.request('join', {
+            url, token, tracks, outputDevice: outputDeviceId, muted: owner.muted, volumes, masterVolume
+          }, { muteRecorded: true });
           return current === owner && stillCurrent(owner) ? { ok: true } : rejected('session-stopped');
         } catch (error) {
           await retire(owner, error?.code);
@@ -297,10 +313,7 @@ function createNativeVoiceIpc({
       }
       return enqueue(async () => {
         if (current !== owner || !stillCurrent(owner) || !owner.session) return rejected('session-stopped');
-        const { tracks, muted, outputDeviceId } = input;
-        const payload = {};
-        if (tracks !== undefined) payload.tracks = tracks;
-        if (muted !== undefined) payload.muted = muted;
+        const { callId, outputDeviceId, ...payload } = input;
         if (outputDeviceId !== undefined) payload.outputDevice = outputDeviceId;
         if (!Object.keys(payload).length) return { ok: true };
         try {

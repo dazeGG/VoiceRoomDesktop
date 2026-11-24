@@ -165,6 +165,31 @@ test('native voice enumerates render endpoints before joining and rejects invali
   await assert.rejects(session.request('update', { outputDevice: null }), { code: 'not-joined' });
 });
 
+test('native helper rejects invalid gains before attempting admission', windowsOnly, async (t) => {
+  const link = connect(t);
+  await handshake(link);
+  const requests = [
+    { masterVolume: -0.01 },
+    { masterVolume: 2.000000001 },
+    { masterVolume: null },
+    { volumes: { TR_example: 3 } },
+    { volumes: { TR_: 1 } },
+    { volumes: { TR_example: '1' } },
+    { volumes: Object.fromEntries(Array.from({ length: 129 }, (_, i) => ['TR_' + i, 1])) }
+  ];
+  for (const [i, settings] of requests.entries()) {
+    link.send(i + 1, 'join', {
+      payload: { url: 'ws://127.0.0.1:1', token: 'fixture', ...settings }
+    });
+    const result = await link.next();
+    assert.equal(result.id, i + 1);
+    assert.equal(result.kind, 'error');
+    assert.deepEqual(result.payload, { command: 'join', code: 'bad-payload' });
+  }
+  link.child.stdin.end();
+  assert.deepEqual(await link.exit, [0, null]);
+});
+
 test('heartbeat loss replaces a real helper only once', windowsOnly, async (t) => {
   const pids = [];
   const session = new VoiceSession(helper, {

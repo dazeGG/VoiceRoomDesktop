@@ -270,7 +270,7 @@ test('main process wires window bootstrap installers into app bootstrap', () => 
     assert.doesNotThrow(() => require(mainPath));
     assert.equal(typeof capturedOptions.installMediaDeviceFilter, 'function');
     assert.equal(typeof capturedOptions.installNativeCaptureBridge, 'function');
-    assert.equal(typeof capturedOptions.installBuildLabel, 'function');
+    assert.equal(capturedOptions.installBuildLabel, undefined);
     assert.equal(typeof capturedOptions.showRendererRecovery, 'function');
     assert.equal(typeof capturedOptions.openAdmin, 'function');
     assert.equal(typeof capturedOptions.classifyAppUrl, 'function');

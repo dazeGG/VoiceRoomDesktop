@@ -106,7 +106,7 @@ test('preload installs desktop markers without native capture contract modules',
     document: { documentElement },
     navigator: {},
     process: {
-      argv: ['electron', '--voice-room-desktop-version=1.2.3-test'],
+      argv: ['electron', '--voice-room-desktop-version=1.2.3-test', '--voice-room-build-hash=abc123'],
       platform: 'darwin'
     },
     require(request) {
@@ -135,6 +135,10 @@ test('preload installs desktop markers without native capture contract modules',
   assert.equal(runtime.platform, 'darwin');
   assert.equal(runtime.version, '1.2.3-test');
   assert.equal(exposed.get('voiceRoomDesktop'), runtime);
+  assert.equal(runtime.buildHash, 'abc123');
+  context.process.argv.pop();
+  vm.runInNewContext(source, { ...context }, { filename: preloadPath });
+  assert.equal(exposed.get('voiceRoomRuntime').buildHash, null);
   assert.equal(typeof exposed.get('voiceRoomNativeCaptureBridge')?.prepare, 'function');
   assert.equal(typeof exposed.get('voiceRoomNativeCaptureBridge')?.requestPort, 'function');
   assert.equal(typeof listeners.get('native-capture:port'), 'function');

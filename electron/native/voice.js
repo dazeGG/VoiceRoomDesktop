@@ -327,7 +327,7 @@ class VoiceSession extends EventEmitter {
 let activeSession = null;
 
 async function startNativeVoice(options) {
-  if (process.env.VOICE_ROOM_NATIVE_VOICE !== '1') throw fault('disabled-by-env');
+  if (process.env.VOICE_ROOM_NATIVE_VOICE === '0') throw fault('disabled-by-env');
   if (activeSession) throw fault('session-active');
   const helper = findVoiceHelper(options);
   if (!helper) throw fault('helper-unavailable');
@@ -355,21 +355,4 @@ function stopNativeVoice() {
   });
 }
 
-function createVoiceQuitHandler(app, stop = stopNativeVoice) {
-  let shutdown;
-  return (event) => {
-    if (!shutdown) {
-      const stopping = stop();
-      if (!stopping) return false;
-      shutdown = Promise.resolve(stopping).then((closed) => {
-        shutdown = null;
-        if (closed) app.quit();
-        else app.exit(0);
-      }, () => app.exit(0));
-    }
-    event.preventDefault();
-    return true;
-  };
-}
-
-module.exports = { findVoiceHelper, startNativeVoice, stopNativeVoice, createVoiceQuitHandler, VoiceSession };
+module.exports = { findVoiceHelper, startNativeVoice, stopNativeVoice, VoiceSession };

@@ -103,6 +103,10 @@ process.stdin.on('data', createDecoder(({ id, kind, payload }) => {
       publishState();
       break;
     case 'output-mute':
+      if (!joined) {
+        send('error', { command: kind, code: 'not-joined' }, id);
+        break;
+      }
       device.muted = payload.muted;
       reply(device);
       break;

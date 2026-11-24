@@ -57,7 +57,7 @@ async function waitFor(check, failure, timeout = 12000) {
 
 async function main() {
   assert.equal(process.platform, 'win32');
-  assert.equal(process.env.VOICE_ROOM_NATIVE_VOICE, '1');
+  assert.notEqual(process.env.VOICE_ROOM_NATIVE_VOICE, '0');
   const root = path.resolve(__dirname, '..');
   const target = path.resolve(root, 'native', 'voice', process.env.CARGO_TARGET_DIR || 'target');
   const examples = path.join(target, 'x86_64-pc-windows-msvc', 'release', 'examples');

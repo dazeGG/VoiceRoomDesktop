@@ -282,7 +282,11 @@ test('failed native voice join emits fixed error without logging credentials', {
   const url = 'ws://127.0.0.1:1/native-voice-test-secret-url';
   link.send(1, 'join', { payload: { token, url } });
   const reply = await link.next();
-  assert.deepEqual(reply.payload, { command: 'join', code: 'join-failed' });
+  // A machine without an audio endpoint (CI runners) fails on the output
+  // device before it dials; both are fixed codes and neither may leak.
+  assert.equal(reply.kind, 'error');
+  assert.equal(reply.payload.command, 'join');
+  assert.ok(['join-failed', 'device-unavailable'].includes(reply.payload.code), reply.payload.code);
   link.child.stdin.end();
   await link.exit;
   const output = Buffer.concat([...stdout, ...stderr]).toString();

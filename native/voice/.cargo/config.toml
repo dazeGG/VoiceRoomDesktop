@@ -1,0 +1,10 @@
+[build]
+target = "x86_64-pc-windows-msvc"
+
+[env]
+# Fail closed when the prebuilt has not been prepared by build-native-voice.js.
+LK_CUSTOM_WEBRTC = { value = ".webrtc/webrtc-a545de4/win-x64-release", relative = true, force = true }
+LK_DEBUG_WEBRTC = { value = "false", force = true }
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
